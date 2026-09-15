@@ -17,7 +17,7 @@ jobs:
   test:
     # x86_64: Firecracker binary and kernel in the strong-wall test are x86_64.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
 
@@ -37,10 +37,38 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache
-          key: ${{ runner.os }}-fc-${{ hashFiles('supervisor/strong.go', 'firecracker-helper/build-rootfs.sh') }}
+          key: ${{ runner.os }}-fc-${{ hashFiles('supervisor/strong.go', 'supervisor/oci.go', 'firecracker-helper/pack-oci.sh', 'examples/**') }}
 
       - name: Build
         run: make build
 
       - name: Test
         run: make test
+
+  test-live:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      HERMETARIUM_ANTHROPIC_API_KEY: ${{ secrets.HERMETARIUM_ANTHROPIC_API_KEY }}
+      HERMETARIUM_XAI_API_KEY: ${{ secrets.HERMETARIUM_XAI_API_KEY }}
+      HERMETARIUM_DEEPSEEK_API_KEY: ${{ secrets.HERMETARIUM_DEEPSEEK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Allow KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -c /dev/kvm
+      - name: Live tests
+        run: |
+          if [ -z "$HERMETARIUM_ANTHROPIC_API_KEY$HERMETARIUM_XAI_API_KEY$HERMETARIUM_DEEPSEEK_API_KEY" ]; then
+            echo "no live keys set; skip"
+            exit 0
+          fi
+          make test-live

@@ -22,6 +22,11 @@ func Run(args []string) int {
 	switch cmd {
 	case "create":
 		wall := flag(rest, "--wall", "weak")
+		example := flag(rest, "--example", ExampleEcho)
+		if _, ok := LookupExample(example); !ok {
+			fmt.Fprintf(os.Stderr, "unknown example %q\n", example)
+			return 2
+		}
 		id, err := NewID()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -29,9 +34,9 @@ func Run(args []string) int {
 		}
 		switch wall {
 		case "strong":
-			_, err = CreateStrong(root, id)
+			_, err = CreateStrongExample(root, id, example)
 		case "weak":
-			_, err = CreateWeak(root, id)
+			_, err = CreateWeakExample(root, id, example)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown wall %q (want weak or strong)\n", wall)
 			return 2
@@ -126,7 +131,7 @@ func flag(args []string, name, fallback string) string {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong
+	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong [--example echo|claude-code|grok-build|deepseek-harness]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>

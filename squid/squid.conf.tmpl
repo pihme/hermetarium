@@ -25,6 +25,17 @@ acl probe_dst dst 127.0.0.1
 acl inbound myport {{.InboundPort}}
 cache_peer 127.0.0.1 parent {{.ProbePort}} 0 no-query no-digest originserver name=probeorigin
 cache_peer {{.InhabitantIP}} parent {{.EchoPort}} 0 no-query no-digest originserver name=inhabitant
+{{if .VendorHost}}
+acl vendorhost dstdomain {{.VendorHost}}
+cache_peer {{.VendorPeer}} parent {{.VendorPort}} 0 no-query no-digest originserver{{if .VendorSSL}} ssl sslflags=DONT_VERIFY_PEER{{end}} name=vendor
+cache_peer_access vendor allow vendorhost
+cache_peer_access vendor deny all
+cache_peer_access probeorigin deny vendorhost
+request_header_access x-api-key deny all
+request_header_access Authorization deny all
+request_header_add x-api-key "{{.VendorKey}}" vendorhost
+request_header_add Authorization "Bearer {{.VendorKey}}" vendorhost
+{{end}}
 cache_peer_access inhabitant allow inbound
 cache_peer_access inhabitant deny all
 cache_peer_access probeorigin deny inbound
@@ -34,4 +45,7 @@ never_direct allow all
 http_access allow inbound
 http_access allow probe
 http_access allow probe_dst
+{{if .VendorHost}}
+http_access allow vendorhost
+{{end}}
 http_access deny all

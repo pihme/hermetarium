@@ -16,10 +16,16 @@ One directory per process:
 | --- | --- |
 | `supervisor/` | Go CLI that boots walls, writes the ACL file, maps Squid `access.log` |
 | `squid/` | Squid image (intercept proxy + probe origin + inbound reverse-proxy) |
-| `examples/echo/` | Inhabitant example: HTTP echo server (later examples will be agents) |
+| `examples/echo/` | Inhabitant example: HTTP echo server |
+| `examples/claude-code/` | Claude Code harness behind HTTP (specified) |
+| `examples/grok-build/` | Grok Build harness behind HTTP (specified) |
+| `examples/deepseek-harness/` | DeepSeek Harness behind HTTP (specified) |
 | `firecracker-helper/` | Strong-wall helper: TAP + Squid + Firecracker (not the inhabitant) |
 | `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo example |
 | `tests/echo/` | Shared checks for the echo example |
+| `tests/claude-code/` | Claude Code tests (mock default; live tagged) |
+| `tests/grok-build/` | Grok Build tests (mock default; live tagged) |
+| `tests/deepseek-harness/` | DeepSeek Harness tests (mock default; live tagged) |
 
 Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
 
@@ -45,6 +51,37 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 `url` is the host HTTP address that reaches the inhabitant **through Squid** (logged inbound). The default inhabitant is the echo example in `examples/echo/`: POST body comes back as the response body. The process stays up, so a second `curl` is the “running server” case.
 
 `create --wall strong` and `logs` / `destroy` / `url` work for both walls. `make test` covers both walls and the echo example.
+
+## Tests
+
+Two suites. Spec: [SPEC.md §11](SPEC.md#11-tests). Coding-agent tests land with the §9c examples; `make test` already runs hello-world.
+
+### Mocked (CI default)
+
+Always run. No vendor account. Hello-world (both walls, probe, echo) and each coding-agent example against a **mock** vendor API: open session, a scripted root shell command, key not in the box.
+
+```bash
+make test
+```
+
+GitHub Actions job `test` runs this on every push and pull request.
+
+### Live (optional, manual)
+
+Real harness talking to the real vendor. Proves a model will take a natural-language ask (run a command / install something) and do it as root. **Not** a merge gate.
+
+The supervisor reads keys from its environment. Do not put them in the image. Unset keys skip that example.
+
+```bash
+export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...   # Claude Code
+export HERMETARIUM_XAI_API_KEY=xai-...            # Grok Build
+export HERMETARIUM_DEEPSEEK_API_KEY=sk-...        # DeepSeek Harness
+make test-live
+```
+
+`make test-live` is `go test -tags live` (those files are invisible to `make test`).
+
+On GitHub: Actions → CI → **Run workflow**. That is the only way the live job starts (not on push/PR). Set the matching repository secrets; the job exports them so the supervisor can inject them on Squid. Secrets must not appear in logs.
 
 ## License
 

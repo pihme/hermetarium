@@ -57,9 +57,38 @@ func containerHostPort(container string, inner int) (int, error) {
 	return 0, fmt.Errorf("docker port %s %d: %q", container, inner, out)
 }
 
+func waitInbound(rawURL string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var last error
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			cancel()
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		cancel()
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			last = fmt.Errorf("status %d", resp.StatusCode)
+		} else {
+			last = err
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if last == nil {
+		last = errWait("inbound not ready: " + rawURL)
+	}
+	return errWait("inbound not ready: " + rawURL + ": " + last.Error())
+}
+
 // Call sends one HTTP POST through the published inbound URL and waits for the body.
 func Call(rawURL, body string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(body))
 	if err != nil {

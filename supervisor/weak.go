@@ -22,7 +22,15 @@ type WeakInstance struct {
 }
 
 func CreateWeak(root, id string) (*WeakInstance, error) {
-	if err := EnsureInhabitant(root); err != nil {
+	return CreateWeakExample(root, id, ExampleEcho)
+}
+
+func CreateWeakExample(root, id, example string) (*WeakInstance, error) {
+	ex, ok := LookupExample(example)
+	if !ok {
+		return nil, fmt.Errorf("unknown example %q", example)
+	}
+	if err := EnsureInhabitant(root, ex); err != nil {
 		return nil, err
 	}
 	dir, err := InstanceDir(root, id)
@@ -30,7 +38,7 @@ func CreateWeak(root, id string) (*WeakInstance, error) {
 		return nil, err
 	}
 	sub := SubnetForID(id)
-	if err := WriteSquidACL(root, dir, sub.Box); err != nil {
+	if err := WriteSquidACL(root, dir, sub.Box, ex); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -80,13 +88,17 @@ func CreateWeak(root, id string) (*WeakInstance, error) {
 		return nil, err
 	}
 
-	if _, err := Docker(30*time.Second,
+	boxArgs := []string{
 		"run", "-d", "--name", box,
 		"--network", network, "--ip", sub.Box,
 		"--cap-add", "NET_ADMIN",
-		"--add-host", ProbeHost+":"+sub.Gate,
-		EchoImage,
-	); err != nil {
+		"--add-host", ProbeHost + ":" + sub.Gate,
+	}
+	for _, h := range VendorHosts() {
+		boxArgs = append(boxArgs, "--add-host", h+":"+sub.Gate)
+	}
+	boxArgs = append(boxArgs, ex.Image)
+	if _, err := Docker(30*time.Second, boxArgs...); err != nil {
 		return nil, err
 	}
 	if _, err := Docker(15*time.Second,

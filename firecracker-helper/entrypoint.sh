@@ -16,6 +16,7 @@ iptables -t nat -A PREROUTING -s 172.16.0.0/24 -p tcp --dport 80 ! -d 172.16.0.1
 
 mkdir -p /log /var/spool/squid /run
 httpd -p 0.0.0.0:18080 -h /probe
+MOCK_EXPECT_KEY="${MOCK_EXPECT_KEY:-htm-test-key}" /usr/local/bin/vendor-mock &
 trap '' HUP
 squid -N -f /log/squid.conf &
 i=0

@@ -1,7 +1,9 @@
 package supervisor
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -16,9 +18,14 @@ type squidConf struct {
 	InboundPort  int
 	InhabitantIP string
 	EchoPort     int
+	VendorHost   string
+	VendorPeer   string
+	VendorPort   int
+	VendorSSL    bool
+	VendorKey    string
 }
 
-func WriteSquidACL(root, hostLogDir, inhabitantIP string) error {
+func WriteSquidACL(root, hostLogDir, inhabitantIP string, ex Example) error {
 	tmplPath := filepath.Join(root, "squid", "squid.conf.tmpl")
 	b, err := os.ReadFile(tmplPath)
 	if err != nil {
@@ -33,7 +40,7 @@ func WriteSquidACL(root, hostLogDir, inhabitantIP string) error {
 		return err
 	}
 	defer out.Close()
-	return tmpl.Execute(out, squidConf{
+	cfg := squidConf{
 		ListenPort:   SquidPort,
 		LogDir:       "/log",
 		ProbeHost:    ProbeHost,
@@ -41,12 +48,58 @@ func WriteSquidACL(root, hostLogDir, inhabitantIP string) error {
 		InboundPort:  InboundPort,
 		InhabitantIP: inhabitantIP,
 		EchoPort:     EchoPort,
-	})
+	}
+	if ex.VendorHost != "" {
+		key, live := ex.Secret()
+		cfg.VendorHost = ex.VendorHost
+		cfg.VendorKey = key
+		if live {
+			cfg.VendorPeer = ex.LivePeer
+			cfg.VendorPort = ex.LivePort
+			cfg.VendorSSL = true
+		} else {
+			cfg.VendorPeer = "127.0.0.1"
+			cfg.VendorPort = VendorMockPort
+		}
+	}
+	return tmpl.Execute(out, cfg)
+}
+
+func EnsureVendorMock(root string) (string, error) {
+	dest := filepath.Join(CacheDir(root), "vendor-mock")
+	src := filepath.Join(root, "examples", "vendor-mock", "main.go")
+	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
+		if sc, err := os.Stat(src); err == nil && !st.ModTime().Before(sc.ModTime()) {
+			return dest, nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", err
+	}
+	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", dest, "./examples/vendor-mock")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("build vendor-mock: %s%s", out, err)
+	}
+	return dest, nil
 }
 
 func EnsureSquidImage(root string) error {
+	bin, err := EnsureVendorMock(root)
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(bin)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "squid", "vendor-mock"), b, 0o755); err != nil {
+		return err
+	}
 	ctx := filepath.Join(root, "squid")
-	_, err := Docker(3*time.Minute, "build", "-t", SquidImage, ctx)
+	_, err = Docker(3*time.Minute, "build", "-t", SquidImage, ctx)
 	return err
 }
 

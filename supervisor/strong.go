@@ -48,29 +48,21 @@ func download(url, dest string) error {
 	return err
 }
 
-func EnsureStrongAssets(root string) (firecracker, kernel, rootfs string, err error) {
-	echoBin, err := EnsureEchoBinary(root)
-	if err != nil {
-		return "", "", "", err
-	}
+func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	tgz, err := cacheFile(root, "firecracker-"+fcVersion+"-x86_64.tgz")
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	firecracker, err = cacheFile(root, "firecracker")
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	kernel, err = cacheFile(root, "vmlinux.bin")
 	if err != nil {
-		return "", "", "", err
-	}
-	rootfs, err = cacheFile(root, "rootfs.ext4")
-	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	if err := download(fcURL, tgz); err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	if _, err := os.Stat(firecracker); err != nil {
 		_, err = Docker(2*time.Minute, "run", "--rm",
@@ -79,39 +71,32 @@ func EnsureStrongAssets(root string) (firecracker, kernel, rootfs string, err er
 			"apk add --no-cache tar >/dev/null && tar -xzf /out/"+filepath.Base(tgz)+" -C /tmp && find /tmp -name 'firecracker-*x86_64' ! -name '*debug*' | head -1 | xargs -I{} cp {} /out/firecracker && chmod +x /out/firecracker",
 		)
 		if err != nil {
-			return "", "", "", err
+			return "", "", err
 		}
 	}
 	if err := download(kernelURL, kernel); err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
-	script := filepath.Join(root, "firecracker-helper", "build-rootfs.sh")
-	stale := true
-	if st, err := os.Stat(rootfs); err == nil && st.Size() > 10_000 {
-		if sc, err := os.Stat(script); err == nil && !st.ModTime().Before(sc.ModTime()) {
-			if eb, err := os.Stat(echoBin); err == nil && !st.ModTime().Before(eb.ModTime()) {
-				stale = false
-			}
-		}
-	}
-	if stale {
-		_, err = Docker(3*time.Minute, "run", "--rm", "--privileged",
-			"-v", script+":/build-rootfs.sh:ro",
-			"-v", CacheDir(root)+":/out",
-			"alpine:3.20", "sh", "/build-rootfs.sh",
-		)
-		if err != nil {
-			return "", "", "", err
-		}
-	}
-	return firecracker, kernel, rootfs, nil
+	return firecracker, kernel, nil
 }
 
 func CreateStrong(root, id string) (*StrongInstance, error) {
-	if err := EnsureInhabitant(root); err != nil {
+	return CreateStrongExample(root, id, ExampleEcho)
+}
+
+func CreateStrongExample(root, id, example string) (*StrongInstance, error) {
+	ex, ok := LookupExample(example)
+	if !ok {
+		return nil, fmt.Errorf("unknown example %q", example)
+	}
+	if err := EnsureInhabitant(root, ex); err != nil {
 		return nil, err
 	}
-	firecracker, kernel, rootfs, err := EnsureStrongAssets(root)
+	firecracker, kernel, err := EnsureStrongAssets(root)
+	if err != nil {
+		return nil, err
+	}
+	rootfs, err := EnsureImageRootfs(root, ex.Image)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +104,7 @@ func CreateStrong(root, id string) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteSquidACL(root, dir, strongGuestIP); err != nil {
+	if err := WriteSquidACL(root, dir, strongGuestIP, ex); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -135,7 +120,7 @@ func CreateStrong(root, id string) (*StrongInstance, error) {
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
-			"boot_args":         "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/init",
+			"boot_args":         "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init",
 		},
 		"drives": []map[string]any{{
 			"drive_id":       "rootfs",

@@ -1,6 +1,6 @@
 # Hermetarium
 
-A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo example).
+A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Supervisor-held API keys. Coding-agent examples (Claude Code, Grok Build, DeepSeek Harness) with mock tests.
 
 ## 1. Name
 
@@ -25,7 +25,7 @@ operator machine or cluster
     ├── wall (weak runc | strong Firecracker)
     └── Squid (spawned; per-habitat ACL file; access.log → I/O log)
           └── Hermetarium = that OCI image, running
-                └── inhabitant (HTTP server: echo now, agent later)
+                └── inhabitant (HTTP server: echo, or a coding-agent harness)
 ```
 
 Operator and outside network both reach that inhabitant only through Squid. There is no product side channel (`docker exec`, SSH, a console) into the box.
@@ -50,7 +50,7 @@ Operator and outside network both reach that inhabitant only through Squid. Ther
 
 ## 6. Walls
 
-Same image. Isolation is the wall.
+**Same image.** Isolation is the wall. Both walls boot the **same OCI image**: same root filesystem, same inhabitant process (that image’s entrypoint/CMD). The strong wall is not a second, smaller guest world. How Firecracker gets a disk from the OCI image (export to ext4, or equivalent) is an implementation detail of that wall.
 
 | Wall | Mechanism | Kernel | Typical supervisor |
 | --- | --- | --- | --- |
@@ -61,7 +61,7 @@ Same image. Isolation is the wall.
 - Do not mount the operator’s home directory, SSH keys, or host Docker socket unless that is an explicit, logged choice.
 - Root inside the image is allowed. On the weak wall, a kernel exploit is a host exploit. On the strong wall, root is only guest root.
 
-Hello-world implements **both** walls. CLI `create` defaults to weak.
+Hello-world implements **both** walls. CLI `create` defaults to weak. `--example` selects echo (default) or a coding-agent inhabitant.
 
 ## 7. Network and logging
 
@@ -71,9 +71,9 @@ Hello-world implements **both** walls. CLI `create` defaults to weak.
 - I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, bytes, allowed or denied. Packet bodies are off unless turned on.
 - Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path. Fail closed on inbound the same as outbound: if the path cannot be applied, do not start.
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
-- Prefer keeping operator secrets on the supervisor and attaching them only for allowlisted destinations.
+- Secrets: see §8.
 
-Whether bodies are captured (metadata only versus TLS interception) and whether secrets may live in the image are not decided.
+Whether bodies are captured (metadata only versus TLS interception) is not decided.
 
 **Parked (not this build):** Squid `external_acl_type` helper, Envoy/xDS, OPA/Rego, replacing Squid. ICAP on Squid is the natural plug for a later wall scanner / pseudo-artifactory.
 
@@ -83,26 +83,69 @@ Whether bodies are captured (metadata only versus TLS interception) and whether 
 
 Rust was the alternative. It is not smaller here: even a thin supervisor needs `serde`/`serde_json`, and the Firecracker/Docker crates pull Tokio/Hyper. Go stdlib does that work with no modules. Do not rewrite the supervisor in TypeScript, Rust, or a WASM-only runtime.
 
-## 8. Inhabitants
+## 8. Secrets
+
+Secrets live only on the supervisor. The supervisor attaches them on the logged path for allowlisted destinations (header inject/replace in Squid). The inhabitant image, filesystem, and process environment must not contain the real secret. If the inhabitant sends its own `x-api-key` or `Authorization`, Squid **replaces** those headers. Direct access from the box to the real vendor origin is denied.
+
+Secrets-in-image is decided: no. This is **not** TLS interception of inhabitant traffic. The inhabitant speaks HTTP to the path; Squid is the HTTPS client to the vendor.
+
+How a credentialed destination is attached:
+
+- Supervisor reads the key from its environment (see table).
+- It writes that key only into the per-habitat Squid config on the **gate** (the box never mounts that file).
+- The inhabitant is pointed at an HTTP host on the logged path. It may have no key, or a non-secret placeholder so the program will start.
+- Squid reverse-proxies that host to the vendor over HTTPS and sets the real credential header.
+- The ACL allowlists that path only.
+
+| Vendor | Supervisor env | Inhabitant origin (HTTP on the path) |
+| --- | --- | --- |
+| Anthropic | `HERMETARIUM_ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL` |
+| xAI | `HERMETARIUM_XAI_API_KEY` | `GROK_CLI_CHAT_PROXY_BASE_URL` (or Grok `config.toml` `base_url`) |
+| DeepSeek | `HERMETARIUM_DEEPSEEK_API_KEY` | DeepSeek / OpenAI-compatible base URL |
+
+If a habitat’s ACL includes a credentialed destination and the supervisor has no key for it, fail closed (do not start). Tests: mock suite uses a test key only the mock origin accepts; live suite feeds the matching supervisor env var.
+
+## 9. Inhabitants
 
 Hermetarium does not care which program it holds. One or more inhabitants start already inside and may change the image. They talk to the outside only through the logged path. The outside talks in the same way: the inhabitant **is** an HTTP server on that path.
 
-Hello-world inbound is an **echo** service (request body returned as response body). Later the same shape is an agent that accepts commands. The operator does not name a host argv to run inside; they send HTTP to the process that is already serving.
+The operator does not name a host argv to run inside.
 
-## 8a. Operator HTTP
+### 9a. Operator HTTP
 
 The supervisor publishes a host URL that reaches the inhabitant through Squid. Both walls. CLI `hermetarium url <id>` prints `http://127.0.0.1:<port>/`.
 
 Two uses of that one server:
 
 1. **Call and wait.** Operator sends one HTTP request, waits until the inhabitant has finished handling it, reads the result (status, body). Echo: payload out equals payload in.
-2. **Talk to a running server.** The same process stays up. Operator can send further HTTP requests on the same URL. Echo still.
+2. **Talk to a running server.** The same process stays up. Operator can send further HTTP requests on the same URL.
 
-Hello-world inhabitant is `examples/echo/`. Later examples replace that process with an agent that accepts commands.
+TLS and auth on this hop (operator → supervisor URL) are not decided.
 
-TLS and auth on this hop are not decided.
+### 9b. Example: echo
 
-## 9. Lifecycle
+`examples/echo/`. Implemented. HTTP echo: request body returned as response body. Hello-world inbound.
+
+### 9c. Coding-agent examples
+
+Same inhabitant shape. The HTTP front is `examples/agentd/` (one open session, bash tool, Anthropic or OpenAI-compatible origin). Official CLIs can replace that inner loop later.
+
+Shared:
+
+- Same OCI image on **both** walls. Runs as **root** inside the image (guest root on the strong wall).
+- HTTP server that **stays up** and holds **one open harness session** for the life of the habitat.
+- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. A later POST is the next turn in the **same** session (not a new harness process per message).
+- Model “home” uses §8. Direct vendor API from the box is denied.
+- No SSE/WebSocket. A turn is still call-and-wait.
+- The operator path is this HTTP server, not the harness’s own TUI or local web UI.
+
+| Example | Directory | Harness (in the image) |
+| --- | --- | --- |
+| Claude Code | `examples/claude-code/` | Anthropic Claude Code (`claude`). Headless/`-p` or ACP; origin `ANTHROPIC_BASE_URL`. |
+| Grok Build | `examples/grok-build/` | xAI Grok Build (`grok`). Headless `grok -p` or `grok agent stdio` (ACP). Origin `GROK_CLI_CHAT_PROXY_BASE_URL` / `base_url`. Key `XAI_API_KEY` is supervisor-only (§8). |
+| DeepSeek Harness | `examples/deepseek-harness/` | DeepSeek Harness (`dsh`). Headless profile (`dsh --profile headless` or equivalent), not `dsh web` as the operator UI. Origin is the DeepSeek / OpenAI-compatible base URL on the path. Key `DEEPSEEK_API_KEY` is supervisor-only (§8). |
+
+## 10. Lifecycle
 
 1. Supervisor creates a Hermetarium: image, wall, network path (in and out), I/O log.
 2. Inhabitant HTTP server starts inside and may mutate filesystem and packages.
@@ -111,14 +154,58 @@ TLS and auth on this hop are not decided.
 
 Whether instances are ephemeral or long-lived is not decided.
 
-## 10. Open questions
+## 11. Tests
+
+Operator talk in tests is HTTP (`hermetarium url`), never `docker exec`. Live tests are `//go:build live` so `make test` cannot see them.
+
+### Hello-world (implemented)
+
+Both walls, fail-closed egress, probe, I/O log, inbound echo. Command: `make test`.
+
+### Coding-agent mock suite (required, CI default)
+
+Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls once same-image Firecracker is in. Same checks for each of §9c (`claude-code`, `grok-build`, `deepseek-harness`).
+
+**Mock the vendor HTTP API, not the harness.** The image runs the real harness binary. A mock origin on the gate (like the probe) speaks enough of that vendor’s API (Anthropic Messages, xAI/OpenAI-compatible, DeepSeek/OpenAI-compatible) to:
+
+1. Reject requests that lack the supervisor-injected key (and reject a dummy key the box might send).
+2. Return a tool call that makes the harness run a **shell command as root** (for example `id -u` or `touch /root/hermetarium-root-ok`).
+3. After the tool result, return a final assistant message that includes that evidence.
+
+The operator test then:
+
+1. **Chat / open session.** Two sequential POSTs to the same inbound URL. The second turn is handled by the same open harness session (the process is still running).
+2. **Root via the agent.** A turn whose tool use runs a shell command; the HTTP reply (or a file the command created under `/root`) shows uid 0. Installing a package is the same path plus an allowlisted package repo; the mock-suite required test is the shell command.
+3. **Key stays on the supervisor.** The test key does not appear in the inhabitant environment or filesystem. Direct vendor origin from the box fails. The I/O log records outbound to that example’s origin as allowed.
+
+What the mock does **not** prove: that a real model would choose that command from a natural-language ask.
+
+### Coding-agent live suite (optional, not a merge gate)
+
+Command: `make test-live`. For each example, requires that example’s supervisor env var (§8). If a given key is unset, **that example’s** live tests skip; other examples with a key still run.
+
+Squid still injects the key (§8); the inhabitant still must not contain it. Egress is the real vendor API (allowlisted), not the mock.
+
+The operator test then (per example that has a key):
+
+1. **Chat.** Two sequential POSTs in natural language on the same URL; the second turn depends on the first (same open session, real model).
+2. **Root via the agent.** A natural-language ask that the harness should run a shell command as root (for example “run `id -u`” or “install a package”). The HTTP reply or a file under `/root` shows uid 0. This is what the mock cannot prove: the model chose the tool.
+
+Not run on push or pull_request. Must not be required to merge.
+
+### CI
+
+- **Always:** job `test` runs `make test` (hello-world + mock suite for every coding-agent example).
+- **Optional / manual:** job `test-live` on `workflow_dispatch` only. The pipeline supplies keys as repository secrets (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, `HERMETARIUM_DEEPSEEK_API_KEY`) and exports whichever are set into the job environment so the supervisor can read them. Secrets are not written into the image, logs, or the inhabitant. Examples whose secret is empty skip.
+
+## 12. Open questions
 
 - Supervisor shape beyond the CLI: Compose plus Squid, Kubernetes, or only the Go binary
 - Persistence: ephemeral or long-lived
-- Secrets: supervisor only, or allowed in the image
 - I/O log bodies: metadata only, or optional TLS interception (mitmproxy is a candidate later; not the wall proxy)
 - When to revisit Squid: `external_acl_type`, OPA beside Squid, or a different proxy
+- Streaming chat (SSE) on the operator HTTP hop
 
-## 11. License
+## 13. License
 
 [PolyForm Noncommercial License 1.0.0](LICENSE). Source-available; not OSI Open Source. Other licenses can be negotiated with the copyright holder.

@@ -1,6 +1,7 @@
 bin/
 .cache/
 var/
+squid/vendor-mock
 *.log
 .DS_Store
 .idea/
