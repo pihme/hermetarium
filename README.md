@@ -9,6 +9,8 @@ Not a tool an agent calls. The CLI name is `hermetarium` in full; do not shorten
 
 ## Pieces
 
+`hermetarium version` and `porter version` print semver (`dev` on a local `make build`). GitHub Releases attach linux-amd64 binaries; tags are `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`.
+
 The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facing command. It creates a habitat: picks a wall (weak Docker/`runc` or strong Firecracker), writes a per-habitat ACL, starts Squid, publishes a localhost URL into the box, and maps Squid’s access log into the I/O log. It talks to Docker, Firecracker, and Squid as processes (`os/exec`), not via their SDKs.
 
 **Squid** (`squid/`) is the logged path. It runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Default deny. Inbound operator HTTP and outbound inhabitant traffic both go through it. For `--vendor claude|grok|deepseek` it allowlists that vendor host and injects the supervisor-held API key; the image never gets the real secret.

@@ -1,6 +1,7 @@
 bin/
 .cache/
 var/
+dist/
 squid/vendor-mock
 *.log
 .DS_Store

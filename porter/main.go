@@ -14,7 +14,15 @@ import (
 	"sync"
 )
 
+// Version is set at link time (-X main.Version=…). Local builds are "dev".
+var Version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println(Version)
+		return
+	}
+	log.Printf("porter %s", Version)
 	h := getenv("HARNESS", "claude")
 	s := &server{harness: h}
 	http.HandleFunc("/", s.serve)

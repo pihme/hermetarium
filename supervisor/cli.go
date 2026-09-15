@@ -13,13 +13,17 @@ func Run(args []string) int {
 		usage()
 		return 2
 	}
+	cmd := args[0]
+	rest := args[1:]
+	if cmd == "version" {
+		fmt.Println(Version)
+		return 0
+	}
 	root, err := Root()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	cmd := args[0]
-	rest := args[1:]
 	switch cmd {
 	case "create":
 		wall := flag(rest, "--wall", "weak")
@@ -173,6 +177,7 @@ func usage() {
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>
        hermetarium destroy <id>
+       hermetarium version
 probe host: %s
 `, ProbeHost)
 }

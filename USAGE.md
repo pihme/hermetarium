@@ -4,8 +4,11 @@ Operator CLI is `hermetarium` in full. Build it from this tree:
 
 ```bash
 make build
-export HERMETARIUM_ROOT=$(pwd)   # only if you run the binary from another directory
+./bin/hermetarium version
+export HERMETARIUM_ROOT=$(pwd)   # required today unless you run from this tree
 ```
+
+The CLI still needs this repo (Squid template, Firecracker helper). A release binary is not self-contained yet.
 
 Needs Docker and Go 1.24+. The **strong** wall also needs `/dev/kvm` and **x86_64**.
 
