@@ -2,33 +2,24 @@
 
 Sealed habitat where agents live. They wake up inside an OCI image and may change that world freely. They cannot leave. Every packet in or out is logged on the wall.
 
-Not a tool an agent calls.
+Not a tool an agent calls. The CLI name is `hermetarium` in full; do not shorten to `herm`.
 
 - [SPEC.md](SPEC.md) — product spec
 - [USAGE.md](USAGE.md) — walls, Squid, logs, custom images, porter
 
-Supervisor: **Go** native binary. Logged path: **Squid** (spawned, per-habitat ACL file). CLI name is `hermetarium` in full; do not shorten to `herm`.
+## Pieces
 
-## Layout
+The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facing command. It creates a habitat: picks a wall (weak Docker/`runc` or strong Firecracker), writes a per-habitat ACL, starts Squid, publishes a localhost URL into the box, and maps Squid’s access log into the I/O log. It talks to Docker, Firecracker, and Squid as processes (`os/exec`), not via their SDKs.
 
-One directory per process:
+**Squid** (`squid/`) is the logged path. It runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Default deny. Inbound operator HTTP and outbound inhabitant traffic both go through it. For `--vendor claude|grok|deepseek` it allowlists that vendor host and injects the supervisor-held API key; the image never gets the real secret.
 
-| Directory | Process |
-| --- | --- |
-| `examples/agentd/` | Stand-in coding loop (not the official CLIs) |
-| `examples/claude-code/` etc. | Images that run **agentd** against that vendor’s API shape |
-| `examples/echo/` | Tiny HTTP echo inhabitant |
-| `firecracker-helper/` | Strong-wall helper: TAP + Squid + Firecracker (not the inhabitant) |
-| `inhabitants/` | Images that install the **official** CLIs (`claude`, `grok`, `dsh`) plus `porter` |
-| `porter/` | Carries operator HTTP turns to the official CLI (sits in the inhabitant image) |
-| `squid/` | Squid image (intercept proxy + probe origin + inbound reverse-proxy) |
-| `supervisor/` | Go CLI that boots walls, writes the ACL file, maps Squid `access.log` |
-| `tests/claude-code/` etc. | **agentd** examples vs mock API (CI); live tagged |
-| `tests/echo/` | Shared echo checks |
-| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo |
-| `tests/inhabitants/` | Official CLIs present + HTTP front (CI); chat/root is live tagged |
+**Porter** (`porter/`) is a small HTTP adapter that lives *inside* the inhabitant image, not next to the supervisor. It listens on TCP 8080, which is what `hermetarium url` reverse-proxies to. Each operator POST is one CLI turn (`claude`, `grok`, or `dsh`); later POSTs continue the same session. You can omit porter and serve HTTP on 8080 yourself (the echo example does).
 
-Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
+**Inhabitants** (`inhabitants/`) are Dockerfiles for official coding CLIs: Claude Code, Grok Build, DeepSeek Harness. They run as **root**, install the real binary, set dummy boot keys and vendor base URLs, and `CMD` porter. They are templates. Build an image, then `create --image <tag>`. Add `--vendor claude` (or `grok` / `deepseek`) when Squid should allowlist that vendor and inject the key.
+
+`examples/` is the test stand-in, not those products. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` plus `examples/claude-code/` (and grok/deepseek) run a small Go tool loop against a mock Messages/Chat API so CI can prove walls, keys, and uid 0 without a live model. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
+
+Other trees: `firecracker-helper/` TAP + Squid + Firecracker for the strong wall; `tests/` for hello-world, agentd examples, and official-CLI smoke. Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
 
 ## Hello world
 
@@ -49,70 +40,31 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 ./bin/hermetarium destroy "$id"
 ```
 
-`--image` is any local or pullable OCI image that listens on TCP 8080. `url` is the host HTTP address that reaches it **through Squid**. More: [USAGE.md](USAGE.md).
-
-`create --wall strong` and `logs` / `destroy` / `url` work for both walls.
-
-Vendor allowlist + key inject (image still yours):
+`--image` is any local or pullable OCI image that listens on TCP 8080. `url` is the host HTTP address that reaches it **through Squid**. `create --wall strong` works the same. More: [USAGE.md](USAGE.md).
 
 ```bash
 id=$(./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude)
 curl -sS -d 'Run id -u' "$(./bin/hermetarium url "$id")"
 ```
 
-`--vendor grok` and `--vendor deepseek` likewise.
-
-## Examples vs inhabitants
-
-| | `examples/` | `inhabitants/` |
-| --- | --- | --- |
-| What runs in the box | `agentd` (a small Go session + bash tool) | Official `claude` / `grok` / `dsh`, wrapped by `porter` |
-| Why it exists | Fast, hermetic tests of Squid, keys, walls, I/O log | The product inhabitant: a real coding CLI as root |
-| `make test` says | Mock API drives a tool_use; uid 0; key not in the box | The official binary is on PATH, HTTP front is up, key not in the box. If the CLI will not speak our mock API, chat/root is **not** claimed here |
-| `make test-live` says | Same loop against the real vendor (optional) | Natural-language turn through the **real CLI** to the real vendor |
-
-Build those Dockerfiles yourself, then `create --image <tag>`. Add `--vendor claude` (or `grok` / `deepseek`) when Squid should allowlist that vendor host and inject the supervisor key.
-
-`porter` listens on `:8080` and execs the official CLI for each operator POST.
-
-Official CLIs often refuse to boot with an empty key env. Inhabitant images set dummies and related boot flags; none of that is the supervisor secret. Squid still replaces `x-api-key` / `Authorization`.
-
-| CLI | Dummy / boot settings in the image |
-| --- | --- |
-| Claude Code | `ANTHROPIC_API_KEY=not-the-supervisor-key`, `ANTHROPIC_BASE_URL`, `IS_SANDBOX=1`, `CLAUDE_CODE_BUBBLEWRAP=1`, `CI=true`, `~/.claude/settings.json` bypassPermissions |
-| Grok Build | `XAI_API_KEY=not-the-supervisor-key`, `GROK_CLI_CHAT_PROXY_BASE_URL` |
-| DeepSeek Harness | `DEEPSEEK_API_KEY=not-the-supervisor-key`, `DEEPSEEK_BASE_URL`, `OPENAI_BASE_URL`, `DSH_HOME` |
+Dummy env in inhabitant images (`ANTHROPIC_API_KEY=not-the-supervisor-key` and the like) only exist so the CLI will start. Squid still replaces `x-api-key` / `Authorization`. Boot flags per CLI: [USAGE.md](USAGE.md).
 
 ## Tests
 
-Two suites. Spec: [SPEC.md §11](SPEC.md#11-tests). Coding-agent tests land with the §9c examples; `make test` already runs hello-world.
+Two suites. Spec: [SPEC.md §11](SPEC.md#11-tests).
 
-### Mocked (CI default)
+**Mocked (CI default).** `make test`. No vendor account. Hello-world (both walls, probe, echo) and agentd examples against a mock vendor API. Official-CLI tests only check that `claude` / `grok` / `dsh` are on PATH and porter is up; they do not claim a mock-driven chat session. GitHub Actions job `test` runs this on every push and pull request.
 
-Always run. No vendor account. Hello-world (both walls, probe, echo) and each coding-agent example against a **mock** vendor API: open session, a scripted root shell command, key not in the box.
-
-```bash
-make test
-```
-
-GitHub Actions job `test` runs this on every push and pull request.
-
-### Live (optional, manual)
-
-Real harness talking to the real vendor. Proves a model will take a natural-language ask (run a command / install something) and do it as root. **Not** a merge gate.
-
-The supervisor reads keys from its environment. Do not put them in the image. Unset keys skip that example.
+**Live (optional, not a merge gate).** Real CLI to the real vendor. Natural-language “run a command / install something” as root.
 
 ```bash
-export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...   # Claude Code
-export HERMETARIUM_XAI_API_KEY=xai-...            # Grok Build
-export HERMETARIUM_DEEPSEEK_API_KEY=sk-...        # DeepSeek Harness
+export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...
+export HERMETARIUM_XAI_API_KEY=xai-...
+export HERMETARIUM_DEEPSEEK_API_KEY=sk-...
 make test-live
 ```
 
-`make test-live` is `go test -tags live` (those files are invisible to `make test`).
-
-On GitHub: Actions → CI → **Run workflow**. That is the only way the live job starts (not on push/PR). Set the matching repository secrets; the job exports them so the supervisor can inject them on Squid. Secrets must not appear in logs.
+Unset keys skip that vendor. `make test-live` is `go test -tags live`. On GitHub: Actions → CI → **Run workflow** only (not push/PR). Repository secrets with those names are exported into the job for the supervisor. They must not appear in logs.
 
 ## License
 
