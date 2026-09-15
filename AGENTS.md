@@ -12,11 +12,11 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 
 ## How to work here
 
-- Layout is **one directory per process**: `supervisor/`, `squid/`, `firecracker-helper/`, plus `examples/` (inhabitants) and `tests/`.
+- Layout is **one directory per process**: `supervisor/`, `squid/`, `firecracker-helper/`, plus `examples/` (stand-in loops), `inhabitants/` (official CLIs), `porter/` (HTTP adapter for those CLIs), and `tests/`.
 - **Supervisor is Go**: native binary, stdlib-first, `os/exec` Docker/Firecracker/Squid. Do not import their SDKs unless exec is proven insufficient. Do not rewrite the supervisor in TypeScript, Rust, JVM, .NET, or a WASM-only runtime.
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
 - CLI name is `hermetarium` in full, never `herm`.
-- Inhabitants in-tree: `examples/echo/` (implemented); `examples/claude-code/`, `examples/grok-build/`, `examples/deepseek-harness/` (specified). Do not add Universal APP / TypeScript host / scanners until asked.
+- `examples/` = stand-in agentd images. `inhabitants/` = official `claude` / `grok` / `dsh`. Do not add Universal APP / TypeScript host / scanners until asked.
 - Prefer small, reversible files. Hello-world is both walls, fail-closed egress, probe, I/O log, inbound echo (`examples/echo/`). Next: same OCI image on Firecracker, supervisor-held keys, coding-agent examples.
 - License: **PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not OSI Open Source. Do not relicense to Apache/MIT/GPL.
 

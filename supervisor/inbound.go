@@ -88,7 +88,11 @@ func waitInbound(rawURL string, timeout time.Duration) error {
 
 // Call sends one HTTP POST through the published inbound URL and waits for the body.
 func Call(rawURL, body string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	return CallTimeout(rawURL, body, 3*time.Minute)
+}
+
+func CallTimeout(rawURL, body string, d time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(body))
 	if err != nil {

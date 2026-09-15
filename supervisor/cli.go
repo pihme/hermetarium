@@ -22,8 +22,14 @@ func Run(args []string) int {
 	switch cmd {
 	case "create":
 		wall := flag(rest, "--wall", "weak")
+		inhab := flag(rest, "--inhabitant", "")
 		example := flag(rest, "--example", ExampleEcho)
-		if _, ok := LookupExample(example); !ok {
+		if inhab != "" {
+			if _, ok := LookupInhabitant(inhab); !ok {
+				fmt.Fprintf(os.Stderr, "unknown inhabitant %q\n", inhab)
+				return 2
+			}
+		} else if _, ok := LookupExample(example); !ok {
 			fmt.Fprintf(os.Stderr, "unknown example %q\n", example)
 			return 2
 		}
@@ -34,9 +40,17 @@ func Run(args []string) int {
 		}
 		switch wall {
 		case "strong":
-			_, err = CreateStrongExample(root, id, example)
+			if inhab != "" {
+				_, err = CreateStrongInhabitant(root, id, inhab)
+			} else {
+				_, err = CreateStrongExample(root, id, example)
+			}
 		case "weak":
-			_, err = CreateWeakExample(root, id, example)
+			if inhab != "" {
+				_, err = CreateWeakInhabitant(root, id, inhab)
+			} else {
+				_, err = CreateWeakExample(root, id, example)
+			}
 		default:
 			fmt.Fprintf(os.Stderr, "unknown wall %q (want weak or strong)\n", wall)
 			return 2
@@ -132,6 +146,7 @@ func flag(args []string, name, fallback string) string {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong [--example echo|claude-code|grok-build|deepseek-harness]
+       hermetarium create --wall weak|strong --inhabitant claude-code|grok-build|deepseek-harness
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>

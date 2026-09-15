@@ -89,6 +89,18 @@ func CreateStrongExample(root, id, example string) (*StrongInstance, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown example %q", example)
 	}
+	return CreateStrongEx(root, id, ex)
+}
+
+func CreateStrongInhabitant(root, id, name string) (*StrongInstance, error) {
+	ex, ok := LookupInhabitant(name)
+	if !ok {
+		return nil, fmt.Errorf("unknown inhabitant %q", name)
+	}
+	return CreateStrongEx(root, id, ex)
+}
+
+func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 	if err := EnsureInhabitant(root, ex); err != nil {
 		return nil, err
 	}
@@ -96,7 +108,7 @@ func CreateStrongExample(root, id, example string) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootfs, err := EnsureImageRootfs(root, ex.Image)
+	rootfs, err := EnsureImageRootfs(root, ex.Image, diskMB(ex))
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +140,7 @@ func CreateStrongExample(root, id, example string) (*StrongInstance, error) {
 			"is_root_device": true,
 			"is_read_only":   false,
 		}},
-		"machine-config": map[string]any{"vcpu_count": 1, "mem_size_mib": 128},
+		"machine-config": map[string]any{"vcpu_count": 1, "mem_size_mib": memMiB(ex)},
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",
 			"guest_mac":     "AA:FC:00:00:00:01",

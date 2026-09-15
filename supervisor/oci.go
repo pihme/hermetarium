@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-func EnsureImageRootfs(root, image string) (string, error) {
+func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
+	if sizeMB <= 0 {
+		sizeMB = 256
+	}
 	id, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", image)
 	if err != nil {
 		return "", err
@@ -65,7 +68,7 @@ func EnsureImageRootfs(root, image string) (string, error) {
 		return "", err
 	}
 	_, err = Docker(3*time.Minute, "run", "--rm", "--privileged",
-		"-e", "SIZE_MB=256",
+		"-e", fmt.Sprintf("SIZE_MB=%d", sizeMB),
 		"-v", script+":/pack-oci.sh:ro",
 		"-v", work+":/in",
 		"-v", work+":/out",

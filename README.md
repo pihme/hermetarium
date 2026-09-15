@@ -16,16 +16,16 @@ One directory per process:
 | --- | --- |
 | `supervisor/` | Go CLI that boots walls, writes the ACL file, maps Squid `access.log` |
 | `squid/` | Squid image (intercept proxy + probe origin + inbound reverse-proxy) |
-| `examples/echo/` | Inhabitant example: HTTP echo server |
-| `examples/claude-code/` | Claude Code harness behind HTTP (specified) |
-| `examples/grok-build/` | Grok Build harness behind HTTP (specified) |
-| `examples/deepseek-harness/` | DeepSeek Harness behind HTTP (specified) |
+| `examples/echo/` | Tiny HTTP echo inhabitant |
+| `examples/agentd/` | Stand-in coding loop (not the official CLIs) |
+| `examples/claude-code/` etc. | Images that run **agentd** against that vendor’s API shape |
+| `porter/` | Carries operator HTTP turns to the official CLI (sits in the inhabitant image) |
+| `inhabitants/` | Images that install the **official** CLIs (`claude`, `grok`, `dsh`) plus `porter` |
 | `firecracker-helper/` | Strong-wall helper: TAP + Squid + Firecracker (not the inhabitant) |
-| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo example |
-| `tests/echo/` | Shared checks for the echo example |
-| `tests/claude-code/` | Claude Code tests (mock default; live tagged) |
-| `tests/grok-build/` | Grok Build tests (mock default; live tagged) |
-| `tests/deepseek-harness/` | DeepSeek Harness tests (mock default; live tagged) |
+| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo |
+| `tests/echo/` | Shared echo checks |
+| `tests/claude-code/` etc. | **agentd** examples vs mock API (CI); live tagged |
+| `tests/inhabitants/` | Official CLIs present + HTTP front (CI); chat/root is live tagged |
 
 Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
 
@@ -50,7 +50,37 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 
 `url` is the host HTTP address that reaches the inhabitant **through Squid** (logged inbound). The default inhabitant is the echo example in `examples/echo/`: POST body comes back as the response body. The process stays up, so a second `curl` is the “running server” case.
 
-`create --wall strong` and `logs` / `destroy` / `url` work for both walls. `make test` covers both walls and the echo example.
+`create --wall strong` and `logs` / `destroy` / `url` work for both walls.
+
+Official CLIs (larger images):
+
+```bash
+id=$(./bin/hermetarium create --wall weak --inhabitant claude-code)
+curl -sS -d 'Run id -u' "$(./bin/hermetarium url "$id")"
+```
+
+Same for `--inhabitant grok-build` and `--inhabitant deepseek-harness`.
+
+## Examples vs inhabitants
+
+| | `examples/` | `inhabitants/` |
+| --- | --- | --- |
+| What runs in the box | `agentd` (a small Go session + bash tool) | Official `claude` / `grok` / `dsh`, wrapped by `porter` |
+| Why it exists | Fast, hermetic tests of Squid, keys, walls, I/O log | The product inhabitant: a real coding CLI as root |
+| `make test` says | Mock API drives a tool_use; uid 0; key not in the box | The official binary is on PATH, HTTP front is up, key not in the box. If the CLI will not speak our mock API, chat/root is **not** claimed here |
+| `make test-live` says | Same loop against the real vendor (optional) | Natural-language turn through the **real CLI** to the real vendor |
+
+`--example claude-code` is the stand-in. `--inhabitant claude-code` is Claude Code.
+
+`porter` listens on `:8080` and execs the official CLI for each operator POST.
+
+Official CLIs often refuse to boot with an empty key env. Inhabitant images set dummies and related boot flags; none of that is the supervisor secret. Squid still replaces `x-api-key` / `Authorization`.
+
+| CLI | Dummy / boot settings in the image |
+| --- | --- |
+| Claude Code | `ANTHROPIC_API_KEY=not-the-supervisor-key`, `ANTHROPIC_BASE_URL`, `IS_SANDBOX=1`, `CLAUDE_CODE_BUBBLEWRAP=1`, `CI=true`, `~/.claude/settings.json` bypassPermissions |
+| Grok Build | `XAI_API_KEY=not-the-supervisor-key`, `GROK_CLI_CHAT_PROXY_BASE_URL` |
+| DeepSeek Harness | `DEEPSEEK_API_KEY=not-the-supervisor-key`, `DEEPSEEK_BASE_URL`, `OPENAI_BASE_URL`, `DSH_HOME` |
 
 ## Tests
 

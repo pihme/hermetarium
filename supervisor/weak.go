@@ -30,6 +30,18 @@ func CreateWeakExample(root, id, example string) (*WeakInstance, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown example %q", example)
 	}
+	return CreateWeakEx(root, id, ex)
+}
+
+func CreateWeakInhabitant(root, id, name string) (*WeakInstance, error) {
+	ex, ok := LookupInhabitant(name)
+	if !ok {
+		return nil, fmt.Errorf("unknown inhabitant %q", name)
+	}
+	return CreateWeakEx(root, id, ex)
+}
+
+func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
 	if err := EnsureInhabitant(root, ex); err != nil {
 		return nil, err
 	}

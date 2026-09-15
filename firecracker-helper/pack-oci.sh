@@ -43,13 +43,17 @@ if [ -x /bin/busybox ]; then
   if [ -z "$body" ]; then
     body=$(/bin/busybox wget -qO- -T 5 http://172.16.0.1/hello 2>/dev/null || true)
   fi
+elif command -v curl >/dev/null 2>&1; then
+  body=$(curl -sS --connect-timeout 3 --max-time 8 http://probe.hermetarium.test/hello 2>/dev/null || true)
 fi
 echo "PROBE_BODY=$body"
 case "$body" in
   *hermetarium-ok*) echo PROBE_OK ;;
   *) echo PROBE_FAIL ;;
 esac
-if /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+if [ -x /bin/busybox ] && /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+  echo LEAK_OK
+elif command -v ping >/dev/null 2>&1 && ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
   echo LEAK_OK
 else
   echo LEAK_FAIL
