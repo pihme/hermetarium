@@ -18,6 +18,28 @@ func TestHelloWorld(t *testing.T) {
 	}
 	t.Run("weak", func(t *testing.T) { testWeak(t, root) })
 	t.Run("strong", func(t *testing.T) { testStrong(t, root) })
+	t.Run("image", func(t *testing.T) { testArbitraryImage(t, root) })
+}
+
+func testArbitraryImage(t *testing.T, root string) {
+	if err := supervisor.EnsureEchoImage(root); err != nil {
+		t.Fatal(err)
+	}
+	id, err := supervisor.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := supervisor.Example{
+		Name: "image", Image: supervisor.EchoImage, Kind: "image",
+		SkipBuild: true, MemMiB: 128, DiskMB: 256,
+	}
+	t.Logf("arbitrary --image %s create %s", ex.Image, id)
+	inst, err := supervisor.CreateWeakEx(root, id, ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.DestroyWeak(id)
+	echo.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath)
 }
 
 func testWeak(t *testing.T, root string) {

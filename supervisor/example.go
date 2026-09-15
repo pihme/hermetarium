@@ -33,9 +33,10 @@ type Example struct {
 	Dialect    string // anthropic | openai
 	LivePeer   string
 	LivePort   int
-	Kind       string // "example" (agentd) or "inhabitant" (official CLI)
+	Kind       string // "example" (agentd), "inhabitant" (official CLI), or "image"
 	MemMiB     int
 	DiskMB     int
+	SkipBuild  bool // use Image as-is; do not build a stock tag
 }
 
 func LookupExample(name string) (Example, bool) {

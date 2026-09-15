@@ -61,7 +61,7 @@ Operator and outside network both reach that inhabitant only through Squid. Ther
 - Do not mount the operator’s home directory, SSH keys, or host Docker socket unless that is an explicit, logged choice.
 - Root inside the image is allowed. On the weak wall, a kernel exploit is a host exploit. On the strong wall, root is only guest root.
 
-Hello-world implements **both** walls. CLI `create` defaults to weak. `--example` selects echo (default) or a coding-agent inhabitant.
+Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI image) and `--wall weak|strong`. Optional `--vendor claude|grok|deepseek` is the Squid allowlist and key inject, not an image name.
 
 ## 7. Network and logging
 
@@ -113,7 +113,7 @@ The operator does not name a host argv to run inside.
 
 ### 9a. Operator HTTP
 
-The supervisor publishes a host URL that reaches the inhabitant through Squid. Both walls. CLI `hermetarium url <id>` prints `http://127.0.0.1:<port>/`.
+The supervisor publishes a host URL that reaches the inhabitant through Squid. Both walls. CLI `hermetarium url <id>` prints `http://127.0.0.1:<port>/`. `create --image NAME` boots any local or pullable OCI image.
 
 Two uses of that one server:
 

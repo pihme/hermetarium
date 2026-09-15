@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func Run(args []string) int {
@@ -22,15 +23,9 @@ func Run(args []string) int {
 	switch cmd {
 	case "create":
 		wall := flag(rest, "--wall", "weak")
-		inhab := flag(rest, "--inhabitant", "")
-		example := flag(rest, "--example", ExampleEcho)
-		if inhab != "" {
-			if _, ok := LookupInhabitant(inhab); !ok {
-				fmt.Fprintf(os.Stderr, "unknown inhabitant %q\n", inhab)
-				return 2
-			}
-		} else if _, ok := LookupExample(example); !ok {
-			fmt.Fprintf(os.Stderr, "unknown example %q\n", example)
+		ex, err := ResolveCreate(rest)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
 		id, err := NewID()
@@ -40,17 +35,9 @@ func Run(args []string) int {
 		}
 		switch wall {
 		case "strong":
-			if inhab != "" {
-				_, err = CreateStrongInhabitant(root, id, inhab)
-			} else {
-				_, err = CreateStrongExample(root, id, example)
-			}
+			_, err = CreateStrongEx(root, id, ex)
 		case "weak":
-			if inhab != "" {
-				_, err = CreateWeakInhabitant(root, id, inhab)
-			} else {
-				_, err = CreateWeakExample(root, id, example)
-			}
+			_, err = CreateWeakEx(root, id, ex)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown wall %q (want weak or strong)\n", wall)
 			return 2
@@ -144,9 +131,44 @@ func flag(args []string, name, fallback string) string {
 	return fallback
 }
 
+// ResolveCreate requires --image (any local or pullable OCI name).
+// Optional --vendor claude|grok|deepseek adds that Squid allowlist and key inject.
+func ResolveCreate(args []string) (Example, error) {
+	image := strings.TrimSpace(flag(args, "--image", ""))
+	if image == "" {
+		return Example{}, fmt.Errorf("create requires --image NAME")
+	}
+	vendor := strings.TrimSpace(flag(args, "--vendor", ""))
+	ex := Example{
+		Name: "image", Image: image, Kind: "image",
+		SkipBuild: true, MemMiB: 512, DiskMB: 1024,
+	}
+	if vendor == "" {
+		return ex, nil
+	}
+	var stock Example
+	var ok bool
+	switch vendor {
+	case "claude", "claude-code":
+		stock, ok = LookupInhabitant(ExampleClaude)
+	case "grok", "grok-build":
+		stock, ok = LookupInhabitant(ExampleGrok)
+	case "deepseek", "deepseek-harness":
+		stock, ok = LookupInhabitant(ExampleDeepseek)
+	default:
+		return Example{}, fmt.Errorf("unknown --vendor %q (want claude, grok, or deepseek)", vendor)
+	}
+	if !ok {
+		return Example{}, fmt.Errorf("unknown --vendor %q", vendor)
+	}
+	stock.Image = image
+	stock.SkipBuild = true
+	stock.Kind = "image"
+	return stock, nil
+}
+
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong [--example echo|claude-code|grok-build|deepseek-harness]
-       hermetarium create --wall weak|strong --inhabitant claude-code|grok-build|deepseek-harness
+	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME [--vendor claude|grok|deepseek]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>

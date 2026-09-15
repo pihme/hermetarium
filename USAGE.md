@@ -19,24 +19,18 @@ Needs Docker and Go 1.24+. The **strong** wall also needs `/dev/kvm` and **x86_6
 | Strong | `--wall strong` | Firecracker microVM. Own guest kernel. Root is guest root only. | Docker, `/dev/kvm`, x86_64 |
 
 ```bash
-id=$(./bin/hermetarium create --wall weak)
-id=$(./bin/hermetarium create --wall strong)
+id=$(./bin/hermetarium create --wall weak --image myorg/box:1)
+id=$(./bin/hermetarium create --wall strong --image myorg/box:1)
 ```
 
-What to put in the box:
+`--image` is required: any local tag or a name Docker can `pull`. The image must listen on **TCP 8080** (porter or your own HTTP server). Optional `--vendor claude|grok|deepseek` adds that Squid allowlist and key inject (see below).
 
 ```bash
-# tiny echo (default)
-./bin/hermetarium create --wall weak --example echo
-
-# stand-in coding loop (not the official CLI)
-./bin/hermetarium create --wall weak --example claude-code
-
-# official CLI
-./bin/hermetarium create --wall weak --inhabitant claude-code
+./bin/hermetarium create --wall weak --image myorg/box:1
+./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude
 ```
 
-Same `--example` / `--inhabitant` values work with `--wall strong`. Official-CLI images are large (about 2 GiB disk / 2 GiB RAM on Firecracker).
+Templates in `examples/` and `inhabitants/` are how you *build* images; they are not CLI names. Strong wall: 512 MiB / 1 GiB disk by default; `--vendor` uses 2 GiB (CLI-sized).
 
 Talk, then tear down:
 
@@ -60,12 +54,12 @@ What the generated file does:
 - Intercept / reverse-proxy so the box has no default route except Squid.
 - Inbound: host `url` → Squid → inhabitant port 8080.
 - Probe allowlist: `probe.hermetarium.test`.
-- Vendor allowlist (coding-agent examples/inhabitants): `claude.hermetarium.test`, `grok.hermetarium.test`, or `deepseek.hermetarium.test`. Direct `api.anthropic.com` / `api.x.ai` / `api.deepseek.com` from the box is denied.
-- If a vendor host is in the ACL, Squid **replaces** `x-api-key` and `Authorization` with the supervisor secret (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, or `HERMETARIUM_DEEPSEEK_API_KEY`). Unset → mock key and mock origin. Set → live vendor over HTTPS from the gate.
+- Vendor allowlist only if you passed `--vendor`: `claude.hermetarium.test`, `grok.hermetarium.test`, or `deepseek.hermetarium.test`. Direct public API hosts from the box stay denied.
+- Then Squid **replaces** `x-api-key` and `Authorization` with the supervisor secret (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, or `HERMETARIUM_DEEPSEEK_API_KEY`). Unset → mock key and mock origin. Set → live vendor over HTTPS from the gate.
 
 ```bash
 export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...   # supervisor process only
-./bin/hermetarium create --wall weak --inhabitant claude-code
+./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude
 ```
 
 The inhabitant image must not hold the real key. Dummy env values so a CLI will start are described below.
@@ -105,7 +99,7 @@ Claude Code refuses `--dangerously-skip-permissions` as root unless it thinks it
 4. Vendor traffic goes to the HTTP host on the logged path (`ANTHROPIC_BASE_URL=http://claude.hermetarium.test`, `GROK_CLI_CHAT_PROXY_BASE_URL=http://grok.hermetarium.test`, or DeepSeek/OpenAI base URL `http://deepseek.hermetarium.test`), **not** straight to the public API.
 5. Dummy key env so the CLI starts (`not-the-supervisor-key`). Squid replaces the header.
 
-`create` today only boots the named stock images (`--inhabitant claude-code` → `hermetarium-in-claude:local`, and the same for grok/dsh). To run a custom image without changing Go: **tag it as that name** after you build, then `create --inhabitant …`. To add a new name, add a Dockerfile under `inhabitants/` and a `LookupInhabitant` entry.
+Boot the image with `--image`. Add `--vendor claude` (or `grok` / `deepseek`) when you want that vendor allowlist and key inject.
 
 Example: Claude Code plus extra tools, still using porter:
 
@@ -132,8 +126,8 @@ CMD ["/usr/local/bin/porter"]
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
-docker build -t hermetarium-in-claude:local -f Dockerfile .
-./bin/hermetarium create --wall weak --inhabitant claude-code
+docker build -t myorg/claude:dev -f Dockerfile .
+./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude
 ```
 
 Mix: take the Claude install + `HARNESS=claude` block from one template, Grok’s `GROK_CLI_CHAT_PROXY_BASE_URL` from another, or drop porter and put your own HTTP server on 8080. The wall does not care which program answers, only that something listens.

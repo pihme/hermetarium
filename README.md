@@ -42,25 +42,25 @@ make test
 
 ```bash
 make build
-id=$(./bin/hermetarium create --wall weak)
+id=$(./bin/hermetarium create --wall weak --image myorg/box:1)
 ./bin/hermetarium url "$id"
 curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 ./bin/hermetarium logs "$id"
 ./bin/hermetarium destroy "$id"
 ```
 
-`url` is the host HTTP address that reaches the inhabitant **through Squid** (logged inbound). The default inhabitant is the echo example in `examples/echo/`: POST body comes back as the response body. The process stays up, so a second `curl` is the “running server” case. More: [USAGE.md](USAGE.md).
+`--image` is any local or pullable OCI image that listens on TCP 8080. `url` is the host HTTP address that reaches it **through Squid**. More: [USAGE.md](USAGE.md).
 
 `create --wall strong` and `logs` / `destroy` / `url` work for both walls.
 
-Official CLIs (larger images):
+Vendor allowlist + key inject (image still yours):
 
 ```bash
-id=$(./bin/hermetarium create --wall weak --inhabitant claude-code)
+id=$(./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude)
 curl -sS -d 'Run id -u' "$(./bin/hermetarium url "$id")"
 ```
 
-Same for `--inhabitant grok-build` and `--inhabitant deepseek-harness`.
+`--vendor grok` and `--vendor deepseek` likewise.
 
 ## Examples vs inhabitants
 
@@ -71,7 +71,7 @@ Same for `--inhabitant grok-build` and `--inhabitant deepseek-harness`.
 | `make test` says | Mock API drives a tool_use; uid 0; key not in the box | The official binary is on PATH, HTTP front is up, key not in the box. If the CLI will not speak our mock API, chat/root is **not** claimed here |
 | `make test-live` says | Same loop against the real vendor (optional) | Natural-language turn through the **real CLI** to the real vendor |
 
-`--example claude-code` is the stand-in. `--inhabitant claude-code` is Claude Code.
+Build those Dockerfiles yourself, then `create --image <tag>`. Add `--vendor claude` (or `grok` / `deepseek`) when Squid should allowlist that vendor host and inject the supervisor key.
 
 `porter` listens on `:8080` and execs the official CLI for each operator POST.
 

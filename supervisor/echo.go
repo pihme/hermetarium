@@ -165,8 +165,20 @@ func EnsureOfficialImage(root string, ex Example) error {
 	return err
 }
 
+func EnsureImageExists(name string) error {
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", name); err == nil {
+		return nil
+	}
+	_, err := Docker(5*time.Minute, "pull", name)
+	return err
+}
+
 func EnsureInhabitant(root string, ex Example) error {
-	if err := EnsureExampleImage(root, ex); err != nil {
+	if ex.SkipBuild {
+		if err := EnsureImageExists(ex.Image); err != nil {
+			return err
+		}
+	} else if err := EnsureExampleImage(root, ex); err != nil {
 		return err
 	}
 	return EnsureSquidImage(root)
