@@ -84,6 +84,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: true
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -91,4 +92,5 @@ jobs:
       - name: Tag and attach linux-amd64 binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
         run: python3 .github/scripts/release.py

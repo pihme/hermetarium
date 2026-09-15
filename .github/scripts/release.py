@@ -54,8 +54,16 @@ COMPONENTS = [
 
 
 def run(args: List[str], check: bool = True) -> str:
-    r = subprocess.run(args, check=check, capture_output=True, text=True)
-    return r.stdout.strip()
+    r = subprocess.run(args, capture_output=True, text=True)
+    if r.stdout.strip():
+        print(r.stdout.rstrip())
+    if r.returncode != 0:
+        err = (r.stderr or r.stdout or "").rstrip()
+        if err:
+            print(err, file=sys.stderr)
+        if check:
+            raise SystemExit(f"command failed ({r.returncode}): {' '.join(args)}")
+    return (r.stdout or "").strip()
 
 
 def last_tag(prefix: str) -> Optional[str]:
@@ -155,14 +163,16 @@ def main() -> int:
             continue
         build = [a.format(ver=nxt) if "{ver}" in a else a for a in c["build"]]
         run(build)
-        run(["git", "tag", "-a", tag, "-m", f"{c['name']} {nxt}"])
-        run(["git", "push", "origin", tag])
+        sha = os.environ.get("GITHUB_SHA") or run(["git", "rev-parse", "HEAD"])
+        # Let GitHub mint the tag (no local git identity needed for git tag -a).
         run(
             [
                 "gh",
                 "release",
                 "create",
                 tag,
+                "--target",
+                sha,
                 "--title",
                 f"{c['name']} {nxt}",
                 "--notes",
