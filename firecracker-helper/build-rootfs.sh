@@ -11,6 +11,9 @@ cp /bin/busybox /rootfs/bin/busybox
 cp /lib/ld-musl-x86_64.so.1 /rootfs/lib/ld-musl-x86_64.so.1
 ln -sf ld-musl-x86_64.so.1 /rootfs/lib/libc.musl-x86_64.so.1
 /rootfs/bin/busybox --install /rootfs/bin
+test -x /out/echo-service
+cp /out/echo-service /rootfs/bin/echo-service
+chmod +x /rootfs/bin/echo-service
 cat > /rootfs/init << 'EOF'
 #!/bin/sh
 /bin/busybox mkdir -p /proc /sys /dev /tmp
@@ -29,6 +32,7 @@ done
 /bin/busybox ip link set eth0 up
 /bin/busybox ip addr add 172.16.0.2/24 dev eth0
 /bin/busybox ip route add default via 172.16.0.1
+/bin/echo-service &
 echo "GUEST_UNAME=$(/bin/busybox uname -r)"
 body=""
 if body=$(/bin/busybox wget -qO- -T 8 http://probe.hermetarium.test/hello); then
@@ -46,7 +50,9 @@ if /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
 else
   echo LEAK_FAIL
 fi
-/bin/busybox poweroff -f 2>/dev/null || /bin/busybox halt -f
+while true; do
+  /bin/busybox sleep 3600
+done
 EOF
 chmod +x /rootfs/init
 echo "172.16.0.1 probe.hermetarium.test" > /rootfs/etc/hosts

@@ -1,6 +1,6 @@
 # Hermetarium
 
-A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed path, I/O log).
+A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo example).
 
 ## 1. Name
 
@@ -25,13 +25,16 @@ operator machine or cluster
     ├── wall (weak runc | strong Firecracker)
     └── Squid (spawned; per-habitat ACL file; access.log → I/O log)
           └── Hermetarium = that OCI image, running
-                └── inhabitants
+                └── inhabitant (HTTP server: echo now, agent later)
 ```
+
+Operator and outside network both reach that inhabitant only through Squid. There is no product side channel (`docker exec`, SSH, a console) into the box.
 
 ## 4. What it is not
 
 - Not a per-command sandbox the inhabitant invokes.
 - Not a host Unix shell, chroot, or jail as the product. A Unix shell still exists **inside** the image.
+- Not a host-side exec API as the way the operator talks to the inhabitant. That talk is HTTP through the logged path.
 - Not Kubernetes-as-security. Kubernetes may run the strong wall; ordinary `runc` pods on Kubernetes are still the weak wall.
 
 ## 5. Vocabulary
@@ -65,8 +68,8 @@ Hello-world implements **both** walls. CLI `create` defaults to weak.
 - No default route except Squid. Setting `HTTP_PROXY` inside the image is not the wall.
 - Fail closed: if the route, firewall, or Squid cannot be applied, do not start.
 - The supervisor **writes a per-habitat ACL file** (default deny, allowlisted destinations only) and starts Squid against it. Squid stays a **sibling process** (GPLv2). The supervisor does not link Squid.
-- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction, protocol, destination, bytes, allowed or denied. Packet bodies are off unless turned on.
-- Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path.
+- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, bytes, allowed or denied. Packet bodies are off unless turned on.
+- Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path. Fail closed on inbound the same as outbound: if the path cannot be applied, do not start.
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
 - Prefer keeping operator secrets on the supervisor and attaching them only for allowlisted destinations.
 
@@ -82,13 +85,28 @@ Rust was the alternative. It is not smaller here: even a thin supervisor needs `
 
 ## 8. Inhabitants
 
-Hermetarium does not care which program it holds. One or more inhabitants start already inside and may change the image. They talk to the outside only through the logged path.
+Hermetarium does not care which program it holds. One or more inhabitants start already inside and may change the image. They talk to the outside only through the logged path. The outside talks in the same way: the inhabitant **is** an HTTP server on that path.
+
+Hello-world inbound is an **echo** service (request body returned as response body). Later the same shape is an agent that accepts commands. The operator does not name a host argv to run inside; they send HTTP to the process that is already serving.
+
+## 8a. Operator HTTP
+
+The supervisor publishes a host URL that reaches the inhabitant through Squid. Both walls. CLI `hermetarium url <id>` prints `http://127.0.0.1:<port>/`.
+
+Two uses of that one server:
+
+1. **Call and wait.** Operator sends one HTTP request, waits until the inhabitant has finished handling it, reads the result (status, body). Echo: payload out equals payload in.
+2. **Talk to a running server.** The same process stays up. Operator can send further HTTP requests on the same URL. Echo still.
+
+Hello-world inhabitant is `examples/echo/`. Later examples replace that process with an agent that accepts commands.
+
+TLS and auth on this hop are not decided.
 
 ## 9. Lifecycle
 
-1. Supervisor creates a Hermetarium: image, wall, network path, I/O log.
-2. Inhabitants start inside and may mutate filesystem and packages.
-3. Supervisor talks to them only through the logged path.
+1. Supervisor creates a Hermetarium: image, wall, network path (in and out), I/O log.
+2. Inhabitant HTTP server starts inside and may mutate filesystem and packages.
+3. Operator talks to it only through the logged path (call-and-wait, or further requests to the running server).
 4. Destroy drops the wall (container or microVM). A snapshot keeps a mutated world.
 
 Whether instances are ephemeral or long-lived is not decided.

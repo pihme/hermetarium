@@ -68,6 +68,18 @@ func Run(args []string) int {
 		os.Stdout.WriteString(stdout)
 		os.Stderr.WriteString(stderr)
 		return code
+	case "url":
+		if len(rest) < 1 {
+			usage()
+			return 2
+		}
+		u, err := LoadInboundURL(root, rest[0])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println(u)
+		return 0
 	case "logs":
 		if len(rest) < 1 {
 			usage()
@@ -115,6 +127,7 @@ func flag(args []string, name, fallback string) string {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong
+       hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>
        hermetarium destroy <id>

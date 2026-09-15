@@ -15,10 +15,13 @@ const (
 	kernelURL = "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin"
 )
 
+const strongGuestIP = "172.16.0.2"
+
 type StrongInstance struct {
 	ID         string `json:"id"`
 	Wall       string `json:"wall"`
 	Helper     string `json:"helper"`
+	InboundURL string `json:"inboundUrl"`
 	LogPath    string `json:"logPath"`
 	SerialPath string `json:"serialPath"`
 	Dir        string `json:"dir"`
@@ -46,6 +49,10 @@ func download(url, dest string) error {
 }
 
 func EnsureStrongAssets(root string) (firecracker, kernel, rootfs string, err error) {
+	echoBin, err := EnsureEchoBinary(root)
+	if err != nil {
+		return "", "", "", err
+	}
 	tgz, err := cacheFile(root, "firecracker-"+fcVersion+"-x86_64.tgz")
 	if err != nil {
 		return "", "", "", err
@@ -82,7 +89,9 @@ func EnsureStrongAssets(root string) (firecracker, kernel, rootfs string, err er
 	stale := true
 	if st, err := os.Stat(rootfs); err == nil && st.Size() > 10_000 {
 		if sc, err := os.Stat(script); err == nil && !st.ModTime().Before(sc.ModTime()) {
-			stale = false
+			if eb, err := os.Stat(echoBin); err == nil && !st.ModTime().Before(eb.ModTime()) {
+				stale = false
+			}
 		}
 	}
 	if stale {
@@ -99,7 +108,7 @@ func EnsureStrongAssets(root string) (firecracker, kernel, rootfs string, err er
 }
 
 func CreateStrong(root, id string) (*StrongInstance, error) {
-	if err := EnsureSquidImage(root); err != nil {
+	if err := EnsureInhabitant(root); err != nil {
 		return nil, err
 	}
 	firecracker, kernel, rootfs, err := EnsureStrongAssets(root)
@@ -110,7 +119,7 @@ func CreateStrong(root, id string) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteSquidACL(root, dir); err != nil {
+	if err := WriteSquidACL(root, dir, strongGuestIP); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -151,9 +160,10 @@ func CreateStrong(root, id string) (*StrongInstance, error) {
 
 	if _, err := Docker(30*time.Second,
 		"run", "-d", "--name", helper,
-		"--privileged", "--network", "none",
+		"--privileged",
 		"--device", "/dev/kvm",
 		"--entrypoint", "sh",
+		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", rootfs+":/opt/rootfs.ext4",
@@ -165,8 +175,14 @@ func CreateStrong(root, id string) (*StrongInstance, error) {
 		return nil, err
 	}
 
+	hostPort, err := containerHostPort(helper, InboundPort)
+	if err != nil {
+		_ = DestroyStrong(id)
+		return nil, err
+	}
+	url := inboundURL(hostPort)
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", Helper: helper,
+		ID: id, Wall: "strong", Helper: helper, InboundURL: url,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
@@ -175,6 +191,14 @@ func CreateStrong(root, id string) (*StrongInstance, error) {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
+		_ = DestroyStrong(id)
+		return nil, err
+	}
+	if _, err := WaitStrongSerial(inst, 90*time.Second); err != nil {
+		_ = DestroyStrong(id)
+		return nil, err
+	}
+	if err := waitInbound(url, 20*time.Second); err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
 	}

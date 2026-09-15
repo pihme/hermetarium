@@ -9,13 +9,16 @@ import (
 )
 
 type squidConf struct {
-	ListenPort int
-	LogDir     string
-	ProbeHost  string
-	ProbePort  int
+	ListenPort   int
+	LogDir       string
+	ProbeHost    string
+	ProbePort    int
+	InboundPort  int
+	InhabitantIP string
+	EchoPort     int
 }
 
-func WriteSquidACL(root, hostLogDir string) error {
+func WriteSquidACL(root, hostLogDir, inhabitantIP string) error {
 	tmplPath := filepath.Join(root, "squid", "squid.conf.tmpl")
 	b, err := os.ReadFile(tmplPath)
 	if err != nil {
@@ -31,22 +34,19 @@ func WriteSquidACL(root, hostLogDir string) error {
 	}
 	defer out.Close()
 	return tmpl.Execute(out, squidConf{
-		ListenPort: SquidPort,
-		LogDir:     "/log",
-		ProbeHost:  ProbeHost,
-		ProbePort:  ProbePort,
+		ListenPort:   SquidPort,
+		LogDir:       "/log",
+		ProbeHost:    ProbeHost,
+		ProbePort:    ProbePort,
+		InboundPort:  InboundPort,
+		InhabitantIP: inhabitantIP,
+		EchoPort:     EchoPort,
 	})
 }
 
 func EnsureSquidImage(root string) error {
 	ctx := filepath.Join(root, "squid")
 	_, err := Docker(3*time.Minute, "build", "-t", SquidImage, ctx)
-	return err
-}
-
-func EnsureHelloImage(root string) error {
-	ctx := filepath.Join(root, "habitat-hello")
-	_, err := Docker(3*time.Minute, "build", "-t", HelloImage, ctx)
 	return err
 }
 

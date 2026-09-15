@@ -12,9 +12,11 @@ import (
 const ProbeHost = "probe.hermetarium.test"
 const ProbePort = 18080
 const SquidPort = 3128
+const InboundPort = 18081
+const EchoPort = 8080
 
 const SquidImage = "hermetarium-squid:local"
-const HelloImage = "hermetarium-hello:local"
+const EchoImage = "hermetarium-echo:local"
 
 func Root() (string, error) {
 	if r := os.Getenv("HERMETARIUM_ROOT"); r != "" {

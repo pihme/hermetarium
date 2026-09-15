@@ -2,35 +2,35 @@ package supervisor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 type WeakInstance struct {
-	ID      string `json:"id"`
-	Wall    string `json:"wall"`
-	Network string `json:"network"`
-	Gate    string `json:"gate"`
-	Box     string `json:"box"`
-	GateIP  string `json:"gateIp"`
-	BoxIP   string `json:"boxIp"`
-	LogPath string `json:"logPath"`
-	Dir     string `json:"dir"`
+	ID         string `json:"id"`
+	Wall       string `json:"wall"`
+	Network    string `json:"network"`
+	Gate       string `json:"gate"`
+	Box        string `json:"box"`
+	GateIP     string `json:"gateIp"`
+	BoxIP      string `json:"boxIp"`
+	InboundURL string `json:"inboundUrl"`
+	LogPath    string `json:"logPath"`
+	Dir        string `json:"dir"`
 }
 
 func CreateWeak(root, id string) (*WeakInstance, error) {
-	if err := EnsureHelloImage(root); err != nil {
-		return nil, err
-	}
-	if err := EnsureSquidImage(root); err != nil {
+	if err := EnsureInhabitant(root); err != nil {
 		return nil, err
 	}
 	dir, err := InstanceDir(root, id)
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteSquidACL(root, dir); err != nil {
+	sub := SubnetForID(id)
+	if err := WriteSquidACL(root, dir, sub.Box); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -40,7 +40,6 @@ func CreateWeak(root, id string) (*WeakInstance, error) {
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		return nil, err
 	}
-	sub := SubnetForID(id)
 	network := "htm-" + id
 	gate := "htm-gate-" + id
 	box := "htm-box-" + id
@@ -65,6 +64,7 @@ func CreateWeak(root, id string) (*WeakInstance, error) {
 		"--network", network, "--ip", sub.Gate,
 		"--cap-add", "NET_ADMIN",
 		"--sysctl", "net.ipv4.ip_forward=1",
+		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
 		"-v", dir+":/log",
 		SquidImage,
 	); err != nil {
@@ -85,7 +85,7 @@ func CreateWeak(root, id string) (*WeakInstance, error) {
 		"--network", network, "--ip", sub.Box,
 		"--cap-add", "NET_ADMIN",
 		"--add-host", ProbeHost+":"+sub.Gate,
-		HelloImage,
+		EchoImage,
 	); err != nil {
 		return nil, err
 	}
@@ -96,9 +96,19 @@ func CreateWeak(root, id string) (*WeakInstance, error) {
 		return nil, err
 	}
 
+	hostPort, err := containerHostPort(gate, InboundPort)
+	if err != nil {
+		return nil, err
+	}
+	url := inboundURL(hostPort)
+	if err := waitInbound(url, 20*time.Second); err != nil {
+		return nil, err
+	}
+
 	inst := &WeakInstance{
 		ID: id, Wall: "weak", Network: network, Gate: gate, Box: box,
-		GateIP: sub.Gate, BoxIP: sub.Box, LogPath: logPath, Dir: dir,
+		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url,
+		LogPath: logPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
 	if err != nil {

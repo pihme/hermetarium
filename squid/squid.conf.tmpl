@@ -3,25 +3,35 @@
 http_port 127.0.0.1:3129
 # Local probe origin is reverse-proxied (avoids intercept hairpin on TAP).
 http_port 0.0.0.0:80 accel defaultsite={{.ProbeHost}} vhost
+# Operator inbound: reverse-proxied to the inhabitant HTTP server.
+http_port 0.0.0.0:{{.InboundPort}} accel defaultsite=echo.hermetarium.test vhost
 http_port 0.0.0.0:{{.ListenPort}} intercept
 visible_hostname hermetarium
 pid_filename {{.LogDir}}/squid.pid
 coredump_dir /tmp
 cache_log {{.LogDir}}/cache.log
-access_log stdio:{{.LogDir}}/access.log squid
+logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp
+access_log stdio:{{.LogDir}}/access.log htm
 logfile_rotate 0
 shutdown_lifetime 1 seconds
 connect_timeout 2 seconds
 cache_effective_user squid
 dns_v4_first on
+cache deny all
 
 acl probe dstdomain {{.ProbeHost}}
 acl probe_dst dst 172.16.0.1
 acl probe_dst dst 127.0.0.1
+acl inbound myport {{.InboundPort}}
 cache_peer 127.0.0.1 parent {{.ProbePort}} 0 no-query no-digest originserver name=probeorigin
+cache_peer {{.InhabitantIP}} parent {{.EchoPort}} 0 no-query no-digest originserver name=inhabitant
+cache_peer_access inhabitant allow inbound
+cache_peer_access inhabitant deny all
+cache_peer_access probeorigin deny inbound
 cache_peer_access probeorigin allow all
 always_direct deny all
 never_direct allow all
+http_access allow inbound
 http_access allow probe
 http_access allow probe_dst
 http_access deny all

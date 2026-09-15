@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hermetarium/supervisor"
+	"hermetarium/tests/echo"
 )
 
 func TestHelloWorld(t *testing.T) {
@@ -56,6 +57,7 @@ func testWeak(t *testing.T, root string) {
 		t.Fatalf("weak I/O log missing probe destination in %s", inst.LogPath)
 	}
 	t.Log("weak wall: I/O log recorded traffic")
+	echo.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath)
 }
 
 func testStrong(t *testing.T, root string) {
@@ -111,6 +113,7 @@ func testStrong(t *testing.T, root string) {
 		t.Fatalf("strong I/O log missing probe in %s", inst.LogPath)
 	}
 	t.Log("strong wall: I/O log recorded traffic")
+	echo.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath)
 }
 
 func tail(s string, n int) string {

@@ -15,10 +15,11 @@ One directory per process:
 | Directory | Process |
 | --- | --- |
 | `supervisor/` | Go CLI that boots walls, writes the ACL file, maps Squid `access.log` |
-| `squid/` | Squid image (intercept proxy + probe origin) |
-| `habitat-hello/` | Inhabitant image used by the hello-world test |
+| `squid/` | Squid image (intercept proxy + probe origin + inbound reverse-proxy) |
+| `examples/echo/` | Inhabitant example: HTTP echo server (later examples will be agents) |
 | `firecracker-helper/` | Strong-wall helper: TAP + Squid + Firecracker (not the inhabitant) |
-| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log |
+| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo example |
+| `tests/echo/` | Shared checks for the echo example |
 
 Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
 
@@ -34,13 +35,16 @@ make test
 
 ```bash
 make build
-./bin/hermetarium create --wall weak
-./bin/hermetarium exec <id> -- uname -a
-./bin/hermetarium logs <id>
-./bin/hermetarium destroy <id>
+id=$(./bin/hermetarium create --wall weak)
+./bin/hermetarium url "$id"
+curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
+./bin/hermetarium logs "$id"
+./bin/hermetarium destroy "$id"
 ```
 
-`exec` is implemented for the weak wall only. `create --wall strong` and `logs` / `destroy` work for both. `make test` covers both walls.
+`url` is the host HTTP address that reaches the inhabitant **through Squid** (logged inbound). The default inhabitant is the echo example in `examples/echo/`: POST body comes back as the response body. The process stays up, so a second `curl` is the “running server” case.
+
+`create --wall strong` and `logs` / `destroy` / `url` work for both walls. `make test` covers both walls and the echo example.
 
 ## License
 

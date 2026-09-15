@@ -19,4 +19,9 @@ func TestParseSquidLine(t *testing.T) {
 	if !ok || rec.Allowed || rec.Destination != "example.com" {
 		t.Fatalf("denied %+v ok=%v", rec, ok)
 	}
+	in := "1757162698.123     4 172.17.0.1 TCP_MISS/200 4 POST http://127.0.0.1:18081/ - HIER_DIRECT/10.20.0.3 text/plain 18081"
+	rec, ok = ParseSquidLine(in)
+	if !ok || rec.Direction != "in" || rec.Method != "POST" || rec.Bytes != 4 {
+		t.Fatalf("inbound %+v ok=%v", rec, ok)
+	}
 }

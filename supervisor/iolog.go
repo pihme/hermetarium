@@ -55,9 +55,15 @@ func ParseSquidLine(line string) (Record, bool) {
 		}
 	}
 	status := f[3]
+	dir := "out"
+	if len(f) >= 11 {
+		if lp, err := strconv.Atoi(f[10]); err == nil && lp == InboundPort {
+			dir = "in"
+		}
+	}
 	return Record{
 		Time:        time.Unix(unix, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano),
-		Direction:   "out",
+		Direction:   dir,
 		Protocol:    "http",
 		Destination: dest,
 		Port:        port,
@@ -141,6 +147,19 @@ func LogHasDestination(path, host string) bool {
 	}
 	for _, r := range recs {
 		if r.Destination == host {
+			return true
+		}
+	}
+	return false
+}
+
+func LogHasDirection(path, dir string) bool {
+	recs, err := ReadIoLog(path)
+	if err != nil {
+		return false
+	}
+	for _, r := range recs {
+		if r.Direction == dir {
 			return true
 		}
 	}
