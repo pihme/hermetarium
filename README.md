@@ -5,6 +5,7 @@ Sealed habitat where agents live. They wake up inside an OCI image and may chang
 Not a tool an agent calls.
 
 - [SPEC.md](SPEC.md) — product spec
+- [USAGE.md](USAGE.md) — walls, Squid, logs, custom images, porter
 
 Supervisor: **Go** native binary. Logged path: **Squid** (spawned, per-habitat ACL file). CLI name is `hermetarium` in full; do not shorten to `herm`.
 
@@ -14,17 +15,17 @@ One directory per process:
 
 | Directory | Process |
 | --- | --- |
-| `supervisor/` | Go CLI that boots walls, writes the ACL file, maps Squid `access.log` |
-| `squid/` | Squid image (intercept proxy + probe origin + inbound reverse-proxy) |
-| `examples/echo/` | Tiny HTTP echo inhabitant |
 | `examples/agentd/` | Stand-in coding loop (not the official CLIs) |
 | `examples/claude-code/` etc. | Images that run **agentd** against that vendor’s API shape |
-| `porter/` | Carries operator HTTP turns to the official CLI (sits in the inhabitant image) |
-| `inhabitants/` | Images that install the **official** CLIs (`claude`, `grok`, `dsh`) plus `porter` |
+| `examples/echo/` | Tiny HTTP echo inhabitant |
 | `firecracker-helper/` | Strong-wall helper: TAP + Squid + Firecracker (not the inhabitant) |
-| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo |
-| `tests/echo/` | Shared echo checks |
+| `inhabitants/` | Images that install the **official** CLIs (`claude`, `grok`, `dsh`) plus `porter` |
+| `porter/` | Carries operator HTTP turns to the official CLI (sits in the inhabitant image) |
+| `squid/` | Squid image (intercept proxy + probe origin + inbound reverse-proxy) |
+| `supervisor/` | Go CLI that boots walls, writes the ACL file, maps Squid `access.log` |
 | `tests/claude-code/` etc. | **agentd** examples vs mock API (CI); live tagged |
+| `tests/echo/` | Shared echo checks |
+| `tests/hello-world/` | Both walls, fail-closed egress, probe, I/O log, echo |
 | `tests/inhabitants/` | Official CLIs present + HTTP front (CI); chat/root is live tagged |
 
 Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
@@ -48,7 +49,7 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 ./bin/hermetarium destroy "$id"
 ```
 
-`url` is the host HTTP address that reaches the inhabitant **through Squid** (logged inbound). The default inhabitant is the echo example in `examples/echo/`: POST body comes back as the response body. The process stays up, so a second `curl` is the “running server” case.
+`url` is the host HTTP address that reaches the inhabitant **through Squid** (logged inbound). The default inhabitant is the echo example in `examples/echo/`: POST body comes back as the response body. The process stays up, so a second `curl` is the “running server” case. More: [USAGE.md](USAGE.md).
 
 `create --wall strong` and `logs` / `destroy` / `url` work for both walls.
 
