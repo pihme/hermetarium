@@ -13,7 +13,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 ## How to work here
 
 - Layout is **one directory per process**: `supervisor/`, `squid/`, `firecracker-helper/`, plus `examples/` (stand-in loops), `inhabitants/` (official CLIs), `porter/` (HTTP adapter for those CLIs), and `tests/`.
-- **Supervisor is Go**: native binary, stdlib-first, `os/exec` Docker/Firecracker/Squid. Do not import their SDKs unless exec is proven insufficient. Do not rewrite the supervisor in TypeScript, Rust, JVM, .NET, or a WASM-only runtime.
+- **Supervisor is Go**: native binary, module `github.com/pihme/hermetarium`, stdlib-first, `os/exec` Docker/Firecracker/Squid. Do not import their SDKs unless exec is proven insufficient. Do not rewrite the supervisor in TypeScript, Rust, JVM, .NET, or a WASM-only runtime.
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
 - CLI name is `hermetarium` in full, never `herm`.
 - **TODO:** the `hermetarium` CLI still needs the repo tree (`HERMETARIUM_ROOT`: Squid template/image, Firecracker helper scripts). Do not pretend a GitHub Release binary is self-contained. Embed or ship those files later.

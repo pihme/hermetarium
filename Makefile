@@ -7,7 +7,7 @@ PVER := $(patsubst porter/v%,%,$(PVER))
 .PHONY: test test-live build tidy
 
 build:
-	$(GO) build -ldflags='-s -w -X hermetarium/supervisor.Version=$(HVER)' -o bin/hermetarium ./supervisor/cmd/hermetarium
+	$(GO) build -ldflags='-s -w -X github.com/pihme/hermetarium/supervisor.Version=$(HVER)' -o bin/hermetarium ./supervisor/cmd/hermetarium
 	$(GO) build -ldflags='-s -w -X main.Version=$(PVER)' -o bin/porter ./porter
 
 test:

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"hermetarium/supervisor"
-	"hermetarium/tests/harness"
+	"github.com/pihme/hermetarium/supervisor"
+	"github.com/pihme/hermetarium/tests/harness"
 )
 
 func TestOfficialCLIs(t *testing.T) {

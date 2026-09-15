@@ -1,11 +1,14 @@
 # Hermetarium
 
+[![CI](https://github.com/pihme/hermetarium/actions/workflows/ci.yml/badge.svg)](https://github.com/pihme/hermetarium/actions/workflows/ci.yml)
+
 Sealed habitat where agents live. They wake up inside an OCI image and may change that world freely. They cannot leave. Every packet in or out is logged on the wall.
 
 Not a tool an agent calls. The CLI name is `hermetarium` in full; do not shorten to `herm`.
 
 - [SPEC.md](SPEC.md) — product spec
 - [USAGE.md](USAGE.md) — walls, Squid, logs, custom images, porter
+- [CONTRIBUTING.md](CONTRIBUTING.md) — tests, commits, versions
 
 ## Pieces
 
@@ -23,11 +26,27 @@ The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facin
 
 Other trees: `firecracker-helper/` TAP + Squid + Firecracker for the strong wall; `tests/` for hello-world, agentd examples, and official-CLI smoke. Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
 
+## Install
+
+Needs Docker and Go 1.24+ on `PATH`. The strong wall also needs `/dev/kvm` and **x86_64**. First strong `create` or `make test` fetches Firecracker into `.cache/`. Firecracker runs in a privileged helper container; no host `sudo`.
+
+The supervisor still needs this repo (Squid template, Firecracker helper). A GitHub Release binary is not self-contained yet: keep a checkout of the **same tag** and set `HERMETARIUM_ROOT` at that tree.
+
+**From source**
+
+```bash
+git clone https://github.com/pihme/hermetarium.git
+cd hermetarium
+make build
+export HERMETARIUM_ROOT=$(pwd)   # if you run the binary from another directory
+./bin/hermetarium version
+```
+
+**From a release** (linux-amd64): [hermetarium releases](https://github.com/pihme/hermetarium/releases?q=hermetarium) and [porter releases](https://github.com/pihme/hermetarium/releases?q=porter). Download `hermetarium-linux-amd64`, `chmod +x`, and point `HERMETARIUM_ROOT` at a clone of that tag (`git checkout hermetarium/vX.Y.Z`). Porter is copied into inhabitant images, not run next to the supervisor.
+
+Go import path: `github.com/pihme/hermetarium`.
+
 ## Hello world
-
-Needs Docker and Go 1.24+ on `PATH`. The strong wall also needs `/dev/kvm` and **x86_64** (the downloaded Firecracker binary and kernel are x86_64). First strong `create` or `make test` fetches those into `.cache/`. Firecracker runs in a privileged helper container; no host `sudo`.
-
-If the binary is not run from this tree, set `HERMETARIUM_ROOT` to the repo root (the directory that contains `squid/` and `supervisor/`).
 
 ```bash
 make test

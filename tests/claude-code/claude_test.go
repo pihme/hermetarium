@@ -3,8 +3,8 @@ package claudecode
 import (
 	"testing"
 
-	"hermetarium/supervisor"
-	"hermetarium/tests/harness"
+	"github.com/pihme/hermetarium/supervisor"
+	"github.com/pihme/hermetarium/tests/harness"
 )
 
 func TestClaudeCode(t *testing.T) {

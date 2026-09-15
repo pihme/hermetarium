@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"hermetarium/supervisor"
-	"hermetarium/tests/echo"
+	"github.com/pihme/hermetarium/supervisor"
+	"github.com/pihme/hermetarium/tests/echo"
 )
 
 func TestHelloWorld(t *testing.T) {

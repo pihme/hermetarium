@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hermetarium/supervisor"
+	"github.com/pihme/hermetarium/supervisor"
 )
 
 func TestOfficialCLILive(t *testing.T) {

@@ -1,6 +1,6 @@
 # Usage
 
-Operator CLI is `hermetarium` in full. Build it from this tree:
+Operator CLI is `hermetarium` in full. See [README](README.md) for install. Build from this tree:
 
 ```bash
 make build

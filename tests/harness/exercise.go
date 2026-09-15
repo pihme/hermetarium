@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hermetarium/supervisor"
+	"github.com/pihme/hermetarium/supervisor"
 )
 
 // Exercise is the mock coding-agent check: two turns, root via bash, inbound log.

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"hermetarium/supervisor"
+	"github.com/pihme/hermetarium/supervisor"
 )
 
 func main() {

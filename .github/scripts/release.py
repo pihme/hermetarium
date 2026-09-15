@@ -29,7 +29,7 @@ COMPONENTS = [
             "go",
             "build",
             "-ldflags",
-            "-s -w -X hermetarium/supervisor.Version={ver}",
+            "-s -w -X github.com/pihme/hermetarium/supervisor.Version={ver}",
             "-o",
             "dist/hermetarium-linux-amd64",
             "./supervisor/cmd/hermetarium",

@@ -3,7 +3,7 @@ package echo
 import (
 	"testing"
 
-	"hermetarium/supervisor"
+	"github.com/pihme/hermetarium/supervisor"
 )
 
 // Exercise is the inbound echo example: one call-and-wait, then a second
