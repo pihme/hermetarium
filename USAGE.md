@@ -47,9 +47,43 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 
 ## Squid
 
-The supervisor copies `--acl FILE` to `var/<id>/squid.conf` and mounts that into the Squid container. Fail closed: if the file cannot be applied, create does not succeed.
+```bash
+./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf
+```
 
-Each habitat is a pair: Dockerfile plus `squid.conf` for the wall (`examples/echo/squid.conf`, `inhabitants/claude-code/squid.conf`, …). Vendor allowlists and API-key placeholders (`__VENDOR_PEER__`, `__VENDOR_KEY__`) live in that file. The inhabitant image must not hold the real key.
+`--acl FILE` is required. The supervisor copies that file to `var/<id>/squid.conf` and starts Squid with `-f /log/squid.conf`. The instance directory is bind-mounted at `/log` in the Squid container. Create fails closed if the file cannot be read or Squid will not start.
+
+`create` does not rewrite the file. If you use a habitat config that still contains `__VENDOR_PEER__` or `__VENDOR_KEY__`, substitute those yourself before passing `--acl`. The image must not hold the real key.
+
+Each example and inhabitant is a pair: Dockerfile plus `squid.conf` (`examples/echo/squid.conf`, `inhabitants/claude-code/squid.conf`, …). Copy one of those and edit the ACL. These settings are the wall contract; if they are wrong, `url`, `logs`, or intercept will not work.
+
+**Paths (instance dir = `/log`)**
+
+| Directive | Required value | Why |
+| --- | --- | --- |
+| (the file itself) | `/log/squid.conf` | `squid -N -f /log/squid.conf` |
+| `pid_filename` | `/log/squid.pid` | create waits until this file exists |
+| `access_log` | `stdio:/log/access.log …` | `hermetarium logs` reads this |
+| `cache_log` | `/log/cache.log` | Squid cache log on the host |
+
+**Ports and names**
+
+| Directive | Required value | Why |
+| --- | --- | --- |
+| `http_port` intercept | `0.0.0.0:3128 intercept` | iptables redirects box `:80` here |
+| `http_port` inbound | `0.0.0.0:18081 accel … vhost` | `hermetarium url` is this port on localhost |
+| extra `http_port` | e.g. `127.0.0.1:3129` | Squid 6 needs at least one non-intercept port |
+| `cache_peer` inhabitant | `inhabitant parent 8080 … originserver` | supervisor names the box `inhabitant`; it must listen on 8080 |
+| `cache_effective_user` | `proxy` | user in the Ubuntu Squid image |
+
+**I/O log format.** `hermetarium logs` parses Squid `access.log` as whitespace fields. Use this `logformat` (or keep the same field order) and attach it to `access_log`. The last token is the local port; 18081 is tagged `direction: in`.
+
+```
+logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp
+access_log stdio:/log/access.log htm
+```
+
+**Policy the wall assumes.** Default deny (`http_access deny all`). Inbound (`myport 18081`) reverse-proxies only to `inhabitant`. Box HTTP is intercepted, not a default route around Squid. `always_direct deny all` / `never_direct allow all` so allowlisted destinations go through `cache_peer`s. Vendor allowlists and header inject (`request_header_add x-api-key …`) are yours to add; see `examples/agentd/squid.conf` and `inhabitants/*/squid.conf`.
 
 ## Logs
 
