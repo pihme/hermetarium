@@ -101,7 +101,7 @@ func agentdOpts(root string, mock bool) (supervisor.CreateOpts, error) {
 	return supervisor.CreateOpts{
 		Image:     AgentdImage,
 		ACL:       acl,
-		AfterGate: extras(root, true, mock),
+		AfterGate: extras(root, false, mock),
 		MemMiB:    128,
 		DiskMB:    256,
 	}, nil
@@ -126,7 +126,7 @@ func inhabitantOpts(root, name string, mock bool) (supervisor.CreateOpts, error)
 	return supervisor.CreateOpts{
 		Image:     image,
 		ACL:       acl,
-		AfterGate: extras(root, true, mock),
+		AfterGate: extras(root, false, mock),
 		MemMiB:    2048,
 		DiskMB:    2048,
 	}, nil
