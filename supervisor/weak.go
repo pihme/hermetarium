@@ -38,11 +38,16 @@ func CreateWeakInhabitant(root, id, name string) (*WeakInstance, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown inhabitant %q", name)
 	}
+	ex.Probe = true
+	ex.UseMock = true
 	return CreateWeakEx(root, id, ex)
 }
 
 func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
 	if err := EnsureInhabitant(root, ex); err != nil {
+		return nil, err
+	}
+	if err := EnsureNetTools(root); err != nil {
 		return nil, err
 	}
 	dir, err := InstanceDir(root, id)
@@ -79,24 +84,20 @@ func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
 		}
 	}()
 
-	if _, err := Docker(30*time.Second,
-		"run", "-d", "--name", gate,
+	if err := runSquid(gate, dir, []string{
 		"--network", network, "--ip", sub.Gate,
-		"--cap-add", "NET_ADMIN",
 		"--sysctl", "net.ipv4.ip_forward=1",
 		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
-		"-v", dir+":/log",
-		SquidImage,
-	); err != nil {
+	}); err != nil {
 		return nil, err
 	}
-	if err := WaitSquid(gate, 20*time.Second); err != nil {
+	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	if _, err := Docker(15*time.Second,
-		"exec", gate, "sh", "-c",
-		"iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 3128",
-	); err != nil {
+	if err := applyIntercept(gate); err != nil {
+		return nil, err
+	}
+	if err := startTestGateExtras(root, id, gate, ex); err != nil {
 		return nil, err
 	}
 
@@ -152,6 +153,8 @@ func ExecWeak(inst *WeakInstance, argv []string) (stdout, stderr string, code in
 
 func DestroyWeak(id string) error {
 	DockerIgnore("rm", "-f", "htm-box-"+id)
+	DockerIgnore("rm", "-f", "htm-probe-"+id)
+	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	DockerIgnore("rm", "-f", "htm-gate-"+id)
 	DockerIgnore("network", "rm", "htm-"+id)
 	return nil

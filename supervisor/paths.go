@@ -15,35 +15,108 @@ const SquidPort = 3128
 const InboundPort = 18081
 const EchoPort = 8080
 
-const SquidImage = "hermetarium-squid:local"
+const SquidImage = "ubuntu/squid:6.6-24.04_beta"
+const AlpineImage = "alpine:3.20"
+const BusyboxImage = "busybox:1.36.1"
+const NetToolsImage = "hermetarium-nettools:local"
 const EchoImage = "hermetarium-echo:local"
 
-func Root() (string, error) {
+type layout struct {
+	data   string
+	cache  string
+	pinned bool // HERMETARIUM_ROOT or a checkout: cache is data/.cache
+}
+
+func lookupLayout() (layout, error) {
 	if r := os.Getenv("HERMETARIUM_ROOT"); r != "" {
-		return r, nil
+		return layout{data: r, cache: filepath.Join(r, ".cache"), pinned: true}, nil
 	}
+	if tree := findCheckout(); tree != "" {
+		return layout{data: tree, cache: filepath.Join(tree, ".cache"), pinned: true}, nil
+	}
+	data, err := xdgJoin("XDG_DATA_HOME", filepath.Join(".local", "share"))
+	if err != nil {
+		return layout{}, err
+	}
+	cache, err := xdgJoin("XDG_CACHE_HOME", ".cache")
+	if err != nil {
+		return layout{}, err
+	}
+	return layout{data: data, cache: cache, pinned: false}, nil
+}
+
+func findCheckout() string {
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return ""
 	}
 	for d := wd; ; d = filepath.Dir(d) {
-		if _, err := os.Stat(filepath.Join(d, "squid", "Dockerfile")); err == nil {
-			if _, err := os.Stat(filepath.Join(d, "supervisor")); err == nil {
-				return d, nil
-			}
+		if isCheckout(d) {
+			return d
 		}
 		if filepath.Dir(d) == d {
-			return "", fmt.Errorf("hermetarium root not found from %s (set HERMETARIUM_ROOT)", wd)
+			return ""
 		}
 	}
 }
 
+func isCheckout(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "squid", "squid.conf.tmpl")); err != nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "supervisor"))
+	return err == nil
+}
+
+func xdgJoin(env, homeRel string) (string, error) {
+	if v := os.Getenv(env); v != "" {
+		return filepath.Join(v, "hermetarium"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("hermetarium directory: %w (set HERMETARIUM_ROOT or %s)", err, env)
+	}
+	return filepath.Join(home, homeRel, "hermetarium"), nil
+}
+
+// Root is the data directory: var/<id>/ lives here.
+// HERMETARIUM_ROOT, else a checkout found from cwd, else XDG data home.
+func Root() (string, error) {
+	l, err := lookupLayout()
+	if err != nil {
+		return "", err
+	}
+	return l.data, nil
+}
+
 func CacheDir(root string) string {
+	l, err := lookupLayout()
+	if err == nil && !l.pinned && root == l.data {
+		return l.cache
+	}
 	return filepath.Join(root, ".cache")
 }
 
 func VarDir(root string) string {
 	return filepath.Join(root, "var")
+}
+
+func SquidTemplate(root string) (string, error) {
+	p := filepath.Join(root, "squid", "squid.conf.tmpl")
+	if _, err := os.Stat(p); err != nil {
+		return "", fmt.Errorf("squid ACL template not found at %s (need a hermetarium checkout or HERMETARIUM_ROOT)", p)
+	}
+	return p, nil
+}
+
+func sourceTree(root string) (string, error) {
+	if isCheckout(root) {
+		return root, nil
+	}
+	if d := findCheckout(); d != "" {
+		return d, nil
+	}
+	return "", fmt.Errorf("need the hermetarium source tree to build stock images (set HERMETARIUM_ROOT)")
 }
 
 func InstanceDir(root, id string) (string, error) {

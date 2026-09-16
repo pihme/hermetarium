@@ -5,10 +5,10 @@ Operator CLI is `hermetarium` in full. See [README](README.md) for install. Buil
 ```bash
 make build
 ./bin/hermetarium version
-export HERMETARIUM_ROOT=$(pwd)   # required today unless you run from this tree
+export HERMETARIUM_ROOT=$(pwd)   # if you run from another directory (locates squid.conf.tmpl and var/)
 ```
 
-The CLI still needs this repo (Squid template, Firecracker helper). A release binary is not self-contained yet.
+Firecracker helper scripts are embedded. Squid is a pulled image. `create` needs `squid/squid.conf.tmpl` (this tree or `HERMETARIUM_ROOT`). Without a checkout, `var/` is `~/.local/share/hermetarium/var/` and cache is `~/.cache/hermetarium`.
 
 Needs Docker and Go 1.24+. The **strong** wall also needs `/dev/kvm` and **x86_64**.
 
@@ -48,7 +48,7 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 
 ## Squid
 
-The supervisor writes a **per-habitat** ACL at `var/<id>/squid.conf` from `squid/squid.conf.tmpl` and starts Squid against it. Default deny. Fail closed: if that path cannot be applied, create does not succeed.
+The supervisor writes a **per-habitat** ACL at `var/<id>/squid.conf` from `squid/squid.conf.tmpl`, pulls a public Squid image, and runs it with that file mounted. Default deny. Fail closed: if that path cannot be applied, create does not succeed.
 
 Do not hand-edit a running `var/<id>/squid.conf` as the product interface. Change policy in the template (or the supervisor that fills it), then `create` a new habitat.
 
@@ -56,9 +56,10 @@ What the generated file does:
 
 - Intercept / reverse-proxy so the box has no default route except Squid.
 - Inbound: host `url` → Squid → inhabitant port 8080.
-- Probe allowlist: `probe.hermetarium.test`.
 - Vendor allowlist only if you passed `--vendor`: `claude.hermetarium.test`, `grok.hermetarium.test`, or `deepseek.hermetarium.test`. Direct public API hosts from the box stay denied.
-- Then Squid **replaces** `x-api-key` and `Authorization` with the supervisor secret (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, or `HERMETARIUM_DEEPSEEK_API_KEY`). Unset → mock key and mock origin. Set → live vendor over HTTPS from the gate.
+- Then Squid **replaces** `x-api-key` and `Authorization` with the supervisor secret (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, or `HERMETARIUM_DEEPSEEK_API_KEY`). Unset with `--vendor` → create fails closed. Set → live vendor over HTTPS from the gate.
+
+Hello-world tests add a probe origin (`probe.hermetarium.test`) as a sidecar, not as part of the Squid image.
 
 ```bash
 export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...   # supervisor process only

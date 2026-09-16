@@ -13,18 +13,22 @@ func echoBinary(root string) string {
 }
 
 func EnsureEchoBinary(root string) (string, error) {
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return "", err
+	}
 	dest := echoBinary(root)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", err
 	}
-	src := filepath.Join(root, "examples", "echo", "main.go")
+	src := filepath.Join(srcRoot, "examples", "echo", "main.go")
 	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
 		if sc, err := os.Stat(src); err == nil && !st.ModTime().Before(sc.ModTime()) {
 			return dest, nil
 		}
 	}
 	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", dest, "./examples/echo")
-	cmd.Dir = root
+	cmd.Dir = srcRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -50,16 +54,24 @@ func EnsureEchoImage(root string) error {
 	if err := os.WriteFile(dest, b, 0o755); err != nil {
 		return err
 	}
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return err
+	}
 	_, err = Docker(3*time.Minute, "build", "-t", EchoImage,
-		"-f", filepath.Join(root, "examples", "echo", "Dockerfile"),
+		"-f", filepath.Join(srcRoot, "examples", "echo", "Dockerfile"),
 		ctx,
 	)
 	return err
 }
 
 func EnsureAgentdBinary(root string) (string, error) {
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return "", err
+	}
 	dest := filepath.Join(CacheDir(root), "agentd")
-	src := filepath.Join(root, "examples", "agentd", "main.go")
+	src := filepath.Join(srcRoot, "examples", "agentd", "main.go")
 	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
 		if sc, err := os.Stat(src); err == nil && !st.ModTime().Before(sc.ModTime()) {
 			return dest, nil
@@ -69,7 +81,7 @@ func EnsureAgentdBinary(root string) (string, error) {
 		return "", err
 	}
 	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", dest, "./examples/agentd")
-	cmd.Dir = root
+	cmd.Dir = srcRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -100,14 +112,22 @@ func EnsureExampleImage(root string, ex Example) error {
 	if err := os.WriteFile(filepath.Join(ctx, "agentd"), b, 0o755); err != nil {
 		return err
 	}
-	df := filepath.Join(root, "examples", ex.Name, "Dockerfile")
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return err
+	}
+	df := filepath.Join(srcRoot, "examples", ex.Name, "Dockerfile")
 	_, err = Docker(3*time.Minute, "build", "-t", ex.Image, "-f", df, ctx)
 	return err
 }
 
 func EnsurePorterBinary(root string) (string, error) {
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return "", err
+	}
 	dest := filepath.Join(CacheDir(root), "porter-build", "porter")
-	src := filepath.Join(root, "porter", "main.go")
+	src := filepath.Join(srcRoot, "porter", "main.go")
 	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
 		if sc, err := os.Stat(src); err == nil && !st.ModTime().Before(sc.ModTime()) {
 			return dest, nil
@@ -117,7 +137,7 @@ func EnsurePorterBinary(root string) (string, error) {
 		return "", err
 	}
 	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", dest, "./porter")
-	cmd.Dir = root
+	cmd.Dir = srcRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -142,7 +162,11 @@ func EnsureOfficialImage(root string, ex Example) error {
 	if err := os.WriteFile(filepath.Join(ctx, "porter"), b, 0o755); err != nil {
 		return err
 	}
-	srcDir := filepath.Join(root, "inhabitants", ex.Name)
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return err
+	}
+	srcDir := filepath.Join(srcRoot, "inhabitants", ex.Name)
 	ents, err := os.ReadDir(srcDir)
 	if err != nil {
 		return err
@@ -181,5 +205,5 @@ func EnsureInhabitant(root string, ex Example) error {
 	} else if err := EnsureExampleImage(root, ex); err != nil {
 		return err
 	}
-	return EnsureSquidImage(root)
+	return nil
 }

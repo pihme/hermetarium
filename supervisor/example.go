@@ -1,6 +1,9 @@
 package supervisor
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 const (
 	ExampleEcho     = "echo"
@@ -37,29 +40,34 @@ type Example struct {
 	MemMiB     int
 	DiskMB     int
 	SkipBuild  bool // use Image as-is; do not build a stock tag
+	Probe      bool // test: allowlist probe.hermetarium.test and start the probe sidecar
+	UseMock    bool // test: if KeyEnv is unset, use the mock origin instead of fail-closed
 }
 
 func LookupExample(name string) (Example, bool) {
 	switch name {
 	case "", ExampleEcho:
-		return Example{Name: ExampleEcho, Image: EchoImage, Kind: "example", MemMiB: 128, DiskMB: 256}, true
+		return Example{Name: ExampleEcho, Image: EchoImage, Kind: "example", MemMiB: 128, DiskMB: 256, Probe: true}, true
 	case ExampleClaude:
 		return Example{
 			Name: ExampleClaude, Image: ClaudeImage, VendorHost: ClaudeHost,
 			KeyEnv: "HERMETARIUM_ANTHROPIC_API_KEY", Dialect: "anthropic",
 			LivePeer: "api.anthropic.com", LivePort: 443, Kind: "example", MemMiB: 128, DiskMB: 256,
+			Probe: true, UseMock: true,
 		}, true
 	case ExampleGrok:
 		return Example{
 			Name: ExampleGrok, Image: GrokImage, VendorHost: GrokHost,
 			KeyEnv: "HERMETARIUM_XAI_API_KEY", Dialect: "openai",
 			LivePeer: "api.x.ai", LivePort: 443, Kind: "example", MemMiB: 128, DiskMB: 256,
+			Probe: true, UseMock: true,
 		}, true
 	case ExampleDeepseek:
 		return Example{
 			Name: ExampleDeepseek, Image: DeepseekImage, VendorHost: DeepseekHost,
 			KeyEnv: "HERMETARIUM_DEEPSEEK_API_KEY", Dialect: "openai",
 			LivePeer: "api.deepseek.com", LivePort: 443, Kind: "example", MemMiB: 128, DiskMB: 256,
+			Probe: true, UseMock: true,
 		}, true
 	default:
 		return Example{}, false
@@ -91,14 +99,17 @@ func LookupInhabitant(name string) (Example, bool) {
 	}
 }
 
-func (e Example) Secret() (key string, live bool) {
+func (e Example) Secret() (key string, live bool, err error) {
 	if e.KeyEnv == "" {
-		return "", false
+		return "", false, nil
 	}
 	if v := os.Getenv(e.KeyEnv); v != "" {
-		return v, true
+		return v, true, nil
 	}
-	return TestVendorKey, false
+	if e.UseMock {
+		return TestVendorKey, false, nil
+	}
+	return "", false, fmt.Errorf("%s is unset (required for vendor %s)", e.KeyEnv, e.VendorHost)
 }
 
 func VendorHosts() []string {

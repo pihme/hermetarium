@@ -19,7 +19,7 @@ export HERMETARIUM_DEEPSEEK_API_KEY=...
 make test-live
 ```
 
-The CLI still needs this tree (`squid/`, `firecracker-helper/`). From another directory: `export HERMETARIUM_ROOT=/path/to/hermetarium`.
+Tests use this tree (`squid/squid.conf.tmpl`, `examples/`). Firecracker helper scripts are embedded. Squid is a pulled image. From another directory: `export HERMETARIUM_ROOT=/path/to/hermetarium`.
 
 ## Commits and versions
 

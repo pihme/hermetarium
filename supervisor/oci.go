@@ -27,7 +27,11 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	script := filepath.Join(root, "firecracker-helper", "pack-oci.sh")
+	helpers, err := fcHelperDir(root)
+	if err != nil {
+		return "", err
+	}
+	script := filepath.Join(helpers, "pack-oci.sh")
 	if st, err := os.Stat(dest); err == nil && st.Size() > 10_000 {
 		if sc, err := os.Stat(script); err == nil && !st.ModTime().Before(sc.ModTime()) {
 			return dest, nil

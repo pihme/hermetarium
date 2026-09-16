@@ -11,7 +11,7 @@ build:
 	$(GO) build -ldflags='-s -w -X main.Version=$(PVER)' -o bin/porter ./porter
 
 test:
-	$(GO) test ./supervisor ./examples/... ./porter ./tests/... -count=1 -p 1 -timeout 15m -v
+	$(GO) test ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/... -count=1 -p 1 -timeout 15m -v
 
 test-live:
 	$(GO) test -tags live ./tests/claude-code ./tests/grok-build ./tests/deepseek-harness ./tests/inhabitants -count=1 -p 1 -timeout 15m -v

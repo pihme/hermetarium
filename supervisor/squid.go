@@ -26,7 +26,10 @@ type squidConf struct {
 }
 
 func WriteSquidACL(root, hostLogDir, inhabitantIP string, ex Example) error {
-	tmplPath := filepath.Join(root, "squid", "squid.conf.tmpl")
+	tmplPath, err := SquidTemplate(root)
+	if err != nil {
+		return err
+	}
 	b, err := os.ReadFile(tmplPath)
 	if err != nil {
 		return err
@@ -43,14 +46,19 @@ func WriteSquidACL(root, hostLogDir, inhabitantIP string, ex Example) error {
 	cfg := squidConf{
 		ListenPort:   SquidPort,
 		LogDir:       "/log",
-		ProbeHost:    ProbeHost,
-		ProbePort:    ProbePort,
 		InboundPort:  InboundPort,
 		InhabitantIP: inhabitantIP,
 		EchoPort:     EchoPort,
 	}
+	if ex.Probe {
+		cfg.ProbeHost = ProbeHost
+		cfg.ProbePort = ProbePort
+	}
 	if ex.VendorHost != "" {
-		key, live := ex.Secret()
+		key, live, err := ex.Secret()
+		if err != nil {
+			return err
+		}
 		cfg.VendorHost = ex.VendorHost
 		cfg.VendorKey = key
 		if live {
@@ -65,9 +73,113 @@ func WriteSquidACL(root, hostLogDir, inhabitantIP string, ex Example) error {
 	return tmpl.Execute(out, cfg)
 }
 
+func EnsureSquidPulled() error {
+	return EnsureImageExists(SquidImage)
+}
+
+func EnsureNetTools(root string) error {
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err == nil {
+		return nil
+	}
+	dir := filepath.Join(CacheDir(root), "nettools-build")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iproute2\n"
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
+		return err
+	}
+	_, err := Docker(3*time.Minute, "build", "-t", NetToolsImage, dir)
+	return err
+}
+
+func runSquid(name, logDir string, extra []string) error {
+	if err := EnsureSquidPulled(); err != nil {
+		return err
+	}
+	args := []string{"run", "-d", "--name", name}
+	args = append(args, extra...)
+	args = append(args,
+		"-v", logDir+":/log",
+		"--entrypoint", "/usr/sbin/squid",
+		SquidImage,
+		"-N", "-f", "/log/squid.conf",
+	)
+	_, err := Docker(30*time.Second, args...)
+	return err
+}
+
+func applyIntercept(netns string) error {
+	_, err := Docker(30*time.Second, "run", "--rm",
+		"--network", "container:"+netns,
+		"--cap-add", "NET_ADMIN",
+		NetToolsImage,
+		"iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "80",
+		"-j", "REDIRECT", "--to-ports", "3128",
+	)
+	return err
+}
+
+func StartProbe(root, id, netns string) error {
+	if err := EnsureImageExists(BusyboxImage); err != nil {
+		return err
+	}
+	probeDir := filepath.Join(root, "tests", "probe")
+	_, err := Docker(30*time.Second,
+		"run", "-d", "--name", "htm-probe-"+id,
+		"--network", "container:"+netns,
+		"-v", probeDir+":/probe:ro",
+		BusyboxImage,
+		"httpd", "-f", "-p", "0.0.0.0:18080", "-h", "/probe",
+	)
+	return err
+}
+
+func StartVendorMock(root, id, netns string) error {
+	bin, err := EnsureVendorMock(root)
+	if err != nil {
+		return err
+	}
+	if err := EnsureImageExists(AlpineImage); err != nil {
+		return err
+	}
+	_, err = Docker(30*time.Second,
+		"run", "-d", "--name", "htm-mock-"+id,
+		"--network", "container:"+netns,
+		"-e", "MOCK_EXPECT_KEY="+TestVendorKey,
+		"-v", bin+":/usr/local/bin/vendor-mock:ro",
+		AlpineImage,
+		"/usr/local/bin/vendor-mock",
+	)
+	return err
+}
+
+func startTestGateExtras(root, id, netns string, ex Example) error {
+	if ex.Probe {
+		if err := StartProbe(root, id, netns); err != nil {
+			return err
+		}
+	}
+	if ex.VendorHost == "" {
+		return nil
+	}
+	_, live, err := ex.Secret()
+	if err != nil {
+		return err
+	}
+	if live {
+		return nil
+	}
+	return StartVendorMock(root, id, netns)
+}
+
 func EnsureVendorMock(root string) (string, error) {
+	srcRoot, err := sourceTree(root)
+	if err != nil {
+		return "", err
+	}
 	dest := filepath.Join(CacheDir(root), "vendor-mock")
-	src := filepath.Join(root, "examples", "vendor-mock", "main.go")
+	src := filepath.Join(srcRoot, "examples", "vendor-mock", "main.go")
 	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
 		if sc, err := os.Stat(src); err == nil && !st.ModTime().Before(sc.ModTime()) {
 			return dest, nil
@@ -77,7 +189,7 @@ func EnsureVendorMock(root string) (string, error) {
 		return "", err
 	}
 	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", dest, "./examples/vendor-mock")
-	cmd.Dir = root
+	cmd.Dir = srcRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -86,61 +198,34 @@ func EnsureVendorMock(root string) (string, error) {
 	return dest, nil
 }
 
-func EnsureSquidImage(root string) error {
-	bin, err := EnsureVendorMock(root)
-	if err != nil {
-		return err
-	}
-	b, err := os.ReadFile(bin)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(root, "squid", "vendor-mock"), b, 0o755); err != nil {
-		return err
-	}
-	ctx := filepath.Join(root, "squid")
-	_, err = Docker(3*time.Minute, "build", "-t", SquidImage, ctx)
-	return err
-}
-
-func WaitSquid(container string, timeout time.Duration) error {
+func WaitSquid(logDir, container string, timeout time.Duration) error {
+	pid := filepath.Join(logDir, "squid.pid")
 	deadline := time.Now().Add(timeout)
 	var last string
 	for time.Now().Before(deadline) {
 		out, err := Docker(5*time.Second, "inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", container)
 		if err == nil && !strings.Contains(out, "true") {
 			logs, _ := Docker(5*time.Second, "logs", container)
-			return errWait("squid container exited: " + out + "\n" + logs + "\n" + dockerCopy(container, "/log/cache.log"))
+			return errWait("squid container exited: " + out + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 		}
-		_, stderr, code := DockerExec(5*time.Second, "exec", container, "test", "-f", "/log/squid.pid")
-		if code == 0 {
-			_, _, _ = DockerExec(5*time.Second, "exec", container, "chmod", "a+r", "/log/access.log", "/log/cache.log")
+		if _, err := os.Stat(pid); err == nil {
+			chmodLogs(logDir)
 			return nil
 		}
-		last = stderr
+		last = "waiting for " + pid
 		time.Sleep(200 * time.Millisecond)
 	}
 	logs, _ := Docker(5*time.Second, "logs", container)
-	return errWait("squid not ready: " + last + "\n" + logs)
+	return errWait("squid not ready: " + last + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 }
 
-type waitError string
+func chmodLogs(logDir string) {
+	DockerIgnore("run", "--rm", "-v", logDir+":/log", NetToolsImage,
+		"chmod", "a+r", "/log/access.log", "/log/cache.log")
+}
 
-func (e waitError) Error() string { return string(e) }
-
-func errWait(s string) error { return waitError(s) }
-
-func dockerCopy(container, src string) string {
-	tmp, err := os.CreateTemp("", "htm-copy-")
-	if err != nil {
-		return ""
-	}
-	tmp.Close()
-	defer os.Remove(tmp.Name())
-	if _, err := Docker(5*time.Second, "cp", container+":"+src, tmp.Name()); err != nil {
-		return ""
-	}
-	b, err := os.ReadFile(tmp.Name())
+func tailHostFile(path string) string {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -149,3 +234,9 @@ func dockerCopy(container, src string) string {
 	}
 	return string(b)
 }
+
+type waitError string
+
+func (e waitError) Error() string { return string(e) }
+
+func errWait(s string) error { return waitError(s) }

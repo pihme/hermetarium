@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	fchelper "github.com/pihme/hermetarium/firecracker-helper"
 )
 
 const (
@@ -33,6 +35,14 @@ func cacheFile(root, name string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, name), nil
+}
+
+func fcHelperDir(root string) (string, error) {
+	dir := filepath.Join(CacheDir(root), "firecracker-helper")
+	if err := fchelper.Extract(dir); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 func download(url, dest string) error {
@@ -97,11 +107,16 @@ func CreateStrongInhabitant(root, id, name string) (*StrongInstance, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown inhabitant %q", name)
 	}
+	ex.Probe = true
+	ex.UseMock = true
 	return CreateStrongEx(root, id, ex)
 }
 
 func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 	if err := EnsureInhabitant(root, ex); err != nil {
+		return nil, err
+	}
+	if err := EnsureNetTools(root); err != nil {
 		return nil, err
 	}
 	firecracker, kernel, err := EnsureStrongAssets(root)
@@ -128,7 +143,11 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 		return nil, err
 	}
 	helper := "htm-fc-" + id
-	helperScript := filepath.Join(root, "firecracker-helper", "entrypoint.sh")
+	helpers, err := fcHelperDir(root)
+	if err != nil {
+		return nil, err
+	}
+	helperScript := filepath.Join(helpers, "entrypoint.sh")
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
@@ -166,9 +185,23 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 		"-v", rootfs+":/opt/rootfs.ext4",
 		"-v", helperScript+":/fc-helper.sh:ro",
 		"-v", dir+":/log",
-		SquidImage,
+		NetToolsImage,
 		"/fc-helper.sh",
 	); err != nil {
+		return nil, err
+	}
+
+	gate := "htm-gate-" + id
+	if err := startTestGateExtras(root, id, helper, ex); err != nil {
+		_ = DestroyStrong(id)
+		return nil, err
+	}
+	if err := runSquid(gate, dir, []string{"--network", "container:" + helper}); err != nil {
+		_ = DestroyStrong(id)
+		return nil, err
+	}
+	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
+		_ = DestroyStrong(id)
 		return nil, err
 	}
 
@@ -191,11 +224,7 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if _, err := WaitStrongSerial(inst, 90*time.Second); err != nil {
-		_ = DestroyStrong(id)
-		return nil, err
-	}
-	if err := waitInbound(url, 20*time.Second); err != nil {
+	if err := waitInbound(url, 40*time.Second); err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
 	}
@@ -245,6 +274,9 @@ func extraFC(inst *StrongInstance) string {
 }
 
 func DestroyStrong(id string) error {
+	DockerIgnore("rm", "-f", "htm-probe-"+id)
+	DockerIgnore("rm", "-f", "htm-mock-"+id)
+	DockerIgnore("rm", "-f", "htm-gate-"+id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)
 	return nil
 }

@@ -16,7 +16,7 @@ Not a tool an agent calls. The CLI name is `hermetarium` in full; do not shorten
 
 The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facing command. It creates a habitat: picks a wall (weak Docker/`runc` or strong Firecracker), writes a per-habitat ACL, starts Squid, publishes a localhost URL into the box, and maps Squid’s access log into the I/O log. It talks to Docker, Firecracker, and Squid as processes (`os/exec`), not via their SDKs.
 
-**Squid** (`squid/`) is the logged path. It runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Default deny. Inbound operator HTTP and outbound inhabitant traffic both go through it. For `--vendor claude|grok|deepseek` it allowlists that vendor host and injects the supervisor-held API key; the image never gets the real secret.
+**Squid** is the logged path. The supervisor pulls a public Squid image and mounts a per-habitat ACL from `squid/squid.conf.tmpl`. Squid runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Default deny. Inbound operator HTTP and outbound inhabitant traffic both go through it. For `--vendor claude|grok|deepseek` it allowlists that vendor host and injects the supervisor-held API key; the image never gets the real secret. If that key is unset, create fails closed.
 
 **Porter** (`porter/`) is a small HTTP adapter that lives *inside* the inhabitant image, not next to the supervisor. It listens on TCP 8080, which is what `hermetarium url` reverse-proxies to. Each operator POST is one CLI turn (`claude`, `grok`, or `dsh`); later POSTs continue the same session. You can omit porter and serve HTTP on 8080 yourself (the echo example does).
 
@@ -24,13 +24,13 @@ The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facin
 
 `examples/` is the test stand-in, not those products. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` plus `examples/claude-code/` (and grok/deepseek) run a small Go tool loop against a mock Messages/Chat API so CI can prove walls, keys, and uid 0 without a live model. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
 
-Other trees: `firecracker-helper/` TAP + Squid + Firecracker for the strong wall; `tests/` for hello-world, agentd examples, and official-CLI smoke. Instance state is `var/<id>/`. Firecracker assets cache in `.cache/`. Both are gitignored.
+Other trees: `firecracker-helper/` TAP + Firecracker for the strong wall (scripts are embedded); `tests/` for hello-world, agentd examples, and official-CLI smoke. Instance state is `var/<id>/` under the data root (this checkout, `HERMETARIUM_ROOT`, or `~/.local/share/hermetarium`). Firecracker assets cache in `.cache/` under the checkout, or `~/.cache/hermetarium` off-tree.
 
 ## Install
 
-Needs Docker and Go 1.24+ on `PATH`. The strong wall also needs `/dev/kvm` and **x86_64**. First strong `create` or `make test` fetches Firecracker into `.cache/`. Firecracker runs in a privileged helper container; no host `sudo`.
+Needs Docker and Go 1.24+ on `PATH`. The strong wall also needs `/dev/kvm` and **x86_64**. First strong `create` or `make test` fetches Firecracker into the cache dir. Firecracker runs in a privileged helper container; no host `sudo`.
 
-The supervisor still needs this repo (Squid template, Firecracker helper). A GitHub Release binary is not self-contained yet: keep a checkout of the **same tag** and set `HERMETARIUM_ROOT` at that tree.
+Firecracker helper scripts are embedded. Squid is a pulled image. `create` still needs `squid/squid.conf.tmpl` on disk (this checkout or `HERMETARIUM_ROOT`). Off-tree, instance state is `~/.local/share/hermetarium/var/` and cache is `~/.cache/hermetarium` unless you set `HERMETARIUM_ROOT`.
 
 **From source**
 
@@ -38,11 +38,10 @@ The supervisor still needs this repo (Squid template, Firecracker helper). A Git
 git clone https://github.com/pihme/hermetarium.git
 cd hermetarium
 make build
-export HERMETARIUM_ROOT=$(pwd)   # if you run the binary from another directory
 ./bin/hermetarium version
 ```
 
-**From a release** (linux-amd64): [hermetarium releases](https://github.com/pihme/hermetarium/releases?q=hermetarium) and [porter releases](https://github.com/pihme/hermetarium/releases?q=porter). Download `hermetarium-linux-amd64`, `chmod +x`, and point `HERMETARIUM_ROOT` at a clone of that tag (`git checkout hermetarium/vX.Y.Z`). Porter is copied into inhabitant images, not run next to the supervisor.
+**From a release** (linux-amd64): [hermetarium releases](https://github.com/pihme/hermetarium/releases?q=hermetarium) and [porter releases](https://github.com/pihme/hermetarium/releases?q=porter). Download `hermetarium-linux-amd64`, `chmod +x`, and point `HERMETARIUM_ROOT` at a clone of that tag (`git checkout hermetarium/vX.Y.Z`) so `create` can read `squid/squid.conf.tmpl`. Porter is copied into inhabitant images, not run next to the supervisor.
 
 Go import path: `github.com/pihme/hermetarium`.
 
