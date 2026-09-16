@@ -18,7 +18,7 @@ The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facin
 
 **Squid** is the logged path. The supervisor pulls a public Squid image and mounts the ACL you pass with `--acl`. Squid runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Each example and inhabitant ships its wall config next to its Dockerfile.
 
-**Porter** (`porter/`) is a small HTTP adapter that lives *inside* the inhabitant image, not next to the supervisor. It listens on TCP 8080, which is what `hermetarium url` reverse-proxies to. Each operator POST is one CLI turn (`claude`, `grok`, or `dsh`); later POSTs continue the same session. You can omit porter and serve HTTP on 8080 yourself (the echo example does).
+**Porter** (`porter/`) is a small HTTP adapter that lives *inside* the inhabitant image, not next to the supervisor. It listens on TCP 8080, which is what `hermetarium url` reverse-proxies to. Each operator POST is one CLI turn (`claude`, `grok`, or `dsh`); later POSTs continue the same session for `claude`/`grok` (`--continue`). DeepSeek Harness's `headless` profile has no resume flag, so each `dsh` turn is an independent one-shot task, not a continued session. You can omit porter and serve HTTP on 8080 yourself (the echo example does).
 
 **Inhabitants** (`inhabitants/`) are Dockerfiles for official coding CLIs: Claude Code, Grok Build, DeepSeek Harness. They run as **root**, install the real binary, set dummy boot keys and vendor base URLs, and `CMD` porter. They are templates. Build an image, then `create --image <tag> --acl FILE`. The ACL file is where vendor allowlists and key inject live.
 

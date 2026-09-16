@@ -133,7 +133,7 @@ Shared with those inhabitants:
 
 - Same OCI image on **both** walls. Runs as **root** inside the image (guest root on the strong wall).
 - HTTP server that **stays up** and holds **one open session** for the life of the habitat.
-- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. A later POST is the next turn in the **same** session (not a new process per message).
+- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. For Claude Code and Grok Build, a later POST is the next turn in the **same** session (not a new process per message). DeepSeek Harness's `headless` profile has no resume flag, so each of its turns is an independent one-shot task.
 - Model “home” uses §8. Direct vendor API from the box is denied.
 - No SSE/WebSocket. A turn is still call-and-wait.
 - The operator path is this HTTP server, not a harness TUI or local web UI.

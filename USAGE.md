@@ -159,13 +159,13 @@ The stock bases are `debian:bookworm-slim` and `node:22-bookworm-slim`. You can 
 
 **Docker-in-Docker.** Start from a dind-capable image (for example `docker:24-dind` or Debian plus Docker Engine). Install the CLI and porter on top. The engine inside the box typically needs cgroup access (`--privileged` on the **box**, or the right cgroup mounts). The supervisor’s weak wall today only adds `NET_ADMIN` to the box, not `--privileged` and not the **host** Docker socket. Do not mount the host Docker socket into the habitat (that is a hole in the wall). Nested Docker on the **strong** wall is a poor fit: Firecracker’s guest kernel is old and small; dind wants a modern kernel and a lot of RAM.
 
-**Kubernetes-in-Docker (KinD and similar).** Same story: the image can contain `kind` / `k3s` / `minikube`, but those want privileged, nested cgroups, and gigabytes of memory. Prefer the **weak** wall, extra capabilities you add in the supervisor if you take that on, and a larger Firecracker `mem_size_mib` / disk if you insist on strong. The stock strong wall is 128 MiB for echo and 2 GiB for official CLIs — KinD needs more.
+**Kubernetes-in-Docker (KinD and similar).** Same story: the image can contain `kind` / `k3s` / `minikube`, but those want privileged, nested cgroups, and gigabytes of memory. Prefer the **weak** wall, extra capabilities you add in the supervisor if you take that on, and a larger Firecracker `mem_size_mib` / disk if you insist on strong. `create --wall strong` itself defaults to 512 MiB / 1 GiB disk (see above); the test suite asks for less for the echo/agentd examples (128 MiB) and more for the official-CLI inhabitants (2 GiB) by passing explicit sizes — KinD needs more still.
 
 **Kernel vs userspace.** Strong wall boots the OCI root filesystem on the Firecracker kernel (currently 4.14). A base that needs systemd, cgroup v2, or a new glibc syscall may run on weak and fail on strong. Try weak first.
 
 ## Porter in a custom image
 
-Porter is a small Go binary: listen on `:8080`, exec `claude` / `grok` / `dsh` for each POST, `--continue` after the first turn.
+Porter is a small Go binary: listen on `:8080`, exec `claude` / `grok` / `dsh` for each POST. `claude` and `grok` get `--continue` after the first turn. `dsh --profile headless` has no resume flag (it answers one task and exits), so each `dsh` turn runs standalone, not as a continuation of the prior one.
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
