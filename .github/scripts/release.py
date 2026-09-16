@@ -19,7 +19,6 @@ COMPONENTS = [
         "tag_prefix": "hermetarium/v",
         "paths": [
             "supervisor/",
-            "squid/",
             "firecracker-helper/",
             "go.mod",
             "Makefile",

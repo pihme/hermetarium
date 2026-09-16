@@ -20,14 +20,22 @@ func CreateWeakAgentd(root, id string, mock bool) (*supervisor.WeakInstance, err
 	if err := EnsureAgentdImage(root); err != nil {
 		return nil, err
 	}
-	return supervisor.CreateWeak(root, id, agentdOpts(root, mock))
+	opts, err := agentdOpts(root, mock)
+	if err != nil {
+		return nil, err
+	}
+	return supervisor.CreateWeak(root, id, opts)
 }
 
 func CreateStrongAgentd(root, id string, mock bool) (*supervisor.StrongInstance, error) {
 	if err := EnsureAgentdImage(root); err != nil {
 		return nil, err
 	}
-	return supervisor.CreateStrong(root, id, agentdOpts(root, mock))
+	opts, err := agentdOpts(root, mock)
+	if err != nil {
+		return nil, err
+	}
+	return supervisor.CreateStrong(root, id, opts)
 }
 
 func CreateWeakInhabitant(root, id, name string, mock bool) (*supervisor.WeakInstance, error) {

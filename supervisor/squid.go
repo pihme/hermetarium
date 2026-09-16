@@ -1,72 +1,22 @@
 package supervisor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 )
 
-type squidConf struct {
-	ListenPort   int
-	LogDir       string
-	ProbeHost    string
-	ProbePort    int
-	InboundPort  int
-	InhabitantIP string
-	EchoPort     int
-	VendorHost   string
-	VendorPeer   string
-	VendorPort   int
-	VendorSSL    bool
-	VendorKey    string
-}
-
-func WriteSquidACL(root, hostLogDir, inhabitantIP string, opts CreateOpts) error {
-	tmplPath, err := SquidTemplate(root)
+func InstallACL(dir, src string) error {
+	if src == "" {
+		return fmt.Errorf("create requires an ACL file (--acl)")
+	}
+	b, err := os.ReadFile(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("read ACL %s: %w", src, err)
 	}
-	b, err := os.ReadFile(tmplPath)
-	if err != nil {
-		return err
-	}
-	tmpl, err := template.New("squid").Parse(string(b))
-	if err != nil {
-		return err
-	}
-	out, err := os.Create(filepath.Join(hostLogDir, "squid.conf"))
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	cfg := squidConf{
-		ListenPort:   SquidPort,
-		LogDir:       "/log",
-		InboundPort:  InboundPort,
-		InhabitantIP: inhabitantIP,
-		EchoPort:     EchoPort,
-	}
-	if opts.ProbeHost != "" {
-		cfg.ProbeHost = opts.ProbeHost
-		cfg.ProbePort = opts.ProbePort
-		if cfg.ProbePort == 0 {
-			cfg.ProbePort = ProbePort
-		}
-	}
-	if opts.VendorHost != "" {
-		peer, port, ssl, key, err := opts.vendorPeer()
-		if err != nil {
-			return err
-		}
-		cfg.VendorHost = opts.VendorHost
-		cfg.VendorPeer = peer
-		cfg.VendorPort = port
-		cfg.VendorSSL = ssl
-		cfg.VendorKey = key
-	}
-	return tmpl.Execute(out, cfg)
+	return os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644)
 }
 
 func EnsureSquidPulled() error {

@@ -2,6 +2,7 @@ package helloworld
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -32,7 +33,9 @@ func testArbitraryImage(t *testing.T, root string) {
 	}
 	t.Logf("arbitrary --image %s create %s", harness.EchoImage, id)
 	inst, err := supervisor.CreateWeak(root, id, supervisor.CreateOpts{
-		Image: harness.EchoImage, MemMiB: 128, DiskMB: 256,
+		Image:  harness.EchoImage,
+		ACL:    filepath.Join(root, "examples", "echo", "squid.conf"),
+		MemMiB: 128, DiskMB: 256,
 	})
 	if err != nil {
 		t.Fatal(err)

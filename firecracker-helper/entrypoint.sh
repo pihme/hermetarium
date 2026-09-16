@@ -14,6 +14,7 @@ iptables -P FORWARD DROP
 # Probe hits 172.16.0.1:80 (accel). Everything else on :80 is intercepted.
 iptables -t nat -A PREROUTING -s 172.16.0.0/24 -p tcp --dport 80 ! -d 172.16.0.1 -j REDIRECT --to-ports 3128
 
+printf '172.16.0.2 inhabitant\n' >> /etc/hosts
 mkdir -p /log
 i=0
 while [ "$i" -lt 200 ]; do

@@ -90,7 +90,7 @@ func EnsureOfficialImage(root, name, image string) error {
 		return err
 	}
 	for _, e := range ents {
-		if e.IsDir() || e.Name() == "Dockerfile" {
+		if e.IsDir() || e.Name() == "Dockerfile" || e.Name() == "squid.conf" {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(srcDir, e.Name()))

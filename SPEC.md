@@ -61,13 +61,13 @@ Operator and outside network both reach that inhabitant only through Squid. Ther
 - Do not mount the operator’s home directory, SSH keys, or host Docker socket unless that is an explicit, logged choice.
 - Root inside the image is allowed. On the weak wall, a kernel exploit is a host exploit. On the strong wall, root is only guest root.
 
-Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI image) and `--wall weak|strong`. Optional `--vendor claude|grok|deepseek` is the Squid allowlist and key inject, not an image name.
+Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI image), `--wall weak|strong`, and `--acl FILE` (Squid config mounted into the gate).
 
 ## 7. Network and logging
 
 - No default route except Squid. Setting `HTTP_PROXY` inside the image is not the wall.
 - Fail closed: if the route, firewall, or Squid cannot be applied, do not start.
-- The supervisor **writes a per-habitat ACL file** (default deny, allowlisted destinations only) and starts Squid against it. Squid stays a **sibling process** (GPLv2). The supervisor does not link Squid.
+- The supervisor **installs an operator-supplied Squid ACL** (`create --acl FILE`, copied to `var/<id>/squid.conf`) and starts Squid against it. Squid stays a **sibling process** (GPLv2). The supervisor does not link Squid. Each example and inhabitant ships its wall config next to its Dockerfile.
 - I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, bytes, allowed or denied. Packet bodies are off unless turned on.
 - Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path. Fail closed on inbound the same as outbound: if the path cannot be applied, do not start.
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
@@ -85,25 +85,24 @@ Rust was the alternative. It is not smaller here: even a thin supervisor needs `
 
 ## 8. Secrets
 
-Secrets live only on the supervisor. The supervisor attaches them on the logged path for allowlisted destinations (header inject/replace in Squid). The inhabitant image, filesystem, and process environment must not contain the real secret. If the inhabitant sends its own `x-api-key` or `Authorization`, Squid **replaces** those headers. Direct access from the box to the real vendor origin is denied.
+Secrets must not live in the inhabitant image, filesystem, or process environment. They belong in the **host-side ACL file** passed to `create --acl` (header inject/replace in Squid). If the inhabitant sends its own `x-api-key` or `Authorization`, that ACL should replace those headers. Direct access from the box to the real vendor origin is denied.
 
 Secrets-in-image is decided: no. This is **not** TLS interception of inhabitant traffic. The inhabitant speaks HTTP to the path; Squid is the HTTPS client to the vendor.
 
 How a credentialed destination is attached:
 
-- Supervisor reads the key from its environment (see table).
-- It writes that key only into the per-habitat Squid config on the **gate** (the box never mounts that file).
+- The operator’s Squid config allowlists the path and contains the credential headers.
+- That file is copied into `var/<id>/squid.conf` on the **gate** (the box never mounts it).
 - The inhabitant is pointed at an HTTP host on the logged path. It may have no key, or a non-secret placeholder so the program will start.
 - Squid reverse-proxies that host to the vendor over HTTPS and sets the real credential header.
-- The ACL allowlists that path only.
 
-| Vendor | Supervisor env | Inhabitant origin (HTTP on the path) |
-| --- | --- | --- |
-| Anthropic | `HERMETARIUM_ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL` |
-| xAI | `HERMETARIUM_XAI_API_KEY` | `GROK_CLI_CHAT_PROXY_BASE_URL` (or Grok `config.toml` `base_url`) |
-| DeepSeek | `HERMETARIUM_DEEPSEEK_API_KEY` | DeepSeek / OpenAI-compatible base URL |
+| Vendor | Typical inhabitant origin (HTTP on the path) |
+| --- | --- |
+| Anthropic | `ANTHROPIC_BASE_URL` |
+| xAI | `GROK_CLI_CHAT_PROXY_BASE_URL` (or Grok `config.toml` `base_url`) |
+| DeepSeek | DeepSeek / OpenAI-compatible base URL |
 
-If a habitat’s ACL includes a credentialed destination and the supervisor has no key for it, fail closed (do not start). Tests: mock suite uses a test key only the mock origin accepts; live suite feeds the matching supervisor env var.
+Fail closed if `--acl` is missing or Squid cannot start. Tests: mock suite ships ACLs with a test key only the mock origin accepts; live suite substitutes a real key into a live ACL file.
 
 ## 9. Inhabitants
 

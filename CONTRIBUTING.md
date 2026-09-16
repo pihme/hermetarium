@@ -19,7 +19,7 @@ export HERMETARIUM_DEEPSEEK_API_KEY=...
 make test-live
 ```
 
-Tests use this tree (`squid/squid.conf.tmpl`, `examples/`). Firecracker helper scripts are embedded. Squid is a pulled image. From another directory: `export HERMETARIUM_ROOT=/path/to/hermetarium`.
+Tests use this tree (`examples/`, `inhabitants/`). Firecracker helper scripts are embedded. Squid is a pulled image. From another directory: `export HERMETARIUM_ROOT=/path/to/hermetarium`.
 
 ## Commits and versions
 
@@ -34,7 +34,7 @@ Two artifacts, tagged independently:
 
 | Artifact | Tag | Bumped when the commit touches |
 | --- | --- | --- |
-| hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `squid/`, `firecracker-helper/`, `go.mod`, `Makefile` |
+| hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile` |
 | porter | `porter/vX.Y.Z` | `porter/` |
 
 A commit that only changes docs, tests, examples, or inhabitants does not cut a release. After CI on `main`, `.github/scripts/release.py` creates the GitHub Release and attaches a linux-amd64 binary.

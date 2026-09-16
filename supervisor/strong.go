@@ -109,7 +109,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteSquidACL(root, dir, strongGuestIP, opts); err != nil {
+	if err := InstallACL(dir, opts.ACL); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {

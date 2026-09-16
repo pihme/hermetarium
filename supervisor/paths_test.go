@@ -50,11 +50,6 @@ func TestRootXDGWhenNoCheckout(t *testing.T) {
 	if CacheDir(root) != filepath.Join(cacheHome, "hermetarium") {
 		t.Fatalf("cache %s", CacheDir(root))
 	}
-	if _, err := SquidTemplate(root); err == nil {
-		t.Fatal("expected missing template")
-	} else if !strings.Contains(err.Error(), "squid ACL template not found") {
-		t.Fatal(err)
-	}
 }
 
 func TestCacheDirExplicitRoot(t *testing.T) {
@@ -64,10 +59,10 @@ func TestCacheDirExplicitRoot(t *testing.T) {
 	}
 }
 
-func TestWriteSquidACLMissingTemplate(t *testing.T) {
+func TestInstallACLMissingFile(t *testing.T) {
 	dir := t.TempDir()
-	err := WriteSquidACL(dir, dir, "10.20.0.3", CreateOpts{})
-	if err == nil || !strings.Contains(err.Error(), "squid ACL template not found") {
+	err := InstallACL(dir, filepath.Join(dir, "missing.conf"))
+	if err == nil || !strings.Contains(err.Error(), "read ACL") {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -33,7 +33,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		return nil, err
 	}
 	sub := SubnetForID(id)
-	if err := WriteSquidACL(root, dir, sub.Box, opts); err != nil {
+	if err := InstallACL(dir, opts.ACL); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -64,6 +64,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	if err := runSquid(gate, dir, []string{
 		"--network", network, "--ip", sub.Gate,
+		"--add-host", "inhabitant:" + sub.Box,
 		"--sysctl", "net.ipv4.ip_forward=1",
 		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
 	}); err != nil {

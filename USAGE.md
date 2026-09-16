@@ -5,10 +5,10 @@ Operator CLI is `hermetarium` in full. See [README](README.md) for install. Buil
 ```bash
 make build
 ./bin/hermetarium version
-export HERMETARIUM_ROOT=$(pwd)   # if you run from another directory (locates squid.conf.tmpl and var/)
+export HERMETARIUM_ROOT=$(pwd)   # if you run from another directory (data dir / checkout)
 ```
 
-Firecracker helper scripts are embedded. Squid is a pulled image. `create` needs `squid/squid.conf.tmpl` (this tree or `HERMETARIUM_ROOT`). Without a checkout, `var/` is `~/.local/share/hermetarium/var/` and cache is `~/.cache/hermetarium`.
+Firecracker helper scripts are embedded. Squid is a pulled image. `create` needs `--image` and `--acl FILE`. Without a checkout, `var/` is `~/.local/share/hermetarium/var/` and cache is `~/.cache/hermetarium`.
 
 Needs Docker and Go 1.24+. The **strong** wall also needs `/dev/kvm` and **x86_64**.
 
@@ -22,18 +22,17 @@ Needs Docker and Go 1.24+. The **strong** wall also needs `/dev/kvm` and **x86_6
 | Strong | `--wall strong` | Firecracker microVM. Own guest kernel. Root is guest root only. | Docker, `/dev/kvm`, x86_64 |
 
 ```bash
-id=$(./bin/hermetarium create --wall weak --image myorg/box:1)
-id=$(./bin/hermetarium create --wall strong --image myorg/box:1)
+id=$(./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf)
+id=$(./bin/hermetarium create --wall strong --image myorg/box:1 --acl examples/echo/squid.conf)
 ```
 
-`--image` is required: any local tag or a name Docker can `pull`. The image must listen on **TCP 8080** (porter or your own HTTP server). Optional `--vendor claude|grok|deepseek` adds that Squid allowlist and key inject (see below).
+`--image` is required: any local tag or a name Docker can `pull`. The image must listen on **TCP 8080** (porter or your own HTTP server). `--acl FILE` is the Squid config mounted into the gate (copied to `var/<id>/squid.conf`).
 
 ```bash
-./bin/hermetarium create --wall weak --image myorg/box:1
-./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude
+./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf
 ```
 
-Templates in `examples/` and `inhabitants/` are how you *build* images; they are not CLI names. Strong wall: 512 MiB / 1 GiB disk by default; `--vendor` uses 2 GiB (CLI-sized).
+Templates in `examples/` and `inhabitants/` are how you *build* images; they are not CLI names. Strong wall: 512 MiB / 1 GiB disk by default.
 
 Talk, then tear down:
 
@@ -48,25 +47,9 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 
 ## Squid
 
-The supervisor writes a **per-habitat** ACL at `var/<id>/squid.conf` from `squid/squid.conf.tmpl`, pulls a public Squid image, and runs it with that file mounted. Default deny. Fail closed: if that path cannot be applied, create does not succeed.
+The supervisor copies `--acl FILE` to `var/<id>/squid.conf` and mounts that into the Squid container. Fail closed: if the file cannot be applied, create does not succeed.
 
-Do not hand-edit a running `var/<id>/squid.conf` as the product interface. Change policy in the template (or the supervisor that fills it), then `create` a new habitat.
-
-What the generated file does:
-
-- Intercept / reverse-proxy so the box has no default route except Squid.
-- Inbound: host `url` → Squid → inhabitant port 8080.
-- Vendor allowlist only if you passed `--vendor`: `claude.hermetarium.test`, `grok.hermetarium.test`, or `deepseek.hermetarium.test`. Direct public API hosts from the box stay denied.
-- Then Squid **replaces** `x-api-key` and `Authorization` with the supervisor secret (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, or `HERMETARIUM_DEEPSEEK_API_KEY`). Unset with `--vendor` → create fails closed. Set → live vendor over HTTPS from the gate.
-
-Hello-world tests add a probe origin (`probe.hermetarium.test`) as a sidecar, not as part of the Squid image.
-
-```bash
-export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...   # supervisor process only
-./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude
-```
-
-The inhabitant image must not hold the real key. Dummy env values so a CLI will start are described below.
+Each habitat is a pair: Dockerfile plus `squid.conf` for the wall (`examples/echo/squid.conf`, `inhabitants/claude-code/squid.conf`, …). Vendor allowlists and API-key placeholders (`__VENDOR_PEER__`, `__VENDOR_KEY__`) live in that file. The inhabitant image must not hold the real key.
 
 ## Logs
 
@@ -103,7 +86,7 @@ Claude Code refuses `--dangerously-skip-permissions` as root unless it thinks it
 4. Vendor traffic goes to the HTTP host on the logged path (`ANTHROPIC_BASE_URL=http://claude.hermetarium.test`, `GROK_CLI_CHAT_PROXY_BASE_URL=http://grok.hermetarium.test`, or DeepSeek/OpenAI base URL `http://deepseek.hermetarium.test`), **not** straight to the public API.
 5. Dummy key env so the CLI starts (`not-the-supervisor-key`). Squid replaces the header.
 
-Boot the image with `--image`. Add `--vendor claude` (or `grok` / `deepseek`) when you want that vendor allowlist and key inject.
+Boot the image with `--image` and pass an `--acl` that allowlists that vendor if you want the logged path to inject a key.
 
 Example: Claude Code plus extra tools, still using porter:
 
@@ -131,7 +114,7 @@ CMD ["/usr/local/bin/porter"]
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
 docker build -t myorg/claude:dev -f Dockerfile .
-./bin/hermetarium create --wall weak --image myorg/claude:dev --vendor claude
+./bin/hermetarium create --wall weak --image myorg/claude:dev --acl inhabitants/claude-code/squid.conf
 ```
 
 Mix: take the Claude install + `HARNESS=claude` block from one template, Grok’s `GROK_CLI_CHAT_PROXY_BASE_URL` from another, or drop porter and put your own HTTP server on 8080. The wall does not care which program answers, only that something listens.

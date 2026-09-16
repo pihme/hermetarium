@@ -135,36 +135,25 @@ func flag(args []string, name, fallback string) string {
 	return fallback
 }
 
-// ResolveCreate requires --image (any local or pullable OCI name).
-// Optional --vendor claude|grok|deepseek adds that Squid allowlist and key inject.
+// ResolveCreate requires --image and --acl.
 func ResolveCreate(args []string) (CreateOpts, error) {
 	image := strings.TrimSpace(flag(args, "--image", ""))
 	if image == "" {
 		return CreateOpts{}, fmt.Errorf("create requires --image NAME")
 	}
-	opts := CreateOpts{Image: image, MemMiB: 512, DiskMB: 1024}
-	vendor := strings.TrimSpace(flag(args, "--vendor", ""))
-	if vendor == "" {
-		return opts, nil
+	acl := strings.TrimSpace(flag(args, "--acl", ""))
+	if acl == "" {
+		return CreateOpts{}, fmt.Errorf("create requires --acl FILE")
 	}
-	v, ok := LookupVendor(vendor)
-	if !ok {
-		return CreateOpts{}, fmt.Errorf("unknown --vendor %q (want claude, grok, or deepseek)", vendor)
-	}
-	opts.VendorHost = v.Host
-	opts.KeyEnv = v.KeyEnv
-	opts.LivePeer = v.LivePeer
-	opts.LivePort = v.LivePort
-	return opts, nil
+	return CreateOpts{Image: image, ACL: acl, MemMiB: 512, DiskMB: 1024}, nil
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME [--vendor claude|grok|deepseek]
+	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>
        hermetarium destroy <id>
        hermetarium version
-probe host: %s
-`, ProbeHost)
+`)
 }

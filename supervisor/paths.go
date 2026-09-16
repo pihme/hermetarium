@@ -60,7 +60,7 @@ func findCheckout() string {
 }
 
 func isCheckout(dir string) bool {
-	if _, err := os.Stat(filepath.Join(dir, "squid", "squid.conf.tmpl")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
 		return false
 	}
 	_, err := os.Stat(filepath.Join(dir, "supervisor"))
@@ -98,14 +98,6 @@ func CacheDir(root string) string {
 
 func VarDir(root string) string {
 	return filepath.Join(root, "var")
-}
-
-func SquidTemplate(root string) (string, error) {
-	p := filepath.Join(root, "squid", "squid.conf.tmpl")
-	if _, err := os.Stat(p); err != nil {
-		return "", fmt.Errorf("squid ACL template not found at %s (need a hermetarium checkout or HERMETARIUM_ROOT)", p)
-	}
-	return p, nil
 }
 
 func InstanceDir(root, id string) (string, error) {
