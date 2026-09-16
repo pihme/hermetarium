@@ -39,7 +39,7 @@ func Exercise(t *testing.T, inboundURL, dir, logPath, vendorHost string) {
 func AssertNoKeyInBox(t *testing.T, inst *supervisor.WeakInstance) {
 	t.Helper()
 	out, _, _ := supervisor.ExecWeak(inst, []string{"sh", "-c", "printenv; test -f /usr/local/bin/agentd"})
-	if strings.Contains(out, supervisor.TestVendorKey) {
+	if strings.Contains(out, TestVendorKey) {
 		t.Fatalf("test vendor key leaked into inhabitant env")
 	}
 }

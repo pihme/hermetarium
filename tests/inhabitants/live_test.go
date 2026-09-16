@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pihme/hermetarium/supervisor"
+	"github.com/pihme/hermetarium/tests/harness"
 )
 
 func TestOfficialCLILive(t *testing.T) {
@@ -19,9 +20,9 @@ func TestOfficialCLILive(t *testing.T) {
 		name   string
 		keyEnv string
 	}{
-		{supervisor.ExampleClaude, "HERMETARIUM_ANTHROPIC_API_KEY"},
-		{supervisor.ExampleGrok, "HERMETARIUM_XAI_API_KEY"},
-		{supervisor.ExampleDeepseek, "HERMETARIUM_DEEPSEEK_API_KEY"},
+		{harness.InhabitantClaude, "HERMETARIUM_ANTHROPIC_API_KEY"},
+		{harness.InhabitantGrok, "HERMETARIUM_XAI_API_KEY"},
+		{harness.InhabitantDeepseek, "HERMETARIUM_DEEPSEEK_API_KEY"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -33,7 +34,7 @@ func TestOfficialCLILive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			inst, err := supervisor.CreateWeakInhabitant(root, id, tc.name)
+			inst, err := harness.CreateWeakInhabitant(root, id, tc.name, false)
 			if err != nil {
 				t.Fatal(err)
 			}

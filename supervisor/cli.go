@@ -39,9 +39,9 @@ func Run(args []string) int {
 		}
 		switch wall {
 		case "strong":
-			_, err = CreateStrongEx(root, id, ex)
+			_, err = CreateStrong(root, id, ex)
 		case "weak":
-			_, err = CreateWeakEx(root, id, ex)
+			_, err = CreateWeak(root, id, ex)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown wall %q (want weak or strong)\n", wall)
 			return 2
@@ -137,38 +137,25 @@ func flag(args []string, name, fallback string) string {
 
 // ResolveCreate requires --image (any local or pullable OCI name).
 // Optional --vendor claude|grok|deepseek adds that Squid allowlist and key inject.
-func ResolveCreate(args []string) (Example, error) {
+func ResolveCreate(args []string) (CreateOpts, error) {
 	image := strings.TrimSpace(flag(args, "--image", ""))
 	if image == "" {
-		return Example{}, fmt.Errorf("create requires --image NAME")
+		return CreateOpts{}, fmt.Errorf("create requires --image NAME")
 	}
+	opts := CreateOpts{Image: image, MemMiB: 512, DiskMB: 1024}
 	vendor := strings.TrimSpace(flag(args, "--vendor", ""))
-	ex := Example{
-		Name: "image", Image: image, Kind: "image",
-		SkipBuild: true, MemMiB: 512, DiskMB: 1024,
-	}
 	if vendor == "" {
-		return ex, nil
+		return opts, nil
 	}
-	var stock Example
-	var ok bool
-	switch vendor {
-	case "claude", "claude-code":
-		stock, ok = LookupInhabitant(ExampleClaude)
-	case "grok", "grok-build":
-		stock, ok = LookupInhabitant(ExampleGrok)
-	case "deepseek", "deepseek-harness":
-		stock, ok = LookupInhabitant(ExampleDeepseek)
-	default:
-		return Example{}, fmt.Errorf("unknown --vendor %q (want claude, grok, or deepseek)", vendor)
-	}
+	v, ok := LookupVendor(vendor)
 	if !ok {
-		return Example{}, fmt.Errorf("unknown --vendor %q", vendor)
+		return CreateOpts{}, fmt.Errorf("unknown --vendor %q (want claude, grok, or deepseek)", vendor)
 	}
-	stock.Image = image
-	stock.SkipBuild = true
-	stock.Kind = "image"
-	return stock, nil
+	opts.VendorHost = v.Host
+	opts.KeyEnv = v.KeyEnv
+	opts.LivePeer = v.LivePeer
+	opts.LivePort = v.LivePort
+	return opts, nil
 }
 
 func usage() {

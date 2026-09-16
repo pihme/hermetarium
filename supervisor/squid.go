@@ -1,9 +1,7 @@
 package supervisor
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -25,7 +23,7 @@ type squidConf struct {
 	VendorKey    string
 }
 
-func WriteSquidACL(root, hostLogDir, inhabitantIP string, ex Example) error {
+func WriteSquidACL(root, hostLogDir, inhabitantIP string, opts CreateOpts) error {
 	tmplPath, err := SquidTemplate(root)
 	if err != nil {
 		return err
@@ -50,25 +48,23 @@ func WriteSquidACL(root, hostLogDir, inhabitantIP string, ex Example) error {
 		InhabitantIP: inhabitantIP,
 		EchoPort:     EchoPort,
 	}
-	if ex.Probe {
-		cfg.ProbeHost = ProbeHost
-		cfg.ProbePort = ProbePort
+	if opts.ProbeHost != "" {
+		cfg.ProbeHost = opts.ProbeHost
+		cfg.ProbePort = opts.ProbePort
+		if cfg.ProbePort == 0 {
+			cfg.ProbePort = ProbePort
+		}
 	}
-	if ex.VendorHost != "" {
-		key, live, err := ex.Secret()
+	if opts.VendorHost != "" {
+		peer, port, ssl, key, err := opts.vendorPeer()
 		if err != nil {
 			return err
 		}
-		cfg.VendorHost = ex.VendorHost
+		cfg.VendorHost = opts.VendorHost
+		cfg.VendorPeer = peer
+		cfg.VendorPort = port
+		cfg.VendorSSL = ssl
 		cfg.VendorKey = key
-		if live {
-			cfg.VendorPeer = ex.LivePeer
-			cfg.VendorPort = ex.LivePort
-			cfg.VendorSSL = true
-		} else {
-			cfg.VendorPeer = "127.0.0.1"
-			cfg.VendorPort = VendorMockPort
-		}
 	}
 	return tmpl.Execute(out, cfg)
 }
@@ -118,84 +114,6 @@ func applyIntercept(netns string) error {
 		"-j", "REDIRECT", "--to-ports", "3128",
 	)
 	return err
-}
-
-func StartProbe(root, id, netns string) error {
-	if err := EnsureImageExists(BusyboxImage); err != nil {
-		return err
-	}
-	probeDir := filepath.Join(root, "tests", "probe")
-	_, err := Docker(30*time.Second,
-		"run", "-d", "--name", "htm-probe-"+id,
-		"--network", "container:"+netns,
-		"-v", probeDir+":/probe:ro",
-		BusyboxImage,
-		"httpd", "-f", "-p", "0.0.0.0:18080", "-h", "/probe",
-	)
-	return err
-}
-
-func StartVendorMock(root, id, netns string) error {
-	bin, err := EnsureVendorMock(root)
-	if err != nil {
-		return err
-	}
-	if err := EnsureImageExists(AlpineImage); err != nil {
-		return err
-	}
-	_, err = Docker(30*time.Second,
-		"run", "-d", "--name", "htm-mock-"+id,
-		"--network", "container:"+netns,
-		"-e", "MOCK_EXPECT_KEY="+TestVendorKey,
-		"-v", bin+":/usr/local/bin/vendor-mock:ro",
-		AlpineImage,
-		"/usr/local/bin/vendor-mock",
-	)
-	return err
-}
-
-func startTestGateExtras(root, id, netns string, ex Example) error {
-	if ex.Probe {
-		if err := StartProbe(root, id, netns); err != nil {
-			return err
-		}
-	}
-	if ex.VendorHost == "" {
-		return nil
-	}
-	_, live, err := ex.Secret()
-	if err != nil {
-		return err
-	}
-	if live {
-		return nil
-	}
-	return StartVendorMock(root, id, netns)
-}
-
-func EnsureVendorMock(root string) (string, error) {
-	srcRoot, err := sourceTree(root)
-	if err != nil {
-		return "", err
-	}
-	dest := filepath.Join(CacheDir(root), "vendor-mock")
-	src := filepath.Join(srcRoot, "examples", "vendor-mock", "main.go")
-	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
-		if sc, err := os.Stat(src); err == nil && !st.ModTime().Before(sc.ModTime()) {
-			return dest, nil
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return "", err
-	}
-	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", dest, "./examples/vendor-mock")
-	cmd.Dir = srcRoot
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("build vendor-mock: %s%s", out, err)
-	}
-	return dest, nil
 }
 
 func WaitSquid(logDir, container string, timeout time.Duration) error {

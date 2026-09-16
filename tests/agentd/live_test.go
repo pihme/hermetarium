@@ -1,6 +1,6 @@
 //go:build live
 
-package deepseekharness
+package agentd
 
 import (
 	"os"
@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/pihme/hermetarium/supervisor"
+	"github.com/pihme/hermetarium/tests/harness"
 )
 
-func TestDeepseekLive(t *testing.T) {
-	if os.Getenv("HERMETARIUM_DEEPSEEK_API_KEY") == "" {
-		t.Skip("HERMETARIUM_DEEPSEEK_API_KEY unset")
+func TestAgentdLive(t *testing.T) {
+	if os.Getenv("HERMETARIUM_ANTHROPIC_API_KEY") == "" {
+		t.Skip("HERMETARIUM_ANTHROPIC_API_KEY unset")
 	}
 	root, err := supervisor.Root()
 	if err != nil {
@@ -22,7 +23,7 @@ func TestDeepseekLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst, err := supervisor.CreateWeakExample(root, id, supervisor.ExampleDeepseek)
+	inst, err := harness.CreateWeakAgentd(root, id, false)
 	if err != nil {
 		t.Fatal(err)
 	}

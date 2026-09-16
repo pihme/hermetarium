@@ -14,7 +14,7 @@ test:
 	$(GO) test ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/... -count=1 -p 1 -timeout 15m -v
 
 test-live:
-	$(GO) test -tags live ./tests/claude-code ./tests/grok-build ./tests/deepseek-harness ./tests/inhabitants -count=1 -p 1 -timeout 15m -v
+	$(GO) test -tags live ./tests/agentd ./tests/inhabitants -count=1 -p 1 -timeout 15m -v
 
 tidy:
 	$(GO) mod tidy

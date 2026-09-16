@@ -18,8 +18,8 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 - CLI name is `hermetarium` in full, never `herm`.
 - Firecracker helper scripts are embedded. Squid is a pulled image plus `squid/squid.conf.tmpl` on disk (not in the supervisor). Data dir is `HERMETARIUM_ROOT`, else this checkout, else XDG (`~/.local/share/hermetarium` for `var/`, `~/.cache/hermetarium` for cache). `create` still needs the template file. Probe and vendor-mock are test sidecars.
 - **Versions:** two semver artifacts, tags `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`. Conventional commits (`feat:` minor, `fix:`/`perf:` patch, `feat!:` or `BREAKING CHANGE:` major). A commit only bumps the artifact whose paths it touches (`supervisor/`, `squid/`, `firecracker-helper/`, `go.mod`, `Makefile` → hermetarium; `porter/` → porter). Docs/tests/examples/inhabitants do not bump. `.github/scripts/release.py` on push to `main` after CI.
-- `examples/` = stand-in agentd images. `inhabitants/` = official `claude` / `grok` / `dsh`. Do not add Universal APP / TypeScript host / scanners until asked.
-- Prefer small, reversible files. Hello-world is both walls, fail-closed egress, probe, I/O log, inbound echo (`examples/echo/`). Next: same OCI image on Firecracker, supervisor-held keys, coding-agent examples.
+- `examples/` = stand-in inhabitant images (echo, agentd). `inhabitants/` = official `claude` / `grok` / `dsh`. `tests/` holds integration tests, vendor-mock, and probe. Do not add Universal APP / TypeScript host / scanners until asked.
+- Prefer small, reversible files. Hello-world is both walls, fail-closed egress, probe, I/O log, inbound echo (`examples/echo/`). Coding-agent stand-in is one `examples/agentd/` image, not three vendor-named copies.
 - License: **PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not OSI Open Source. Do not relicense to Apache/MIT/GPL.
 
 ## Do not invent

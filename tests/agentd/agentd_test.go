@@ -1,4 +1,4 @@
-package claudecode
+package agentd
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/pihme/hermetarium/tests/harness"
 )
 
-func TestClaudeCode(t *testing.T) {
+func TestAgentd(t *testing.T) {
 	root, err := supervisor.Root()
 	if err != nil {
 		t.Fatal(err)
@@ -21,9 +21,8 @@ func testWall(t *testing.T, root string, strong bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ex := supervisor.ExampleClaude
 	if strong {
-		inst, err := supervisor.CreateStrongExample(root, id, ex)
+		inst, err := harness.CreateStrongAgentd(root, id, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +30,7 @@ func testWall(t *testing.T, root string, strong bool) {
 		harness.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath, supervisor.ClaudeHost)
 		return
 	}
-	inst, err := supervisor.CreateWeakExample(root, id, ex)
+	inst, err := harness.CreateWeakAgentd(root, id, true)
 	if err != nil {
 		t.Fatal(err)
 	}

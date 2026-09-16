@@ -90,30 +90,8 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	return firecracker, kernel, nil
 }
 
-func CreateStrong(root, id string) (*StrongInstance, error) {
-	return CreateStrongExample(root, id, ExampleEcho)
-}
-
-func CreateStrongExample(root, id, example string) (*StrongInstance, error) {
-	ex, ok := LookupExample(example)
-	if !ok {
-		return nil, fmt.Errorf("unknown example %q", example)
-	}
-	return CreateStrongEx(root, id, ex)
-}
-
-func CreateStrongInhabitant(root, id, name string) (*StrongInstance, error) {
-	ex, ok := LookupInhabitant(name)
-	if !ok {
-		return nil, fmt.Errorf("unknown inhabitant %q", name)
-	}
-	ex.Probe = true
-	ex.UseMock = true
-	return CreateStrongEx(root, id, ex)
-}
-
-func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
-	if err := EnsureInhabitant(root, ex); err != nil {
+func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
+	if err := EnsureImageExists(opts.Image); err != nil {
 		return nil, err
 	}
 	if err := EnsureNetTools(root); err != nil {
@@ -123,7 +101,7 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootfs, err := EnsureImageRootfs(root, ex.Image, diskMB(ex))
+	rootfs, err := EnsureImageRootfs(root, opts.Image, diskMB(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +109,7 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteSquidACL(root, dir, strongGuestIP, ex); err != nil {
+	if err := WriteSquidACL(root, dir, strongGuestIP, opts); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -159,7 +137,7 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 			"is_root_device": true,
 			"is_read_only":   false,
 		}},
-		"machine-config": map[string]any{"vcpu_count": 1, "mem_size_mib": memMiB(ex)},
+		"machine-config": map[string]any{"vcpu_count": 1, "mem_size_mib": memMiB(opts)},
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",
 			"guest_mac":     "AA:FC:00:00:00:01",
@@ -192,7 +170,7 @@ func CreateStrongEx(root, id string, ex Example) (*StrongInstance, error) {
 	}
 
 	gate := "htm-gate-" + id
-	if err := startTestGateExtras(root, id, helper, ex); err != nil {
+	if err := runAfterGate(opts, id, helper); err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
 	}

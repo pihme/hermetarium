@@ -19,7 +19,6 @@ const SquidImage = "ubuntu/squid:6.6-24.04_beta"
 const AlpineImage = "alpine:3.20"
 const BusyboxImage = "busybox:1.36.1"
 const NetToolsImage = "hermetarium-nettools:local"
-const EchoImage = "hermetarium-echo:local"
 
 type layout struct {
 	data   string
@@ -107,16 +106,6 @@ func SquidTemplate(root string) (string, error) {
 		return "", fmt.Errorf("squid ACL template not found at %s (need a hermetarium checkout or HERMETARIUM_ROOT)", p)
 	}
 	return p, nil
-}
-
-func sourceTree(root string) (string, error) {
-	if isCheckout(root) {
-		return root, nil
-	}
-	if d := findCheckout(); d != "" {
-		return d, nil
-	}
-	return "", fmt.Errorf("need the hermetarium source tree to build stock images (set HERMETARIUM_ROOT)")
 }
 
 func InstanceDir(root, id string) (string, error) {

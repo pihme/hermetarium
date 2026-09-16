@@ -14,7 +14,7 @@ func TestWriteSquidACL(t *testing.T) {
 	}
 	t.Run("product", func(t *testing.T) {
 		dir := t.TempDir()
-		ex := Example{Name: "image", Image: "x", SkipBuild: true}
+		ex := CreateOpts{Image: "x"}
 		if err := WriteSquidACL(root, dir, "10.20.0.3", ex); err != nil {
 			t.Fatal(err)
 		}
@@ -32,7 +32,7 @@ func TestWriteSquidACL(t *testing.T) {
 	t.Run("fail-closed", func(t *testing.T) {
 		t.Setenv("HERMETARIUM_ANTHROPIC_API_KEY", "")
 		dir := t.TempDir()
-		ex := Example{VendorHost: ClaudeHost, KeyEnv: "HERMETARIUM_ANTHROPIC_API_KEY"}
+		ex := CreateOpts{VendorHost: ClaudeHost, KeyEnv: "HERMETARIUM_ANTHROPIC_API_KEY"}
 		if err := WriteSquidACL(root, dir, "10.20.0.3", ex); err == nil {
 			t.Fatal("expected fail closed without key")
 		}
@@ -40,9 +40,9 @@ func TestWriteSquidACL(t *testing.T) {
 	t.Run("mock", func(t *testing.T) {
 		t.Setenv("HERMETARIUM_ANTHROPIC_API_KEY", "")
 		dir := t.TempDir()
-		ex := Example{
-			VendorHost: ClaudeHost, KeyEnv: "HERMETARIUM_ANTHROPIC_API_KEY",
-			UseMock: true, Probe: true,
+		ex := CreateOpts{
+			VendorHost: ClaudeHost, VendorPeer: "127.0.0.1", VendorPort: 18082,
+			VendorKey: "htm-test-key", ProbeHost: ProbeHost,
 		}
 		if err := WriteSquidACL(root, dir, "10.20.0.3", ex); err != nil {
 			t.Fatal(err)

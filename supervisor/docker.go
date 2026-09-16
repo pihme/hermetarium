@@ -48,3 +48,11 @@ func DockerExec(timeout time.Duration, args ...string) (stdout, stderr string, c
 func DockerIgnore(args ...string) {
 	_, _ = Docker(30*time.Second, args...)
 }
+
+func EnsureImageExists(name string) error {
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", name); err == nil {
+		return nil
+	}
+	_, err := Docker(5*time.Minute, "pull", name)
+	return err
+}

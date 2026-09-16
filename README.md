@@ -22,9 +22,9 @@ The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facin
 
 **Inhabitants** (`inhabitants/`) are Dockerfiles for official coding CLIs: Claude Code, Grok Build, DeepSeek Harness. They run as **root**, install the real binary, set dummy boot keys and vendor base URLs, and `CMD` porter. They are templates. Build an image, then `create --image <tag>`. Add `--vendor claude` (or `grok` / `deepseek`) when Squid should allowlist that vendor and inject the key.
 
-`examples/` is the test stand-in, not those products. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` plus `examples/claude-code/` (and grok/deepseek) run a small Go tool loop against a mock Messages/Chat API so CI can prove walls, keys, and uid 0 without a live model. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
+`examples/` is the test stand-in, not those products. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` is one small Go tool loop against a mock Messages API so CI can prove walls, keys, and uid 0 without a live model. The mock origin is `tests/vendormock/`. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
 
-Other trees: `firecracker-helper/` TAP + Firecracker for the strong wall (scripts are embedded); `tests/` for hello-world, agentd examples, and official-CLI smoke. Instance state is `var/<id>/` under the data root (this checkout, `HERMETARIUM_ROOT`, or `~/.local/share/hermetarium`). Firecracker assets cache in `.cache/` under the checkout, or `~/.cache/hermetarium` off-tree.
+Other trees: `firecracker-helper/` TAP + Firecracker for the strong wall (scripts are embedded); `tests/` for hello-world, agentd, and official-CLI smoke. Instance state is `var/<id>/` under the data root (this checkout, `HERMETARIUM_ROOT`, or `~/.local/share/hermetarium`). Firecracker assets cache in `.cache/` under the checkout, or `~/.cache/hermetarium` off-tree.
 
 ## Install
 
@@ -73,7 +73,7 @@ Dummy env in inhabitant images (`ANTHROPIC_API_KEY=not-the-supervisor-key` and t
 
 Two suites. Spec: [SPEC.md §11](SPEC.md#11-tests).
 
-**Mocked (CI default).** `make test`. No vendor account. Hello-world (both walls, probe, echo) and agentd examples against a mock vendor API. Official-CLI tests only check that `claude` / `grok` / `dsh` are on PATH and porter is up; they do not claim a mock-driven chat session. GitHub Actions job `test` runs this on every push and pull request.
+**Mocked (CI default).** `make test`. No vendor account. Hello-world (both walls, probe, echo) and one agentd example against a mock vendor API. Official-CLI tests only check that `claude` / `grok` / `dsh` are on PATH and porter is up; they do not claim a mock-driven chat session. GitHub Actions job `test` runs this on every push and pull request.
 
 **Live (optional, not a merge gate).** Real CLI to the real vendor. Natural-language “run a command / install something” as root.
 

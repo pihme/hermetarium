@@ -10,7 +10,7 @@ Needs Docker and Go 1.24+. Strong-wall tests also need `/dev/kvm` and **x86_64**
 make test
 ```
 
-That is the merge gate (hello-world, echo, agentd mock suites, official-CLI smoke). Optional live suite (real vendor keys):
+That is the merge gate (hello-world, echo, agentd mock suite, official-CLI smoke). Optional live suite (real vendor keys):
 
 ```bash
 export HERMETARIUM_ANTHROPIC_API_KEY=...

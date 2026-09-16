@@ -15,13 +15,13 @@ func TestOfficialCLIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("claude-code", func(t *testing.T) {
-		probeOfficial(t, root, supervisor.ExampleClaude, []string{"/usr/local/bin/claude", "--version"}, supervisor.ClaudeHost)
+		probeOfficial(t, root, harness.InhabitantClaude, []string{"/usr/local/bin/claude", "--version"}, supervisor.ClaudeHost)
 	})
 	t.Run("grok-build", func(t *testing.T) {
-		probeOfficial(t, root, supervisor.ExampleGrok, []string{"/usr/local/bin/grok", "--version"}, supervisor.GrokHost)
+		probeOfficial(t, root, harness.InhabitantGrok, []string{"/usr/local/bin/grok", "--version"}, supervisor.GrokHost)
 	})
 	t.Run("deepseek-harness", func(t *testing.T) {
-		probeOfficial(t, root, supervisor.ExampleDeepseek, []string{"/usr/local/bin/dsh", "--help"}, supervisor.DeepseekHost)
+		probeOfficial(t, root, harness.InhabitantDeepseek, []string{"/usr/local/bin/dsh", "--help"}, supervisor.DeepseekHost)
 	})
 }
 
@@ -32,7 +32,7 @@ func probeOfficial(t *testing.T, root, name string, versionCmd []string, vendorH
 		t.Fatal(err)
 	}
 	t.Logf("inhabitant %s weak %s", name, id)
-	inst, err := supervisor.CreateWeakInhabitant(root, id, name)
+	inst, err := harness.CreateWeakInhabitant(root, id, name, true)
 	if err != nil {
 		t.Fatal(err)
 	}

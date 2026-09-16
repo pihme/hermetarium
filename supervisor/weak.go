@@ -21,30 +21,8 @@ type WeakInstance struct {
 	Dir        string `json:"dir"`
 }
 
-func CreateWeak(root, id string) (*WeakInstance, error) {
-	return CreateWeakExample(root, id, ExampleEcho)
-}
-
-func CreateWeakExample(root, id, example string) (*WeakInstance, error) {
-	ex, ok := LookupExample(example)
-	if !ok {
-		return nil, fmt.Errorf("unknown example %q", example)
-	}
-	return CreateWeakEx(root, id, ex)
-}
-
-func CreateWeakInhabitant(root, id, name string) (*WeakInstance, error) {
-	ex, ok := LookupInhabitant(name)
-	if !ok {
-		return nil, fmt.Errorf("unknown inhabitant %q", name)
-	}
-	ex.Probe = true
-	ex.UseMock = true
-	return CreateWeakEx(root, id, ex)
-}
-
-func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
-	if err := EnsureInhabitant(root, ex); err != nil {
+func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
+	if err := EnsureImageExists(opts.Image); err != nil {
 		return nil, err
 	}
 	if err := EnsureNetTools(root); err != nil {
@@ -55,7 +33,7 @@ func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
 		return nil, err
 	}
 	sub := SubnetForID(id)
-	if err := WriteSquidACL(root, dir, sub.Box, ex); err != nil {
+	if err := WriteSquidACL(root, dir, sub.Box, opts); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
@@ -97,7 +75,7 @@ func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
 	if err := applyIntercept(gate); err != nil {
 		return nil, err
 	}
-	if err := startTestGateExtras(root, id, gate, ex); err != nil {
+	if err := runAfterGate(opts, id, gate); err != nil {
 		return nil, err
 	}
 
@@ -110,7 +88,7 @@ func CreateWeakEx(root, id string, ex Example) (*WeakInstance, error) {
 	for _, h := range VendorHosts() {
 		boxArgs = append(boxArgs, "--add-host", h+":"+sub.Gate)
 	}
-	boxArgs = append(boxArgs, ex.Image)
+	boxArgs = append(boxArgs, opts.Image)
 	if _, err := Docker(30*time.Second, boxArgs...); err != nil {
 		return nil, err
 	}

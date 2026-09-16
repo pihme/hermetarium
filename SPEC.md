@@ -1,6 +1,6 @@
 # Hermetarium
 
-A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Supervisor-held API keys. Coding-agent examples (Claude Code, Grok Build, DeepSeek Harness) with mock tests.
+A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Supervisor-held API keys. One agentd coding-agent example with mock tests. Official CLIs (Claude Code, Grok Build, DeepSeek Harness) as inhabitant templates.
 
 ## 1. Name
 
@@ -126,24 +126,18 @@ TLS and auth on this hop (operator → supervisor URL) are not decided.
 
 `examples/echo/`. Implemented. HTTP echo: request body returned as response body. Hello-world inbound.
 
-### 9c. Coding-agent examples
+### 9c. Coding-agent example
 
-Same inhabitant shape. The HTTP front is `examples/agentd/` (one open session, bash tool, Anthropic or OpenAI-compatible origin). Official CLIs can replace that inner loop later.
+`examples/agentd/`. Same inhabitant shape as echo: HTTP on 8080, one open session, a bash tool, Anthropic-shaped origin on the logged path (`claude.hermetarium.test`). It is a stand-in loop, not Claude Code / Grok Build / DeepSeek Harness. Those official CLIs are `inhabitants/` (porter + the real binary).
 
-Shared:
+Shared with those inhabitants:
 
 - Same OCI image on **both** walls. Runs as **root** inside the image (guest root on the strong wall).
-- HTTP server that **stays up** and holds **one open harness session** for the life of the habitat.
-- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. A later POST is the next turn in the **same** session (not a new harness process per message).
+- HTTP server that **stays up** and holds **one open session** for the life of the habitat.
+- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. A later POST is the next turn in the **same** session (not a new process per message).
 - Model “home” uses §8. Direct vendor API from the box is denied.
 - No SSE/WebSocket. A turn is still call-and-wait.
-- The operator path is this HTTP server, not the harness’s own TUI or local web UI.
-
-| Example | Directory | Harness (in the image) |
-| --- | --- | --- |
-| Claude Code | `examples/claude-code/` | Anthropic Claude Code (`claude`). Headless/`-p` or ACP; origin `ANTHROPIC_BASE_URL`. |
-| Grok Build | `examples/grok-build/` | xAI Grok Build (`grok`). Headless `grok -p` or `grok agent stdio` (ACP). Origin `GROK_CLI_CHAT_PROXY_BASE_URL` / `base_url`. Key `XAI_API_KEY` is supervisor-only (§8). |
-| DeepSeek Harness | `examples/deepseek-harness/` | DeepSeek Harness (`dsh`). Headless profile (`dsh --profile headless` or equivalent), not `dsh web` as the operator UI. Origin is the DeepSeek / OpenAI-compatible base URL on the path. Key `DEEPSEEK_API_KEY` is supervisor-only (§8). |
+- The operator path is this HTTP server, not a harness TUI or local web UI.
 
 ## 10. Lifecycle
 
@@ -164,9 +158,9 @@ Both walls, fail-closed egress, probe, I/O log, inbound echo. Command: `make tes
 
 ### Coding-agent mock suite (required, CI default)
 
-Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls once same-image Firecracker is in. Same checks for each of §9c (`claude-code`, `grok-build`, `deepseek-harness`).
+Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls. One §9c image (`examples/agentd/`). Official-CLI smoke (`inhabitants/`) only checks that `claude` / `grok` / `dsh` are on PATH and porter answers.
 
-**Mock the vendor HTTP API, not the harness.** The image runs the real harness binary. A mock origin on the gate (like the probe) speaks enough of that vendor’s API (Anthropic Messages, xAI/OpenAI-compatible, DeepSeek/OpenAI-compatible) to:
+**Mock the vendor HTTP API.** The agentd image runs a small tool loop, not an official CLI. A mock origin on the gate (like the probe) speaks enough of the Anthropic Messages API to:
 
 1. Reject requests that lack the supervisor-injected key (and reject a dummy key the box might send).
 2. Return a tool call that makes the harness run a **shell command as root** (for example `id -u` or `touch /root/hermetarium-root-ok`).
@@ -182,11 +176,11 @@ What the mock does **not** prove: that a real model would choose that command fr
 
 ### Coding-agent live suite (optional, not a merge gate)
 
-Command: `make test-live`. For each example, requires that example’s supervisor env var (§8). If a given key is unset, **that example’s** live tests skip; other examples with a key still run.
+Command: `make test-live`. agentd live requires `HERMETARIUM_ANTHROPIC_API_KEY`. Each official-CLI live test requires that CLI’s supervisor env var (§8) and skips if unset.
 
 Squid still injects the key (§8); the inhabitant still must not contain it. Egress is the real vendor API (allowlisted), not the mock.
 
-The operator test then (per example that has a key):
+The operator test then (per case that has a key):
 
 1. **Chat.** Two sequential POSTs in natural language on the same URL; the second turn depends on the first (same open session, real model).
 2. **Root via the agent.** A natural-language ask that the harness should run a shell command as root (for example “run `id -u`” or “install a package”). The HTTP reply or a file under `/root` shows uid 0. This is what the mock cannot prove: the model chose the tool.
@@ -195,7 +189,7 @@ Not run on push or pull_request. Must not be required to merge.
 
 ### CI
 
-- **Always:** job `test` runs `make test` (hello-world + mock suite for every coding-agent example).
+- **Always:** job `test` runs `make test` (hello-world + agentd mock suite + official-CLI smoke).
 - **Optional / manual:** job `test-live` on `workflow_dispatch` only. The pipeline supplies keys as repository secrets (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, `HERMETARIUM_DEEPSEEK_API_KEY`) and exports whichever are set into the job environment so the supervisor can read them. Secrets are not written into the image, logs, or the inhabitant. Examples whose secret is empty skip.
 
 ## 12. Open questions

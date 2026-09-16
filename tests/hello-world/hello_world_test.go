@@ -9,6 +9,7 @@ import (
 
 	"github.com/pihme/hermetarium/supervisor"
 	"github.com/pihme/hermetarium/tests/echo"
+	"github.com/pihme/hermetarium/tests/harness"
 )
 
 func TestHelloWorld(t *testing.T) {
@@ -22,19 +23,17 @@ func TestHelloWorld(t *testing.T) {
 }
 
 func testArbitraryImage(t *testing.T, root string) {
-	if err := supervisor.EnsureEchoImage(root); err != nil {
+	if err := harness.EnsureEchoImage(root); err != nil {
 		t.Fatal(err)
 	}
 	id, err := supervisor.NewID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ex := supervisor.Example{
-		Name: "image", Image: supervisor.EchoImage, Kind: "image",
-		SkipBuild: true, MemMiB: 128, DiskMB: 256,
-	}
-	t.Logf("arbitrary --image %s create %s", ex.Image, id)
-	inst, err := supervisor.CreateWeakEx(root, id, ex)
+	t.Logf("arbitrary --image %s create %s", harness.EchoImage, id)
+	inst, err := supervisor.CreateWeak(root, id, supervisor.CreateOpts{
+		Image: harness.EchoImage, MemMiB: 128, DiskMB: 256,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +47,7 @@ func testWeak(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	t.Logf("weak wall: create %s", id)
-	inst, err := supervisor.CreateWeak(root, id)
+	inst, err := harness.CreateWeakEcho(root, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +87,7 @@ func testStrong(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	t.Logf("strong wall: create %s", id)
-	inst, err := supervisor.CreateStrong(root, id)
+	inst, err := harness.CreateStrongEcho(root, id)
 	if err != nil {
 		t.Fatal(err)
 	}
