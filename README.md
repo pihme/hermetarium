@@ -14,7 +14,7 @@ Not a tool an agent calls. The CLI name is `hermetarium` in full; do not shorten
 
 `hermetarium version` and `porter version` print semver (`dev` on a local `make build`). GitHub Releases attach linux-amd64 binaries; tags are `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`.
 
-The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facing command. It creates a habitat: picks a wall (weak Docker/`runc` or strong Firecracker), writes a per-habitat ACL, starts Squid, publishes a localhost URL into the box, and maps Squid’s access log into the I/O log. It talks to Docker, Firecracker, and Squid as processes (`os/exec`), not via their SDKs.
+The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facing command. It creates a habitat: picks a wall (weak Docker/`runc` or strong Firecracker), copies `--acl` into the instance, starts Squid, publishes a localhost URL into the box, and maps Squid’s access log into the I/O log. It talks to Docker, Firecracker, and Squid as processes (`os/exec`), not via their SDKs.
 
 **Squid** is the logged path. The supervisor pulls a public Squid image and mounts the ACL you pass with `--acl`. Squid runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Each example and inhabitant ships its wall config next to its Dockerfile.
 
@@ -63,11 +63,12 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 `--image` is any local or pullable OCI image that listens on TCP 8080. `url` is the host HTTP address that reaches it **through Squid**. `create --wall strong` works the same. More: [USAGE.md](USAGE.md).
 
 ```bash
-id=$(./bin/hermetarium create --wall weak --image myorg/claude:dev --acl inhabitants/claude-code/squid.conf)
+sed 's/__VENDOR_KEY__/sk-ant-.../' inhabitants/claude-code/squid.conf > /tmp/claude.acl
+id=$(./bin/hermetarium create --wall weak --image myorg/claude:dev --acl /tmp/claude.acl)
 curl -sS -d 'Run id -u' "$(./bin/hermetarium url "$id")"
 ```
 
-Dummy env in inhabitant images (`ANTHROPIC_API_KEY=not-the-supervisor-key` and the like) only exist so the CLI will start. Squid still replaces `x-api-key` / `Authorization`. Boot flags per CLI: [USAGE.md](USAGE.md).
+Dummy env in inhabitant images (`ANTHROPIC_API_KEY=not-the-supervisor-key` and the like) only exist so the CLI will start. Squid still replaces `x-api-key` / `Authorization` from the ACL. Boot flags per CLI: [USAGE.md](USAGE.md).
 
 ## Tests
 

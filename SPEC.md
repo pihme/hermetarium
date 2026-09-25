@@ -1,6 +1,6 @@
 # Hermetarium
 
-A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Supervisor-held API keys. One agentd coding-agent example with mock tests. Official CLIs (Claude Code, Grok Build, DeepSeek Harness) as inhabitant templates.
+A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Operator-supplied Squid ACL (`create --acl`). One agentd coding-agent example with mock tests. Official CLIs (Claude Code, Grok Build, DeepSeek Harness) as inhabitant templates.
 
 ## 1. Name
 
@@ -17,7 +17,7 @@ An agent that can run a shell and install packages must not run on the operator�
 
 An **inhabitant** boots **inside** an OCI image. It may use that image’s Linux freely: shell, package managers, rewriting files. It has no sandbox API and does not ask permission per command.
 
-It must not leave. The **wall** is outside the image. The **supervisor** is a Go binary: it boots the image, starts Squid as the only network path, writes a per-habitat ACL file, and maps Squid’s access log into the I/O log. If that path cannot be applied, Hermetarium does not start.
+It must not leave. The **wall** is outside the image. The **supervisor** is a Go binary: it boots the image, starts Squid as the only network path, installs the operator-supplied ACL (`create --acl FILE`), and maps Squid’s access log into the I/O log. If that path cannot be applied, Hermetarium does not start.
 
 ```
 operator machine or cluster
@@ -102,7 +102,7 @@ How a credentialed destination is attached:
 | xAI | `GROK_CLI_CHAT_PROXY_BASE_URL` (or Grok `config.toml` `base_url`) |
 | DeepSeek | DeepSeek / OpenAI-compatible base URL |
 
-Fail closed if `--acl` is missing or Squid cannot start. Tests: mock suite ships ACLs with a test key only the mock origin accepts; live suite substitutes a real key into a live ACL file.
+Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` files use `__VENDOR_KEY__` for the inject header; tests substitute a mock key or a live env var before `create`. The supervisor does not read vendor API keys from its environment.
 
 ## 9. Inhabitants
 
@@ -161,7 +161,7 @@ Command: `make test`. GitHub Actions job `test` on push and pull_request. No liv
 
 **Mock the vendor HTTP API.** The agentd image runs a small tool loop, not an official CLI. A mock origin on the gate (like the probe) speaks enough of the Anthropic Messages API to:
 
-1. Reject requests that lack the supervisor-injected key (and reject a dummy key the box might send).
+1. Reject requests that lack the ACL-injected key (and reject a dummy key the box might send).
 2. Return a tool call that makes the harness run a **shell command as root** (for example `id -u` or `touch /root/hermetarium-root-ok`).
 3. After the tool result, return a final assistant message that includes that evidence.
 
@@ -169,15 +169,15 @@ The operator test then:
 
 1. **Chat / open session.** Two sequential POSTs to the same inbound URL. The second turn is handled by the same open harness session (the process is still running).
 2. **Root via the agent.** A turn whose tool use runs a shell command; the HTTP reply (or a file the command created under `/root`) shows uid 0. Installing a package is the same path plus an allowlisted package repo; the mock-suite required test is the shell command.
-3. **Key stays on the supervisor.** The test key does not appear in the inhabitant environment or filesystem. Direct vendor origin from the box fails. The I/O log records outbound to that example’s origin as allowed.
+3. **Key stays in the ACL.** The test key does not appear in the inhabitant environment or filesystem. Direct vendor origin from the box fails. The I/O log records outbound to that example’s origin as allowed.
 
 What the mock does **not** prove: that a real model would choose that command from a natural-language ask.
 
 ### Coding-agent live suite (optional, not a merge gate)
 
-Command: `make test-live`. agentd live requires `HERMETARIUM_ANTHROPIC_API_KEY`. Each official-CLI live test requires that CLI’s supervisor env var (§8) and skips if unset.
+Command: `make test-live`. agentd live requires `HERMETARIUM_ANTHROPIC_API_KEY`. Each official-CLI live test requires that CLI’s key env var and skips if unset. Tests write the key into a copy of the habitat ACL; the supervisor does not read those env vars.
 
-Squid still injects the key (§8); the inhabitant still must not contain it. Egress is the real vendor API (allowlisted), not the mock.
+Squid injects the key from that ACL (§8); the inhabitant still must not contain it. Egress is the real vendor API (allowlisted), not the mock.
 
 The operator test then (per case that has a key):
 
@@ -189,7 +189,7 @@ Not run on push or pull_request. Must not be required to merge.
 ### CI
 
 - **Always:** job `test` runs `make test` (hello-world + agentd mock suite + official-CLI smoke).
-- **Optional / manual:** job `test-live` on `workflow_dispatch` only. The pipeline supplies keys as repository secrets (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, `HERMETARIUM_DEEPSEEK_API_KEY`) and exports whichever are set into the job environment so the supervisor can read them. Secrets are not written into the image, logs, or the inhabitant. Examples whose secret is empty skip.
+- **Optional / manual:** job `test-live` on `workflow_dispatch` only. The pipeline supplies keys as repository secrets (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, `HERMETARIUM_DEEPSEEK_API_KEY`) and exports whichever are set so tests can substitute them into the habitat ACL. Secrets are not written into the image, logs, or the inhabitant. Cases whose secret is empty skip.
 
 ## 12. Open questions
 

@@ -133,19 +133,17 @@ func inhabitantOpts(root, name string, mock bool) (supervisor.CreateOpts, error)
 }
 
 func fillACL(src string, mock bool, livePeer, keyEnv string) (string, error) {
-	peer, key := MockVendorPeer, TestVendorKey
-	if !mock {
-		peer, key = livePeer, os.Getenv(keyEnv)
-	}
-	return MaterializeACL(src, peer, key)
-}
-
-func MaterializeACL(src, peer, key string) (string, error) {
 	b, err := os.ReadFile(src)
 	if err != nil {
 		return "", err
 	}
-	s := strings.ReplaceAll(string(b), "__VENDOR_PEER__", peer)
+	s := string(b)
+	key := TestVendorKey
+	if mock {
+		s = strings.ReplaceAll(s, livePeer, MockVendorPeer)
+	} else {
+		key = os.Getenv(keyEnv)
+	}
 	s = strings.ReplaceAll(s, "__VENDOR_KEY__", key)
 	f, err := os.CreateTemp("", "htm-acl-*.conf")
 	if err != nil {

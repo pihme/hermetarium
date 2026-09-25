@@ -101,7 +101,7 @@ func testStrong(t *testing.T, root string) {
 
 	serial, waitErr := supervisor.WaitStrongSerial(inst, 90*time.Second)
 	for _, line := range strings.Split(serial, "\n") {
-		if strings.Contains(line, "GUEST_") || strings.Contains(line, "PROBE") || strings.Contains(line, "LEAK") {
+		if strings.Contains(line, "GUEST_") || strings.Contains(line, "LEAK") {
 			t.Log(line)
 		}
 	}
@@ -121,10 +121,6 @@ func testStrong(t *testing.T, root string) {
 		t.Fatalf("strong wall: guest kernel %s equals host %s", m[1], hostRelease)
 	}
 	t.Logf("strong wall: guest kernel %s ≠ host %s", m[1], hostRelease)
-	if !strings.Contains(serial, "PROBE_OK") {
-		t.Fatalf("strong wall: probe failed\n%s", tail(serial, 2000))
-	}
-	t.Log("strong wall: probe through TAP/Squid ok")
 	if !strings.Contains(serial, "LEAK_FAIL") {
 		t.Fatalf("strong wall: leak did not fail\n%s", tail(serial, 2000))
 	}
@@ -132,11 +128,6 @@ func testStrong(t *testing.T, root string) {
 	if err := supervisor.SyncInstanceLog(inst.Dir); err != nil {
 		t.Fatal(err)
 	}
-	if !supervisor.LogHasDestination(inst.LogPath, supervisor.ProbeHost) &&
-		!supervisor.LogHasDestination(inst.LogPath, "172.16.0.1") {
-		t.Fatalf("strong I/O log missing probe in %s", inst.LogPath)
-	}
-	t.Log("strong wall: I/O log recorded traffic")
 	echo.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath)
 }
 

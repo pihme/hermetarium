@@ -53,7 +53,7 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 
 `--acl FILE` is required. The supervisor copies that file to `var/<id>/squid.conf` and starts Squid with `-f /log/squid.conf`. The instance directory is bind-mounted at `/log` in the Squid container. Create fails closed if the file cannot be read or Squid will not start.
 
-`create` does not rewrite the file. If you use a habitat config that still contains `__VENDOR_PEER__` or `__VENDOR_KEY__`, substitute those yourself before passing `--acl`. The image must not hold the real key.
+`create` does not rewrite the file. Habitat vendor configs use `__VENDOR_KEY__` for the inject header; substitute your key before passing `--acl`. The image must not hold the real key.
 
 Each example and inhabitant is a pair: Dockerfile plus `squid.conf` (`examples/echo/squid.conf`, `inhabitants/claude-code/squid.conf`, …). Copy one of those and edit the ACL. These settings are the wall contract; if they are wrong, `url`, `logs`, or intercept will not work.
 
@@ -116,7 +116,7 @@ Claude Code refuses `--dangerously-skip-permissions` as root unless it thinks it
 
 1. Process listens on **TCP 8080**. Operator POSTs a turn; GET can be a health check.
 2. Runs as **root**.
-3. Image contains `iproute2` (and usually `iptables`, `curl` or `wget`) so the wall can set the default route and the guest can hit the probe.
+3. Image contains `iproute2` (and usually `iptables`) so the wall can set the default route.
 4. Vendor traffic goes to the HTTP host on the logged path (`ANTHROPIC_BASE_URL=http://claude.hermetarium.test`, `GROK_CLI_CHAT_PROXY_BASE_URL=http://grok.hermetarium.test`, or DeepSeek/OpenAI base URL `http://deepseek.hermetarium.test`), **not** straight to the public API.
 5. Dummy key env so the CLI starts (`not-the-supervisor-key`). Squid replaces the header.
 
@@ -148,7 +148,8 @@ CMD ["/usr/local/bin/porter"]
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
 docker build -t myorg/claude:dev -f Dockerfile .
-./bin/hermetarium create --wall weak --image myorg/claude:dev --acl inhabitants/claude-code/squid.conf
+sed 's/__VENDOR_KEY__/sk-ant-.../' inhabitants/claude-code/squid.conf > /tmp/claude.acl
+./bin/hermetarium create --wall weak --image myorg/claude:dev --acl /tmp/claude.acl
 ```
 
 Mix: take the Claude install + `HARNESS=claude` block from one template, Grok’s `GROK_CLI_CHAT_PROXY_BASE_URL` from another, or drop porter and put your own HTTP server on 8080. The wall does not care which program answers, only that something listens.

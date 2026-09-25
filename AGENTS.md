@@ -29,4 +29,4 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 - TLS bodies in the I/O log (metadata-only vs opt-in MITM)
 - Live ACL helpers / OPA / a different proxy
 
-Decided in SPEC.md (do not reopen): API keys live only on the supervisor, attached on the Squid path; both walls boot the same OCI image.
+Decided in SPEC.md (do not reopen): API keys must not live in the inhabitant image; they go in the host-side ACL passed to `create --acl`. Both walls boot the same OCI image.

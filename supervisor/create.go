@@ -27,14 +27,14 @@ func memMiB(o CreateOpts) int {
 	if o.MemMiB > 0 {
 		return o.MemMiB
 	}
-	return 128
+	return 512
 }
 
 func diskMB(o CreateOpts) int {
 	if o.DiskMB > 0 {
 		return o.DiskMB
 	}
-	return 256
+	return 1024
 }
 
 func runAfterGate(opts CreateOpts, id, netns string) error {

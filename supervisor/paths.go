@@ -13,7 +13,6 @@ const ProbeHost = "probe.hermetarium.test"
 const ProbePort = 18080
 const SquidPort = 3128
 const InboundPort = 18081
-const EchoPort = 8080
 
 const SquidImage = "ubuntu/squid:6.6-24.04_beta"
 const AlpineImage = "alpine:3.20"

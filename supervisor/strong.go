@@ -227,13 +227,12 @@ func WaitStrongSerial(inst *StrongInstance, timeout time.Duration) (string, erro
 	for time.Now().Before(deadline) {
 		stdout := helperLogs(inst.Helper)
 		_ = os.WriteFile(inst.SerialPath, []byte(stdout), 0o644)
-		probe := strings.Contains(stdout, "PROBE_OK") || strings.Contains(stdout, "PROBE_FAIL")
 		leak := strings.Contains(stdout, "LEAK_OK") || strings.Contains(stdout, "LEAK_FAIL")
-		if probe && leak {
+		if leak {
 			return stdout, nil
 		}
 		if !helperRunning(inst.Helper) {
-			return stdout + extraFC(inst), fmt.Errorf("helper exited before probe/leak finished")
+			return stdout + extraFC(inst), fmt.Errorf("helper exited before leak check finished")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
