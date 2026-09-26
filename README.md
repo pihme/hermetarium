@@ -24,7 +24,7 @@ The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facin
 
 One possible inhabitant from outside this repo is [Fregoli](https://github.com/pihme/fregoli), a self-evolving web app whose own Docker image serves HTTP on 8080 directly (no porter). Its server currently binds `127.0.0.1` only, which likely keeps it unreachable through the wall until [fregoli#1](https://github.com/pihme/fregoli/issues/1) is resolved.
 
-`examples/` is the test stand-in, not those products. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` is one small Go tool loop against a mock Messages API so CI can prove walls, keys, and uid 0 without a live model. The mock origin is `tests/vendormock/`. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
+`examples/` is the test stand-in, not the official CLIs above. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` is one small Go tool loop against a mock Messages API so CI can prove walls, keys, and uid 0 without a live model. The mock origin is `tests/vendormock/`. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
 
 Other trees: `firecracker-helper/` TAP + Firecracker for the strong wall (scripts are embedded); `tests/` for hello-world, agentd, and official-CLI smoke. Instance state is `var/<id>/` under the data root (this checkout, `HERMETARIUM_ROOT`, or `~/.local/share/hermetarium`). Firecracker assets cache in `.cache/` under the checkout, or `~/.cache/hermetarium` off-tree.
 
