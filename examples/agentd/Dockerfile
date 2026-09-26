@@ -1,4 +1,4 @@
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache curl iproute2 iptables
 COPY agentd /usr/local/bin/agentd
 ENV AGENTD_VENDOR=anthropic
