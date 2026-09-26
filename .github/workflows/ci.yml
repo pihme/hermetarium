@@ -34,7 +34,7 @@ jobs:
           test -c /dev/kvm
           ls -l /dev/kvm
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .cache
           key: ${{ runner.os }}-fc-${{ hashFiles('supervisor/strong.go', 'supervisor/oci.go', 'firecracker-helper/pack-oci.sh', 'examples/**') }}
