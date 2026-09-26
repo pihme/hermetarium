@@ -2,6 +2,7 @@
 
 This branch holds the static GitHub Pages site for `pihme/hermetarium`.
 
-Generated on 2026-09-26 from `main` at commit `ad2bb5e8f232beb481533a83ece702d2e3580d6d`.
+Generated on 2026-09-26 from `main` at commit `97a5de859ac438c814f320da9aefa1972ede00c0`.
 Single self-contained `index.html` (inline CSS, no build step, no trackers) plus `.nojekyll`.
+Generator: `gen.py` (layout B, sidebar handbook) + per-site content script.
 Regenerate when `main` changes; do not merge this branch into `main`.
