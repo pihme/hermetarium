@@ -1,6 +1,6 @@
 # Usage
 
-Operator CLI is `hermetarium` in full. See [README](README.md) for install. Build from this tree:
+Operator CLI is `hermetarium` in full. See the [readme](README.md) for install. Build from this tree:
 
 ```bash
 make build
@@ -91,7 +91,7 @@ access_log stdio:/log/access.log htm
 ./bin/hermetarium logs <id>
 ```
 
-That syncs Squid `access.log` into `var/<id>/io.jsonl` and prints JSON lines (`time`, `direction` `in`/`out`, `protocol`, `destination`, `allowed`, `bytes`, …). Bodies are off.
+That syncs Squid `access.log` into `var/<id>/io.jsonl` and prints JSON lines (`time`, `direction` `in`/`out`, `protocol`, `destination`, `port`, `method`, `allowed`, `bytes`). Bodies are off.
 
 On disk, same directory:
 
