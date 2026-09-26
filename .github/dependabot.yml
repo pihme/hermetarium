@@ -1,3 +1,7 @@
+# Commit prefixes follow the release rules in CONTRIBUTING.md (.github/scripts/release.py):
+#   Go modules -> fix(deps): patch release of hermetarium (go.mod is a release path)
+#   GitHub Actions -> ci(deps); example/inhabitant base images -> chore(deps): no release,
+#   because examples/ and inhabitants/ are not part of any released artifact
 version: 2
 updates:
   # One Go module (go.mod at the root; porter and examples are packages inside it)
@@ -9,7 +13,7 @@ updates:
     open-pull-requests-limit: 5
     labels: [dependencies]
     commit-message:
-      prefix: chore
+      prefix: fix
       include: scope
     groups:
       go-minor-and-patch:
