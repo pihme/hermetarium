@@ -4,7 +4,7 @@ Source-available under [PolyForm Noncommercial 1.0.0](LICENSE). Other licenses c
 
 ## Contributions
 
-This project does not accept outside code contributions at the moment, so that its licensing stays in one hand. Issues, bug reports and ideas are very welcome: please [open an issue](https://github.com/pihme/hermetarium/issues/new/choose). Pull requests from outside contributors will be closed without merging.
+This project does not accept outside code contributions at the moment, so that its licensing stays in one hand. Issues, bug reports and ideas are very welcome: please [open an issue](https://github.com/pihme/hermetarium/issues/new/choose).
 
 ## Good issues
 
