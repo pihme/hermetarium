@@ -17,7 +17,17 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
 - CLI name is `hermetarium` in full, never `herm`.
 - Firecracker helper scripts are embedded. Squid is a pulled image. `create --acl FILE` copies that Squid config into the instance dir and mounts it. Wall configs live next to the habitat Dockerfile (`examples/*/squid.conf`, `inhabitants/*/squid.conf`). Data dir is `HERMETARIUM_ROOT`, else this checkout, else XDG. Probe and vendor-mock are test sidecars.
-- **Versions:** two semver artifacts, tags `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`. Conventional commits (`feat:` minor, `fix:`/`perf:` patch, `feat!:` or `BREAKING CHANGE:` major). A commit only bumps the artifact whose paths it touches (`supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile` → hermetarium; `porter/` → porter). Docs/tests/examples/inhabitants do not bump. `.github/scripts/release.py` on push to `main` after CI.
+- **Versions:** two semver artifacts, tagged independently. [Conventional Commits](https://www.conventionalcommits.org/): `feat:` minor, `fix:`/`perf:` patch, `feat!:`/`fix!:` or a `BREAKING CHANGE:` footer major; `docs:`, `test:`, `chore:`, `ci:` do not bump. A commit only bumps the artifact whose paths it touches:
+
+  | Artifact | Tag | Bumped when the commit touches |
+  | --- | --- | --- |
+  | hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile` |
+  | porter | `porter/vX.Y.Z` | `porter/` |
+
+  Docs, tests, examples and inhabitants alone do not bump. After CI on a push to `main`, `.github/scripts/release.py` creates the GitHub Release and attaches a linux-amd64 binary.
+- **Dependabot** (`.github/dependabot.yml`): Go modules `fix(deps):` (hermetarium patch release), GitHub Actions `ci(deps):`, example/inhabitant base images `chore(deps):` (no release). Merge its PRs only with green CI.
+- **Changes on main:** keep them small; `make test` should pass on linux-amd64 with Docker and KVM.
+- Outside pull requests are not accepted (see `CONTRIBUTING.md`); issues are.
 - `examples/` = stand-in inhabitant images (echo, agentd). `inhabitants/` = official `claude` / `grok` / `dsh`. `tests/` holds integration tests, vendor-mock, and probe. Do not add Universal APP / TypeScript host / scanners until asked.
 - Prefer small, reversible files. Hello-world is both walls, fail-closed egress, probe, I/O log, inbound echo (`examples/echo/`). Coding-agent stand-in is one `examples/agentd/` image, not three vendor-named copies.
 - License: **PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not OSI Open Source. Do not relicense to Apache/MIT/GPL.

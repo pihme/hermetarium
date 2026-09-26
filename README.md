@@ -15,7 +15,7 @@ The CLI name is `hermetarium` in full; do not shorten to `herm`.
 - [Website](https://pihme.github.io/hermetarium/) — handbook and current status
 - [Specification](SPEC.md) — product spec
 - [Usage guide](USAGE.md) — walls, Squid, logs, custom images, porter
-- [Contributing](CONTRIBUTING.md) — tests, commits, versions; issues welcome, outside pull requests not accepted for now
+- [Contributing](CONTRIBUTING.md) — issues welcome, outside pull requests not accepted for now
 
 ## Getting started
 

@@ -1,4 +1,4 @@
-# Commit prefixes follow the release rules in CONTRIBUTING.md (.github/scripts/release.py):
+# Commit prefixes follow the release rules in AGENTS.md (.github/scripts/release.py):
 #   Go modules -> fix(deps): patch release of hermetarium (go.mod is a release path)
 #   GitHub Actions -> ci(deps); example/inhabitant base images -> chore(deps): no release,
 #   because examples/ and inhabitants/ are not part of any released artifact

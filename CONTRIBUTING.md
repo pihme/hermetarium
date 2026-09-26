@@ -6,9 +6,13 @@ Source-available under [PolyForm Noncommercial 1.0.0](LICENSE). Other licenses c
 
 This project does not accept outside code contributions at the moment, so that its licensing stays in one hand. Issues, bug reports and ideas are very welcome: please [open an issue](https://github.com/pihme/hermetarium/issues/new/choose). Pull requests from outside contributors will be closed without merging.
 
-The sections below describe how the maintainer works on the code.
+## Good issues
 
-## Run tests
+Pick the matching [issue form](https://github.com/pihme/hermetarium/issues/new/choose) (bug report, security / isolation, documentation, feature request, question). A good report names the Hermetarium version or commit, the wall (weak or strong), host OS and architecture, the habitat you ran, the command, what you expected and what happened, with the relevant part of the I/O log if it helps.
+
+**Security:** the tracker is public. Do not post working exploits, real keys or anything that endangers running habitats. For a serious vulnerability, open an issue that only names the affected area and ask for a private channel.
+
+## Build and test locally
 
 Needs Docker and Go 1.24+. Strong-wall tests also need `/dev/kvm` and **x86_64**.
 
@@ -16,7 +20,7 @@ Needs Docker and Go 1.24+. Strong-wall tests also need `/dev/kvm` and **x86_64**
 make test
 ```
 
-That is the merge gate (hello-world, echo, agentd mock suite, official-CLI smoke). Optional live suite (real vendor keys):
+The default suite (hello-world, echo, agentd against a mock vendor, official-CLI smoke) needs no vendor account. Optional live suite with real vendor keys:
 
 ```bash
 export HERMETARIUM_ANTHROPIC_API_KEY=...
@@ -25,38 +29,4 @@ export HERMETARIUM_DEEPSEEK_API_KEY=...
 make test-live
 ```
 
-Tests use this tree (`examples/`, `inhabitants/`). Firecracker helper scripts are embedded. Squid is a pulled image. From another directory: `export HERMETARIUM_ROOT=/path/to/hermetarium`.
-
-## Commits and versions
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat:` minor
-- `fix:` or `perf:` patch
-- `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer: major
-- `docs:`, `test:`, `chore:`, `ci:` do not bump a release
-
-Two artifacts, tagged independently:
-
-| Artifact | Tag | Bumped when the commit touches |
-| --- | --- | --- |
-| hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile` |
-| porter | `porter/vX.Y.Z` | `porter/` |
-
-A commit that only changes docs, tests, examples, or inhabitants does not cut a release. After CI on `main`, `.github/scripts/release.py` creates the GitHub Release and attaches a linux-amd64 binary.
-
-## Go module
-
-```
-github.com/pihme/hermetarium
-```
-
-Do not rewrite the supervisor in TypeScript, Rust, or a WASM-only runtime. Do not link Squid.
-
-## Changes on main
-
-For the maintainer's own changes and Dependabot pull requests:
-
-- Keep changes small.
-- `make test` should pass on linux-amd64 with Docker and KVM.
-- CLI name is `hermetarium` in full, never `herm`.
+Tests use this tree (`examples/`, `inhabitants/`). From another directory: `export HERMETARIUM_ROOT=/path/to/hermetarium`.
