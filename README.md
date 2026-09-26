@@ -34,7 +34,7 @@ make build
 
 **From a release** (linux-amd64): [hermetarium releases](https://github.com/pihme/hermetarium/releases?q=hermetarium) and [porter releases](https://github.com/pihme/hermetarium/releases?q=porter). Download `hermetarium-linux-amd64`, `chmod +x`, and pass `--acl` a Squid config from the habitat you are running. Porter is copied into inhabitant images, not run next to the supervisor.
 
-`hermetarium version` and `porter version` print semver (`dev` on a local `make build`). GitHub Releases attach linux-amd64 binaries; tags are `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`. Go import path: `github.com/pihme/hermetarium`.
+`hermetarium version` and `porter version` print semver. A local `make build` stamps the `git describe` version (for example `0.4.0-20-g166358c`); a plain `go build` prints `dev`. GitHub Releases attach linux-amd64 binaries; tags are `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`. Go import path: `github.com/pihme/hermetarium`.
 
 **Hello world**
 
