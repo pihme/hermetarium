@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
         with:
@@ -54,7 +54,7 @@ jobs:
       HERMETARIUM_XAI_API_KEY: ${{ secrets.HERMETARIUM_XAI_API_KEY }}
       HERMETARIUM_DEEPSEEK_API_KEY: ${{ secrets.HERMETARIUM_DEEPSEEK_API_KEY }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
