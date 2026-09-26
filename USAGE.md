@@ -146,8 +146,8 @@ CMD ["/usr/local/bin/porter"]
 ```
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
-docker build -t myorg/claude:dev -f Dockerfile .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o inhabitants/claude-code/porter ./porter
+docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code   # context holds settings.json + porter
 sed 's/__VENDOR_KEY__/sk-ant-.../' inhabitants/claude-code/squid.conf > /tmp/claude.acl
 ./bin/hermetarium create --wall weak --image myorg/claude:dev --acl /tmp/claude.acl
 ```
