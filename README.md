@@ -2,9 +2,11 @@
 
 [![CI](https://github.com/pihme/hermetarium/actions/workflows/ci.yml/badge.svg)](https://github.com/pihme/hermetarium/actions/workflows/ci.yml)
 
-Sealed habitat where agents live. They wake up inside an OCI image and may change that world freely. They cannot leave. Every packet in or out is logged on the wall.
+An agent that can run a shell and install packages should not run on the operator's machine. Hermetarium is the world the agent wakes up in: an **inhabitant** boots inside an OCI image and may use its Linux freely (shell, package managers, rewriting files), as root. It is not a per-command sandbox and not a tool the agent calls.
 
-Not a tool an agent calls. The CLI name is `hermetarium` in full; do not shorten to `herm`.
+The **wall** is outside the image. A Go **supervisor** boots the image behind either a weak (Docker/`runc`) or strong (Firecracker microVM) wall, starts **Squid** as the only network path with an operator-supplied ACL, and turns Squid's access log into an I/O log. If that path cannot be applied, the habitat does not start (fail closed). API keys never live in the image; Squid injects them from the host-side ACL.
+
+The CLI name is `hermetarium` in full; do not shorten to `herm`.
 
 - [Website](https://pihme.github.io/hermetarium/) — handbook and current status
 - [Specification](SPEC.md) — product spec
