@@ -156,7 +156,7 @@ Mix: take the Claude install + `HARNESS=claude` block from one template, Grok’
 
 ## Different base images (Docker-in-Docker, Kubernetes-in-Docker)
 
-The stock bases are `debian:bookworm-slim` and `node:22-bookworm-slim`. You can `FROM` something else if you keep the contract above (root, 8080, `ip`, vendor URL, dummy key).
+The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. You can `FROM` something else if you keep the contract above (root, 8080, `ip`, vendor URL, dummy key).
 
 **Docker-in-Docker.** Start from a dind-capable image (for example `docker:24-dind` or Debian plus Docker Engine). Install the CLI and porter on top. The engine inside the box typically needs cgroup access (`--privileged` on the **box**, or the right cgroup mounts). The supervisor’s weak wall today only adds `NET_ADMIN` to the box, not `--privileged` and not the **host** Docker socket. Do not mount the host Docker socket into the habitat (that is a hole in the wall). Nested Docker on the **strong** wall is a poor fit: Firecracker’s guest kernel is old and small; dind wants a modern kernel and a lot of RAM.
 
