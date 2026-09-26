@@ -2,6 +2,12 @@
 
 Source-available under [PolyForm Noncommercial 1.0.0](LICENSE). Other licenses can be negotiated with the copyright holder.
 
+## Contributions
+
+This project does not accept outside code contributions at the moment, so that its licensing stays in one hand. Issues, bug reports and ideas are very welcome: please [open an issue](https://github.com/pihme/hermetarium/issues/new/choose). Pull requests from outside contributors will be closed without merging.
+
+The sections below describe how the maintainer works on the code.
+
 ## Run tests
 
 Needs Docker and Go 1.24+. Strong-wall tests also need `/dev/kvm` and **x86_64**.
@@ -47,7 +53,9 @@ github.com/pihme/hermetarium
 
 Do not rewrite the supervisor in TypeScript, Rust, or a WASM-only runtime. Do not link Squid.
 
-## Pull requests
+## Changes on main
+
+For the maintainer's own changes and Dependabot pull requests:
 
 - Keep changes small.
 - `make test` should pass on linux-amd64 with Docker and KVM.
