@@ -7,3 +7,4 @@ squid/vendor-mock
 .DS_Store
 .idea/
 *.iml
+inhabitants/claude-code/porter
