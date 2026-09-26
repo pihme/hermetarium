@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Website and handbook
+    url: https://pihme.github.io/hermetarium/
+    about: Getting started, architecture and current status of Hermetarium.

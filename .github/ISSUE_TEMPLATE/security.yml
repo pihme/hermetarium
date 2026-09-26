@@ -1,0 +1,51 @@
+name: Security / isolation
+description: The wall, egress control, key handling or I/O log does not hold as promised.
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This tracker is public. Do **not** post working exploits, real keys or anything that endangers running habitats. For a serious vulnerability, open an issue that only describes the affected area and ask for a private channel.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Egress not blocked / bypasses Squid
+        - Vendor key visible inside the box
+        - Escape from the weak wall
+        - Escape from the strong wall
+        - Traffic missing from the I/O log
+        - Habitat starts although the path could not be applied (fail open)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: wall
+    attributes:
+      label: Wall
+      options:
+        - weak (Docker/runc)
+        - strong (Firecracker)
+        - both
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `hermetarium version`, or the commit.
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happens
+      description: Describe the behavior at a level that is safe to share publicly.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Host OS and kernel, architecture, Docker version.

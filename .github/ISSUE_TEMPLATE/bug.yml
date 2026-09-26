@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in Hermetarium does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please check the open issues first; the website's Current status lists known gaps. If the bug lets an inhabitant get past the wall or leak a key, use the Security template instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `hermetarium version` (and `porter version` if porter is involved), or the commit.
+      placeholder: 0.4.0
+    validations:
+      required: true
+  - type: dropdown
+    id: wall
+    attributes:
+      label: Wall
+      options:
+        - weak (Docker/runc)
+        - strong (Firecracker)
+        - both
+        - not wall-related
+    validations:
+      required: true
+  - type: input
+    id: image
+    attributes:
+      label: Inhabitant image
+      description: Which image you passed to `--image` (example, inhabitant template, or your own).
+      placeholder: inhabitants/claude-code built as myorg/claude:dev
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, including the `--acl` file you used (redact keys).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Error output, `hermetarium logs <id>` excerpt (redact keys).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Host OS and kernel, architecture, Docker version, whether /dev/kvm is available.
+      placeholder: Ubuntu 24.04, x86_64, Docker 27.x, /dev/kvm yes

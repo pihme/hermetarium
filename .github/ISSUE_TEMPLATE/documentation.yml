@@ -1,0 +1,23 @@
+name: Documentation
+description: Something in the readme, spec, usage guide or website is wrong, unclear or missing.
+labels: ["documentation"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: File and section, or website URL.
+      placeholder: USAGE.md, "Squid ACL" / https://pihme.github.io/hermetarium/#start
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+      description: If the docs disagree with the code, say which part of the code.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or fix
