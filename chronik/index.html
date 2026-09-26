@@ -12,7 +12,11 @@ aside{position:fixed;inset:0 auto 0 0;width:270px;background:var(--side);border-
 .lbl{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);margin:1.2rem 0 .4rem;font-weight:600}
 aside nav a{display:block;padding:.32rem .7rem;border-radius:7px;color:var(--fg);text-decoration:none;font-size:.93rem;border-left:2px solid transparent}
 aside nav a:hover{background:color-mix(in srgb,var(--acc) 10%,transparent);border-left-color:var(--acc)}
-.side-foot{margin-top:auto;font-size:.75rem;color:var(--mut);padding-top:1.5rem}
+.marg{margin-top:auto;padding-top:1rem;border-top:1px dashed var(--line);font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif}
+.marg-t{font-style:italic;font-size:1rem;color:var(--acc);letter-spacing:.02em}.marg-t span{font-style:normal;margin-right:.15rem}
+.marg-s{font-style:italic;font-size:.78rem;color:var(--mut);margin:.1rem 0 .45rem}
+aside .marg nav a{font-style:italic;font-size:.98rem}
+.side-foot{margin-top:0;font-size:.75rem;color:var(--mut);padding-top:1rem}
 main{margin-left:270px;padding:3rem clamp(1.5rem,5vw,4.5rem) 4rem;max-width:calc(270px + 900px)}
 .crumb{font-size:.82rem;color:var(--mut)}h1{font-size:2.6rem;letter-spacing:-.03em;margin:.3rem 0 .6rem;line-height:1.1}
 .lead{font-size:1.18rem;color:var(--mut);margin:0 0 1.2rem;max-width:44rem}.badges{font-size:.85rem;color:var(--mut)}
@@ -40,7 +44,7 @@ footer{margin-top:3rem;padding-top:1.4rem;border-top:1px solid var(--line);color
 .dx-a{stroke:var(--acc);stroke-width:2;fill:none}.dx-a.d{stroke-dasharray:5 5}.dx-m{fill:var(--acc)}.dx-l{fill:var(--mut);font-size:12px}
 .dia-cap{font-size:.85rem;color:var(--mut);margin:-.8rem 0 1.2rem}
 @media(max-width:860px){aside{position:sticky;top:0;inset:auto;width:auto;height:auto;flex-direction:row;align-items:center;gap:1rem;padding:.7rem 1rem;z-index:3;overflow-x:auto;white-space:nowrap}
-.ver,.lbl,.side-foot,.ext{display:none}aside nav{display:flex}aside nav a{border-left:0;padding:.25rem .55rem}
+.ver,.lbl,.side-foot,.ext,.marg-t,.marg-s{display:none}.marg{margin:0;padding:0 0 0 .6rem;border-top:0;border-left:1px dashed var(--line)}aside nav{display:flex}aside nav a{border-left:0;padding:.25rem .55rem}
 main{margin-left:0;padding:2rem 1.2rem 3rem}.grid{grid-template-columns:1fr}h1{font-size:2.1rem}}
 
 .period{max-width:46rem}.period h2{font-size:1.3rem}.period h2 .span{color:var(--mut);font-weight:400;font-size:.95rem}
@@ -48,9 +52,9 @@ main{margin-left:0;padding:2rem 1.2rem 3rem}.grid{grid-template-columns:1fr}h1{f
 .period p::first-letter{float:left;font-size:3.4em;line-height:.8;padding:.1em .12em 0 0;color:var(--acc);font-weight:600}
 .period h2{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-weight:600;letter-spacing:.01em}
 aside nav a.on{border-left-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)}</style></head><body><aside><a class="brand" href="../"><span class="mark" aria-hidden="true">H</span>Hermetarium</a><div class="ver">Go · Docker · Firecracker · Squid</div>
-<div class="lbl">Handbook</div><nav><a href="../#what">What it is</a><a href="../#concepts">Key concepts</a><a href="../#start">Getting started</a><a href="../#layout">Architecture &amp; layout</a><a href="../#links">Links</a><a href="../chronik/" aria-current="page" class="on">Chronicles</a></nav>
+<div class="lbl">Handbook</div><nav><a href="../#what">What it is</a><a href="../#concepts">Key concepts</a><a href="../#start">Getting started</a><a href="../#layout">Architecture &amp; layout</a><a href="../#links">Links</a></nav>
 <div class="lbl ext">Elsewhere</div><nav class="ext"><a href="https://github.com/pihme/hermetarium">GitHub repository</a><a href="https://github.com/pihme/hermetarium/issues">Issues</a><a href="https://pihme.github.io/fregoli/">Fregoli</a></nav>
-<div class="side-foot">main@97a5de8 · 2026-09-26</div></aside>
-<main><div class="crumb"><a href="../">pihme / hermetarium</a> / chronicles</div><h1>Chronicles</h1>
+<div class="marg"><div class="marg-t"><span aria-hidden="true">❦</span> Marginalia</div><div class="marg-s">doodles in the margin</div><nav><a href="../chronik/" aria-current="page" class="on">Chronicles</a></nav></div><div class="side-foot">main@97a5de8 · 2026-09-26</div></aside>
+<main><div class="crumb"><a href="../">pihme / hermetarium</a> / marginalia / chronicles</div><h1>Chronicles</h1>
 <p class="lead">The history of Hermetarium as set down so far, newest first.</p>
 <section class="period"><h2>September 2026</h2><p>In the ninth month of the year of our Lord 2026, upon the sixth day, the house of Hermetarium was raised upon GitHub and its first commit laid down; upon the tenth day it received its first star. The great labour came upon the fifteenth day: a CI workflow, inbound HTTP through Squid with the echo example, the selfsame OCI image made to boot upon Firecracker, coding-agent examples, and dwellings for the official coding CLIs together with porter, their adapter. That night <code>create</code> learned to take any OCI image by <code>--image</code>, the README was written anew and a usage guide added, and the first releases went forth: <a href="https://github.com/pihme/hermetarium/releases/tag/hermetarium/v0.1.0">hermetarium v0.1.0</a> and porter v0.1.0, and but minutes later v0.2.0 with the Go module path and contributing docs. Upon the sixteenth day v0.3.0 had Squid drawn as a pulled image, the Firecracker helper scripts embedded within, and XDG directories used outside a checkout; and after a refactor that left but a single agentd example, <a href="https://github.com/pihme/hermetarium/releases/tag/hermetarium/v0.4.0">v0.4.0</a> brought forth <code>create --acl</code>, each habitat keeping its Squid wall config beside its Dockerfile. That same evening the scribes set right what was written of DeepSeek Harness (<code>dsh</code>) session continuity, and porter tests were added. Upon the seventeenth day a second star was given. Upon the twenty-fifth day a <a href="https://github.com/pihme/hermetarium/commit/ad2bb5e">refactor</a> brought the ACL, probe and docs into accord with the copied <code>--acl</code> file; and upon the twenty-sixth the scribes named <a href="https://pihme.github.io/fregoli/">Fregoli</a> as one who might dwell within, whilst this website was raised upon GitHub Pages and that same day gained a sidebar, a drawing of its architecture, and these chronicles.</p></section><footer>Last updated 2026-09-26 · generated from <a href="https://github.com/pihme/hermetarium/tree/97a5de859ac438c814f320da9aefa1972ede00c0"><code>main@97a5de8</code></a> · <a href="https://github.com/pihme/hermetarium/blob/main/LICENSE">PolyForm Noncommercial 1.0.0</a> (source-available, not OSI Open Source)</footer></main></body></html>
