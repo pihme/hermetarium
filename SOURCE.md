@@ -2,7 +2,7 @@
 
 This branch holds the static GitHub Pages site for `pihme/hermetarium`.
 
-Generated on 2026-09-27 from `main` at commit `2c2bbf31a5ea43375e628b43a0662b266a20b5f9`.
+Generated on 2026-10-01 from `main` at commit `2c2bbf31a5ea43375e628b43a0662b266a20b5f9`.
 Self-contained `index.html`, `chronik/index.html` (Chronicles) `jigsaw/index.html` (family page, from `family.json`) and, where present, `namesake/index.html` (from `namesake-<repo>.json`), all with inline CSS, no build step, no trackers; plus favicons (`favicon.svg`, `favicon.png`, `apple-touch-icon.png`) and `.nojekyll`.
 Generator: `gen.py` (layout B, sidebar handbook) + per-site content script + `chronik-<repo>.json` chronicle data + `family.json` project-family registry + `status-<repo>.json` (Current status; open issues and releases pulled live via `gh` at build time).
 Regenerate when `main` changes; do not merge this branch into `main`.
