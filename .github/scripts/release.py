@@ -4,6 +4,17 @@
 Tags: hermetarium/vX.Y.Z and porter/vX.Y.Z
 Commit type (feat/fix/BREAKING) chooses major/minor/patch.
 Only commits that touch a component's paths count for that component.
+
+While the version is 0.x a breaking change bumps the minor version instead
+(SemVer: anything may change before 1.0.0; 1.0.0 is a deliberate decision).
+
+Release-As: a "Release-As: <artifact>@X.Y.Z" commit footer (git trailer) since the
+artifact's last tag sets exactly that version, from any commit and any path, so an
+empty commit triggers it (one footer line per artifact):
+  git commit --allow-empty -m "chore: release 1.0" -m "Release-As: hermetarium@1.0.0"
+The bare form "Release-As: X.Y.Z" is ignored with a warning: it names no artifact.
+Upwards only: a version at or below the current one is ignored with a warning.
+Several footers for one artifact: the highest wins.
 """
 from __future__ import annotations
 
@@ -81,6 +92,8 @@ def parse_semver(tag: str, prefix: str) -> Tuple[int, int, int]:
 
 def bump(ver: Tuple[int, int, int], kind: str) -> Tuple[int, int, int]:
     major, minor, patch = ver
+    if kind == "major" and major == 0:
+        kind = "minor"  # pre-1.0: breaking changes bump the minor version
     if kind == "major":
         return (major + 1, 0, 0)
     if kind == "minor":
@@ -122,6 +135,48 @@ def log_kinds(since: Optional[str], paths: List[str]) -> List[Tuple[str, str]]:
     return rows
 
 
+RELEASE_AS = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_warned = set()
+
+
+def warn(msg: str) -> None:
+    if msg in _warned:
+        return
+    _warned.add(msg)
+    print(("::warning::" if os.environ.get("GITHUB_ACTIONS") else "warning: ") + msg, file=sys.stderr)
+
+
+def release_as(since: Optional[str], name: str) -> Optional[Tuple[Tuple[int, int, int], str]]:
+    """Highest Release-As footer for this artifact since its last tag: (version, short sha)."""
+    names = [c["name"] for c in COMPONENTS]
+    rng = f"{since}..HEAD" if since else "HEAD"
+    out = subprocess.run(["git", "log", rng, "--format=%h%x1f%(trailers:key=Release-As,valueonly,separator=%x1d)%x1e"],
+                         capture_output=True, text=True).stdout
+    best = None
+    for rec in out.split("\x1e"):
+        sha, _, vals = rec.strip().partition("\x1f")
+        for raw in (v.strip() for v in vals.split("\x1d")):
+            if not raw:
+                continue
+            target, _, ver = raw.rpartition("@")
+            if not target and len(names) > 1:
+                warn(f"{sha}: 'Release-As: {raw}' ignored: name the artifact, e.g. 'Release-As: {names[0]}@{raw}' ({', '.join(names)})")
+                continue
+            if target and target not in names:
+                warn(f"{sha}: 'Release-As: {raw}' ignored: unknown artifact {target!r} ({', '.join(names)})")
+                continue
+            if target and target != name:
+                continue
+            m = RELEASE_AS.match(ver)
+            if not m:
+                warn(f"{sha}: 'Release-As: {raw}' ignored: not X.Y.Z")
+                continue
+            v = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            if best is None or v > best[0]:
+                best = (v, sha)
+    return best
+
+
 def strongest(kinds: List[str]) -> Optional[str]:
     if "major" in kinds:
         return "major"
@@ -145,6 +200,14 @@ def main() -> int:
         prev = last_tag(prefix)
         kinds_subj = log_kinds(prev, c["paths"])
         kind = strongest([k for k, _ in kinds_subj])
+        base = parse_semver(prev, prefix) if prev else (0, 0, 0)
+        forced = release_as(prev, c["name"])
+        if forced and forced[0] <= base:
+            warn(f"{forced[1]}: 'Release-As' {c['name']} {fmt_ver(forced[0])} ignored: not above {fmt_ver(base)}")
+            forced = None
+        if forced:
+            kind = "Release-As " + forced[1]
+            kinds_subj = kinds_subj + [("", f"version set by a Release-As footer in {forced[1]}")]
         if not kind:
             touched = run(["git", "rev-list", "-1", "HEAD", "--"] + c["paths"], check=False)
             if not prev and touched:
@@ -153,8 +216,7 @@ def main() -> int:
             else:
                 print(f"{c['name']}: no releasable commits since {prev or 'start'}")
                 continue
-        base = parse_semver(prev, prefix) if prev else (0, 0, 0)
-        nxt = fmt_ver(bump(base, kind))
+        nxt = fmt_ver(forced[0]) if forced else fmt_ver(bump(base, kind))
         tag = prefix + nxt
         notes = "\n".join(f"- {s}" for _, s in kinds_subj) or f"{c['name']} {nxt}"
         print(f"{c['name']}: {prev or '0.0.0'} -> {tag} ({kind})")
