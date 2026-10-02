@@ -17,7 +17,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
 - CLI name is `hermetarium` in full, never `herm`.
 - Firecracker helper scripts are embedded. Squid is a pulled image. `create --acl FILE` copies that Squid config into the instance dir and mounts it. Wall configs live next to the habitat Dockerfile (`examples/*/squid.conf`, `inhabitants/*/squid.conf`). Data dir is `HERMETARIUM_ROOT`, else this checkout, else XDG. Probe and vendor-mock are test sidecars.
-- **Versions:** two semver artifacts, tagged independently. [Conventional Commits](https://www.conventionalcommits.org/): `feat:` minor, `fix:`/`perf:` patch, `feat!:`/`fix!:` or a `BREAKING CHANGE:` footer major; `docs:`, `test:`, `chore:`, `ci:` do not bump. A commit only bumps the artifact whose paths it touches:
+- **Versions:** two semver artifacts, tagged independently. [Conventional Commits](https://www.conventionalcommits.org/): `feat:` minor, `fix:`/`perf:` patch, `feat!:`/`fix!:` or a `BREAKING CHANGE:` footer major (minor while the version is 0.x); `docs:`, `test:`, `chore:`, `ci:` do not bump. A commit only bumps the artifact whose paths it touches:
 
   | Artifact | Tag | Bumped when the commit touches |
   | --- | --- | --- |
@@ -25,6 +25,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
   | porter | `porter/vX.Y.Z` | `porter/` |
 
   Docs, tests, examples and inhabitants alone do not bump. After CI on a push to `main`, `.github/scripts/release.py` creates the GitHub Release and attaches a linux-amd64 binary.
+- **Release 1.0** (or any chosen version): an empty commit with one footer per artifact, naming it: `Release-As: hermetarium@1.0.0` and/or `Release-As: porter@1.0.0`, e.g. `git commit --allow-empty -m "chore: release 1.0" -m "Release-As: hermetarium@1.0.0"`. A bare `Release-As: 1.0.0` names no artifact and is ignored with a warning. It releases by itself, regardless of type or paths; upwards only (a version at or below the current one is ignored with a warning). Only use it when the maintainer decided the version.
 - **Dependabot** (`.github/dependabot.yml`): Go modules `fix(deps):` (hermetarium patch release), GitHub Actions `ci(deps):`, example/inhabitant base images `chore(deps):` (no release). Merge its PRs only with green CI.
 - **Changes on main:** keep them small; `make test` should pass on linux-amd64 with Docker and KVM.
 - Outside pull requests are not accepted (see `CONTRIBUTING.md`); issues are.
