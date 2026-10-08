@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,10 @@ func Run(args []string) int {
 		ex, err := ResolveCreate(rest)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		if wall != "strong" && (flagPresent(rest, "--mem") || flagPresent(rest, "--disk")) {
+			fmt.Fprintln(os.Stderr, "--mem and --disk apply only to --wall strong")
 			return 2
 		}
 		id, err := NewID()
@@ -135,7 +140,31 @@ func flag(args []string, name, fallback string) string {
 	return fallback
 }
 
+func flagPresent(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
+}
+
+// sizeFlag reads a positive integer. A missing flag returns fallback.
+func sizeFlag(args []string, name string, fallback int) (int, error) {
+	if !flagPresent(args, name) {
+		return fallback, nil
+	}
+	raw := strings.TrimSpace(flag(args, name, ""))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s requires a positive integer", name)
+	}
+	return n, nil
+}
+
 // ResolveCreate requires --image and --acl.
+// --mem and --disk are optional; defaults are 512 MiB and 1024 MiB.
+// The caller rejects those flags unless --wall strong.
 func ResolveCreate(args []string) (CreateOpts, error) {
 	image := strings.TrimSpace(flag(args, "--image", ""))
 	if image == "" {
@@ -145,11 +174,20 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	if acl == "" {
 		return CreateOpts{}, fmt.Errorf("create requires --acl FILE")
 	}
-	return CreateOpts{Image: image, ACL: acl, MemMiB: 512, DiskMB: 1024}, nil
+	mem, err := sizeFlag(args, "--mem", 512)
+	if err != nil {
+		return CreateOpts{}, err
+	}
+	disk, err := sizeFlag(args, "--disk", 1024)
+	if err != nil {
+		return CreateOpts{}, err
+	}
+	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk}, nil
 }
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>
