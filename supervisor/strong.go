@@ -52,7 +52,7 @@ func download(url, dest string) error {
 	tmp := dest + ".part"
 	_, err := Docker(3*time.Minute, "run", "--rm",
 		"-v", filepath.Dir(dest)+":/out",
-		"alpine:3.20", "sh", "-c",
+		AlpineImage, "sh", "-c",
 		"apk add --no-cache curl >/dev/null && curl -fL -o /out/"+filepath.Base(tmp)+" "+url+" && mv /out/"+filepath.Base(tmp)+" /out/"+filepath.Base(dest),
 	)
 	return err
@@ -77,7 +77,7 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	if _, err := os.Stat(firecracker); err != nil {
 		_, err = Docker(2*time.Minute, "run", "--rm",
 			"-v", CacheDir(root)+":/out",
-			"alpine:3.20", "sh", "-c",
+			AlpineImage, "sh", "-c",
 			"apk add --no-cache tar >/dev/null && tar -xzf /out/"+filepath.Base(tgz)+" -C /tmp && find /tmp -name 'firecracker-*x86_64' ! -name '*debug*' | head -1 | xargs -I{} cp {} /out/firecracker && chmod +x /out/firecracker",
 		)
 		if err != nil {

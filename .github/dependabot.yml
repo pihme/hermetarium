@@ -2,6 +2,7 @@
 #   Go modules -> fix(deps): patch release of hermetarium (go.mod is a release path)
 #   GitHub Actions -> ci(deps); example/inhabitant base images -> chore(deps): no release,
 #   because examples/ and inhabitants/ are not part of any released artifact
+#   supervisor/helper (the image the supervisor pulls) -> fix(deps): patch release
 version: 2
 updates:
   # One Go module (go.mod at the root; porter and examples are packages inside it)
@@ -51,4 +52,21 @@ updates:
       include: scope
     groups:
       docker-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Supervisor helper image. supervisor/ is a hermetarium release path, and the
+  # binary reads this FROM line, so a bump is fix(deps): a patch release.
+  - package-ecosystem: docker
+    directories:
+      - /supervisor/helper
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: fix
+      include: scope
+    groups:
+      helper-image-minor-and-patch:
         update-types: [minor, patch]

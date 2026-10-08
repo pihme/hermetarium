@@ -15,7 +15,6 @@ const SquidPort = 3128
 const InboundPort = 18081
 
 const SquidImage = "ubuntu/squid:6.6-24.04_beta"
-const AlpineImage = "alpine:3.20"
 const BusyboxImage = "busybox:1.36.1"
 const NetToolsImage = "hermetarium-nettools:local"
 

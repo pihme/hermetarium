@@ -80,7 +80,7 @@ func readFile(path string) ([]byte, error) {
 	}
 	out, err := Docker(15*time.Second, "run", "--rm",
 		"-v", filepath.Dir(path)+":/log:ro",
-		"alpine:3.20", "cat", "/log/"+filepath.Base(path),
+		AlpineImage, "cat", "/log/"+filepath.Base(path),
 	)
 	if err != nil {
 		return nil, err

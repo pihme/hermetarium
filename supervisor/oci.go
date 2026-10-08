@@ -76,7 +76,7 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 		"-v", script+":/pack-oci.sh:ro",
 		"-v", work+":/in",
 		"-v", work+":/out",
-		"alpine:3.20", "sh", "/pack-oci.sh",
+		AlpineImage, "sh", "/pack-oci.sh",
 	)
 	if err != nil {
 		return "", err
