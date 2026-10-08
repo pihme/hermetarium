@@ -149,7 +149,7 @@ Whether instances are ephemeral or long-lived is not decided.
 
 ## 11. Tests
 
-Operator talk in tests is HTTP (`hermetarium url`), never `docker exec`. Live tests are `//go:build live` so `make test` cannot see them.
+What the suite checks today is [TESTING.md](TESTING.md). Operator talk in tests is HTTP (`hermetarium url`), never `docker exec`. Live tests are `//go:build live` so `make test` cannot see them.
 
 ### Hello-world (implemented)
 

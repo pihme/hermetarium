@@ -14,6 +14,7 @@ The CLI name is `hermetarium` in full; do not shorten to `herm`.
 
 - [Website](https://pihme.github.io/hermetarium/) — handbook and current status
 - [Specification](SPEC.md) — product spec
+- [Testing](TESTING.md) — what the suite checks
 - [Usage guide](USAGE.md) — walls, Squid, logs, custom images, porter
 - [Contributing](CONTRIBUTING.md) — issues welcome, outside pull requests not accepted for now
 
@@ -113,7 +114,7 @@ Firecracker assets cache in `.cache/` under the checkout, or `~/.cache/hermetari
 
 ## Tests
 
-Two suites. Spec: [specification, section 11](SPEC.md#11-tests).
+Two suites. Requirements: [specification, section 11](SPEC.md#11-tests). What each test checks: [TESTING.md](TESTING.md).
 
 **Mocked (CI default).** `make test`. No vendor account. Hello-world (both walls, probe, echo) and one agentd example against a mock vendor API. Official-CLI tests only check that `claude` / `grok` / `dsh` are on PATH and porter is up; they do not claim a mock-driven chat session. GitHub Actions job `test` runs this on every push to `main` and on every pull request.
 

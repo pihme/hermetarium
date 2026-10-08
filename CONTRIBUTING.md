@@ -20,7 +20,7 @@ Needs Docker and Go 1.24+. Strong-wall tests also need `/dev/kvm` and **x86_64**
 make test
 ```
 
-The default suite (hello-world, echo, agentd against a mock vendor, official-CLI smoke) needs no vendor account. Optional live suite with real vendor keys:
+The default suite (hello-world, echo, agentd against a mock vendor, official-CLI smoke) needs no vendor account. What each test checks: [TESTING.md](TESTING.md). Optional live suite with real vendor keys:
 
 ```bash
 export HERMETARIUM_ANTHROPIC_API_KEY=...
