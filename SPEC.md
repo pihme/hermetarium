@@ -143,7 +143,7 @@ Shared with those inhabitants:
 1. Supervisor creates a Hermetarium: image, wall, network path (in and out), I/O log.
 2. Inhabitant HTTP server starts inside and may mutate filesystem and packages.
 3. Operator talks to it only through the logged path (call-and-wait, or further requests to the running server).
-4. Destroy drops the wall (container or microVM). A snapshot keeps a mutated world.
+4. Destroy drops the wall (container or microVM). Keeping a mutated world would need a snapshot; that is not implemented.
 
 Whether instances are ephemeral or long-lived is not decided.
 

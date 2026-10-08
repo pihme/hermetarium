@@ -43,15 +43,16 @@ make test
 ```
 
 ```bash
+make echo-image
 make build
-id=$(./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf)
+id=$(./bin/hermetarium create --wall weak --image hermetarium/echo:dev --acl examples/echo/squid.conf)
 ./bin/hermetarium url "$id"
 curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 ./bin/hermetarium logs "$id"
 ./bin/hermetarium destroy "$id"
 ```
 
-`--image` is any local or pullable OCI image that listens on TCP 8080 (`myorg/box:1` and `myorg/claude:dev` below are placeholders for your own images). `url` is the host HTTP address that reaches it **through Squid**. `create --wall strong` works the same. More: [usage guide](USAGE.md).
+`make echo-image` needs Docker and tags `hermetarium/echo:dev`. `--image` is any local or pullable OCI image that listens on TCP 8080 (`myorg/claude:dev` below is a placeholder for an image you build). `url` is the host HTTP address that reaches it **through Squid**. `create --wall strong` works the same; `--mem MiB` and `--disk MiB` set the microVM size (default 512 and 1024). More: [usage guide](USAGE.md).
 
 **An official CLI as inhabitant**
 
@@ -67,6 +68,7 @@ Dummy env in inhabitant images (`ANTHROPIC_API_KEY=not-the-supervisor-key` and t
 
 ```text
 hermetarium create --wall weak|strong --image NAME --acl FILE
+hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB]
 hermetarium url <id>
 hermetarium exec <id> -- <cmd>     # weak wall only, not the product path
 hermetarium logs <id>

@@ -22,17 +22,22 @@ Needs Docker and Go 1.24+. The **strong** wall also needs `/dev/kvm` and **x86_6
 | Strong | `--wall strong` | Firecracker microVM. Own guest kernel. Root is guest root only. | Docker, `/dev/kvm`, x86_64 |
 
 ```bash
-id=$(./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf)
-id=$(./bin/hermetarium create --wall strong --image myorg/box:1 --acl examples/echo/squid.conf)
+make echo-image   # Docker; tags hermetarium/echo:dev
+id=$(./bin/hermetarium create --wall weak --image hermetarium/echo:dev --acl examples/echo/squid.conf)
+id=$(./bin/hermetarium create --wall strong --image hermetarium/echo:dev --acl examples/echo/squid.conf)
 ```
 
 `--image` is required: any local tag or a name Docker can `pull`. The image must listen on **TCP 8080** (porter or your own HTTP server). `--acl FILE` is the Squid config mounted into the gate (copied to `var/<id>/squid.conf`).
 
 ```bash
-./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf
+./bin/hermetarium create --wall weak --image hermetarium/echo:dev --acl examples/echo/squid.conf
 ```
 
-Templates in `examples/` and `inhabitants/` are how you *build* images; they are not CLI names. Strong wall: 512 MiB / 1 GiB disk by default.
+Templates in `examples/` and `inhabitants/` are how you *build* images; they are not CLI names. Strong wall defaults are 512 MiB of RAM and 1024 MiB of disk. `--mem` and `--disk` override those, and only with `--wall strong` (the disk unit is MiB, `bs=1M`).
+
+```bash
+./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image hermetarium/echo:dev --acl examples/echo/squid.conf
+```
 
 Talk, then tear down:
 
@@ -48,7 +53,7 @@ curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
 ## Squid
 
 ```bash
-./bin/hermetarium create --wall weak --image myorg/box:1 --acl examples/echo/squid.conf
+./bin/hermetarium create --wall weak --image hermetarium/echo:dev --acl examples/echo/squid.conf
 ```
 
 `--acl FILE` is required. The supervisor copies that file to `var/<id>/squid.conf` and starts Squid with `-f /log/squid.conf`. The instance directory is bind-mounted at `/log` in the Squid container. Create fails closed if the file cannot be read or Squid will not start.
@@ -160,7 +165,7 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. You can 
 
 **Docker-in-Docker.** Start from a dind-capable image (for example `docker:24-dind` or Debian plus Docker Engine). Install the CLI and porter on top. The engine inside the box typically needs cgroup access (`--privileged` on the **box**, or the right cgroup mounts). The supervisor’s weak wall today only adds `NET_ADMIN` to the box, not `--privileged` and not the **host** Docker socket. Do not mount the host Docker socket into the habitat (that is a hole in the wall). Nested Docker on the **strong** wall is a poor fit: Firecracker’s guest kernel is old and small; dind wants a modern kernel and a lot of RAM.
 
-**Kubernetes-in-Docker (KinD and similar).** Same story: the image can contain `kind` / `k3s` / `minikube`, but those want privileged, nested cgroups, and gigabytes of memory. Prefer the **weak** wall, extra capabilities you add in the supervisor if you take that on, and a larger Firecracker `mem_size_mib` / disk if you insist on strong. `create --wall strong` itself defaults to 512 MiB / 1 GiB disk (see above); the test suite asks for less for the echo/agentd examples (128 MiB) and more for the official-CLI inhabitants (2 GiB) by passing explicit sizes — KinD needs more still.
+**Kubernetes-in-Docker (KinD and similar).** Same story: the image can contain `kind` / `k3s` / `minikube`, but those want privileged, nested cgroups, and gigabytes of memory. Prefer the **weak** wall, extra capabilities you add in the supervisor if you take that on. On the strong wall, raise the size with `--mem` and `--disk` (defaults are 512 MiB and 1024 MiB). The test suite asks for less for the echo/agentd examples (128 MiB) and 2 GiB for the official-CLI inhabitants through the Go API. KinD needs more still.
 
 **Kernel vs userspace.** Strong wall boots the OCI root filesystem on the Firecracker kernel (currently 4.14). A base that needs systemd, cgroup v2, or a new glibc syscall may run on weak and fail on strong. Try weak first.
 
