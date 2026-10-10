@@ -129,8 +129,22 @@ make test-live
 
 Unset keys skip that vendor. `make test-live` is `go test -tags live`. On GitHub: Actions → CI → **Run workflow** only (not push/PR). Repository secrets with those names are exported into the job for the supervisor. They must not appear in logs.
 
+## How this project is built
+
+Hermetarium is developed agent-first. AI coding agents write all code,
+tests, and documentation, and review each other's changes, under human
+direction: specs, design decisions, and acceptance based on observed
+behaviour and test results. No human reads the code line by line. This
+is a deliberate choice. Quality rests on automated tests, CI, and
+independent agent review.
+
+Evaluate the code against your own requirements before you depend on it.
+Found a problem? Open an issue.
+
 ## License
 
 [PolyForm Noncommercial License 1.0.0](LICENSE). Source-available; not OSI Open Source. Commercial use is not granted. Other licenses can be negotiated with the copyright holder.
 
 Squid is a separate GPLv2 program, run as a sibling process, not linked into the supervisor.
+
+Third-party software compiled in or run by Hermetarium, and its licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
