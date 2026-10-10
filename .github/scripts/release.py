@@ -239,6 +239,8 @@ def main() -> int:
                 "--notes",
                 notes,
                 os.path.join("dist", c["asset"]),
+                "LICENSE",
+                "THIRD_PARTY_NOTICES.md",
             ]
         )
         released = True
