@@ -1,10 +1,18 @@
 # Hermetarium
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hermetarium-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/hermetarium-logo-light.svg">
+    <img src="docs/assets/hermetarium-logo-universal.svg" width="120" alt="Hermetarium logo">
+  </picture>
+</p>
+
 [![CI](https://github.com/pihme/hermetarium/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pihme/hermetarium/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/pihme/hermetarium?filter=hermetarium%2F*&label=release)](https://github.com/pihme/hermetarium/releases?q=hermetarium)
 [![Porter release](https://img.shields.io/github/v/release/pihme/hermetarium?filter=porter%2F*&label=porter)](https://github.com/pihme/hermetarium/releases?q=porter)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE)
-[![Website](https://img.shields.io/badge/website-pihme.github.io%2Fhermetarium-1f6f5c)](https://pihme.github.io/hermetarium/)
+[![Website](https://img.shields.io/badge/website-pihme.github.io%2Fhermetarium-1f8a6a)](https://pihme.github.io/hermetarium/)
 
 An agent that can run a shell and install packages should not run on the operator's machine. Hermetarium is the world the agent wakes up in: an **inhabitant** boots inside an OCI image and may use its Linux freely (shell, package managers, rewriting files), as root. It is not a per-command sandbox and not a tool the agent calls.
 
