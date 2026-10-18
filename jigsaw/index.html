@@ -53,12 +53,13 @@ main{margin-left:0;padding:2rem 1.2rem 3rem}.grid{grid-template-columns:1fr}h1{f
 :root{--slate:#455a6e;--pf-w:2px}
 @media(prefers-color-scheme:dark){:root{--slate:#5d7a99}}
 
-/* 1. Vise-bracket frame (hero, code blocks) */
-.pf-hero{position:relative;padding:1.2rem 1.9rem 1.3rem;margin:0 0 1.2rem -1.9rem;width:fit-content;max-width:52rem}
-.pf-hero::before,.pf-hero::after,pre.pf-br::before,pre.pf-br::after{content:"";position:absolute;top:0;bottom:0;width:.9rem;border:var(--pf-w) solid var(--slate);pointer-events:none}
-.pf-hero::before,pre.pf-br::before{left:0;border-right:0}
-.pf-hero::after,pre.pf-br::after{right:0;border-left:0}
-pre.pf-br{position:relative;border-left:0;padding-left:1.4rem;padding-right:1.4rem}
+/* 1. Vise brackets: once per page, inside the quickstart code block's rounded box; other code blocks are plain rounded surfaces */
+.pf-hero{position:relative;padding:1.2rem 0 1.3rem;margin:0 0 1.2rem;max-width:52rem}
+main pre{border-left:0}
+pre.pf-br{position:relative}
+pre.pf-br::after{content:"";position:absolute;inset:0;border:var(--pf-w) solid color-mix(in srgb,var(--slate) 60%,transparent);border-radius:inherit;pointer-events:none;
+  --c:linear-gradient(#000 0 0);-webkit-mask:var(--c) 0 0/10px 10px,var(--c) 100% 0/10px 10px,var(--c) 0 100%/10px 10px,var(--c) 100% 100%/10px 10px;-webkit-mask-repeat:no-repeat;
+  mask:var(--c) 0 0/10px 10px no-repeat,var(--c) 100% 0/10px 10px no-repeat,var(--c) 0 100%/10px 10px no-repeat,var(--c) 100% 100%/10px 10px no-repeat}
 
 /* 2. Section heading mark: two-colour half-split square instead of "#" */
 h2 .hash{display:inline-block;width:.8em;height:.8em;margin-right:.6rem;vertical-align:-.05em;font-size:inherit;color:transparent;overflow:hidden;
