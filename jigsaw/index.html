@@ -1,8 +1,8 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jigsaw — Hermetarium</title><meta name="description" content="The world an agent wakes up in: an OCI image it may use freely as root, behind a wall with Squid as the only, logged way out."><link rel="icon" href="../favicon.svg" type="image/svg+xml"><link rel="icon" href="../favicon.ico" sizes="16x16 32x32 48x48"><link rel="icon" href="../favicon.png" sizes="32x32" type="image/png"><link rel="apple-touch-icon" href="../apple-touch-icon.png"><style>*{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}body{margin:0}
 table{width:100%;border-collapse:collapse}.tbl{overflow-x:auto}pre{overflow-x:auto}img{max-width:100%}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
-:root{--acc:#1f8a6a;--acc-ui:#1a7a5e;--bg:#ffffff;--side:#f7f6f3;--fg:#1c1c1e;--mut:#66666e;--line:#e8e6e1;--code:#f5f3ef;--on-acc:#fff;color-scheme:light dark}
-@media(prefers-color-scheme:dark){:root{--acc:#27a079;--acc-ui:#27a079;--bg:#111214;--side:#16171a;--fg:#e9e9ec;--mut:#9d9da6;--line:#26272b;--code:#1b1c20;--on-acc:#111}}
+:root{--acc:#1f8a6a;--acc-ui:#1a7a5e;--bg:#ffffff;--side:#f7f6f3;--fg:#1c1c1e;--mut:#66666e;--line:#e8e6e1;--code:#f5f3ef;--on-acc:#fff;color-scheme:light}
+
 body{background:var(--bg);color:var(--fg);font:15.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 a{color:var(--acc-ui)}
 aside{position:fixed;inset:0 auto 0 0;width:270px;background:var(--side);border-right:1px solid var(--line);padding:1.6rem 1.3rem;overflow-y:auto;display:flex;flex-direction:column}
@@ -46,12 +46,13 @@ footer{margin-top:3rem;padding-top:1.4rem;border-top:1px solid var(--line);color
 .dia-cap{font-size:.85rem;color:var(--mut);margin:-.8rem 0 1.2rem}
 @media(max-width:860px){aside{position:sticky;top:0;inset:auto;width:auto;height:auto;flex-direction:row;align-items:center;gap:1rem;padding:.7rem 1rem;z-index:3;overflow-x:auto;white-space:nowrap}
 .ver,.lbl,.ext,.marg-t,.marg-s{display:none}.marg{margin:0;padding:0 0 0 .6rem;border-top:0;border-left:1px dashed var(--line)}aside nav{display:flex}aside nav a{border-left:0;padding:.25rem .55rem}
-main{margin-left:0;padding:2rem 1.2rem 3rem}.grid{grid-template-columns:1fr}h1{font-size:2.1rem}}
+main{margin-left:0;padding:2rem 1.2rem 3rem}.grid{grid-template-columns:1fr}h1{font-size:2.1rem}
+aside{flex-wrap:wrap;row-gap:1rem;overflow-x:visible}.brand{flex:0 0 100%}aside>nav:not(.ext){flex:1 1 0;min-width:0;overflow-x:auto;scrollbar-width:none;margin-left:-.55rem}.marg{flex:none}}
 /* Site motif kit – local CSS only, no external deps.
    Requires the template variables --acc / --bg / --fg / --line (gen.py) and adds --slate.
    Body gets a project class: pf-hermetarium | pf-fregoli | pf-git-warden | pf-grok-budget-mcp | pf-claude-budget-mcp */
-:root{--slate:#455a6e;--pf-w:2px}
-@media(prefers-color-scheme:dark){:root{--slate:#5d7a99}}
+:root{--slate:#455a6e;--pf-w:2px;color-scheme:light}
+
 
 /* 1. Vise brackets: one free-standing pair [ ] around the hero title and subtitle; code blocks are plain rounded surfaces */
 .pf-hero{margin:0 0 1.2rem;max-width:52rem}
@@ -67,8 +68,8 @@ h2 .hash{display:inline-block;width:.8em;height:.8em;margin-right:.6rem;vertical
   background:linear-gradient(90deg,var(--slate) 0 50%,var(--acc) 50% 100%);border-radius:3px}
 
 /* 3. Two-colour accents: primary button (single --acc-ui fill, white text, narrow slate stripe with no text on it) + cards */
-.btn.p{background:var(--acc-ui);border-color:var(--acc-ui);border-left:.35rem solid var(--slate)}
-.btn.p:hover{background:color-mix(in srgb,var(--acc-ui) 85%,var(--fg));border-color:color-mix(in srgb,var(--acc-ui) 85%,var(--fg));border-left-color:var(--slate)}
+.btn.p{background:var(--acc-ui);border-color:var(--acc-ui)}
+.btn.p:hover{background:color-mix(in srgb,var(--acc-ui) 85%,var(--fg));border-color:color-mix(in srgb,var(--acc-ui) 85%,var(--fg))}
 .card{border-top:3px solid transparent;border-image:linear-gradient(90deg,var(--slate) 0 50%,var(--acc) 50% 100%) 1}
 
 /* 4. Bracket bullets */
@@ -137,7 +138,7 @@ background:color-mix(in srgb,var(--pa) 5%,var(--bg))}
 font:italic .82rem/1.6 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
 .jc-t{margin:.25rem 0 0;color:var(--mut);font-size:.93rem}
 .jc-x{margin:.6rem 0 0;font:1.04rem/1.7 "Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif}
-@media(prefers-color-scheme:dark){.jc-r{color:var(--fg)}}
+
 .pz-piece{opacity:1}.pz-piece path{fill:color-mix(in srgb,var(--pa) var(--pa-tint,22%),#fff)}.pz image{pointer-events:none}
 .pz-here path{stroke:var(--pa-ui);stroke-width:2px;vector-effect:non-scaling-stroke}
 .pz-piece:not(.pz-here):hover path,.pz-piece:not(.pz-here):focus-visible path{stroke:var(--pa-ui);stroke-width:2px;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}</style></head><body class="pf-hermetarium"><aside><a class="brand" href="../"><img class="mark" src="../favicon.svg" alt="" width="32" height="32">Hermetarium</a><div class="ver">Go · Docker · Firecracker · Squid</div>
