@@ -41,3 +41,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 - Live ACL helpers / OPA / a different proxy
 
 Decided in SPEC.md (do not reopen): API keys must not live in the inhabitant image; they go in the host-side ACL passed to `create --acl`. Both walls boot the same OCI image.
+
+## Team rules
+
+Labels: `needs-triage`, `needs-info`, `needs-input`, `ready-for-maintainer`, `ready-for-development`, `ready-for-qa`, `ready-for-human`, `wontfix`, plus `bug` / `enhancement`. `ready-for-maintainer` is for Maintainer (website, docs fixes, smaller changes), `ready-for-development` is for Developer (larger feature and code work), and `ready-for-qa` is for QA. Team roles, labels, handover, merging and release mode: `docs/agents/team.md` (same in every repo; change it in presets first). See `docs/agents/triage-labels.md`.
