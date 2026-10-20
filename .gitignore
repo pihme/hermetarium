@@ -8,3 +8,7 @@ squid/vendor-mock
 .idea/
 *.iml
 inhabitants/claude-code/porter
+
+# Nix dev shells
+/result
+.pip/

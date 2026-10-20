@@ -21,10 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: cachix/install-nix-action@v31
+      - run: bash .github/scripts/load-nix-env.sh ./nix/reference-env
 
       - name: Allow KVM
         run: |
@@ -55,10 +53,8 @@ jobs:
       HERMETARIUM_DEEPSEEK_API_KEY: ${{ secrets.HERMETARIUM_DEEPSEEK_API_KEY }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: cachix/install-nix-action@v31
+      - run: bash .github/scripts/load-nix-env.sh ./nix/reference-env
       - name: Allow KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -85,10 +81,8 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: true
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: cachix/install-nix-action@v31
+      - run: bash .github/scripts/load-nix-env.sh ./nix/reference-env
       - name: Tag and attach linux-amd64 binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -70,3 +70,13 @@ updates:
     groups:
       helper-image-minor-and-patch:
         update-types: [minor, patch]
+  - package-ecosystem: nix
+    directory: /nix/reference-env
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: chore
+      include: scope
