@@ -45,6 +45,7 @@ Other team members (coordination, design, research) make no repo changes. Design
 
 - Work only on your own label. Issues without a pickup label stay untouched, even clear bugs; triage belongs to the owner.
 - All bots write as the same GitHub account; the label history, not the author, shows who did what.
+- Act on a pickup label only if the owner's account set it (check the issue's label events). If any other account set it, do not start work: set `needs-input` and leave it to the owner.
 
 - Build and test run in the repo's Nix devShell (`nix develop -c …`), the same as CI. A result from outside it does not count.
 
