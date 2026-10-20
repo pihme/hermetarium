@@ -20,7 +20,7 @@ vars=(
   NIX_CFLAGS_COMPILE NIX_LDFLAGS
   CC CXX AR NM RANLIB
   CHROME_PATH PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS
-  PIP_PREFIX PYTHONPATH
+  PIP_PREFIX PYTHONPATH PIP_NO_BINARY
   LLVM_COV LLVM_PROFDATA
 )
 for var in "${vars[@]}"; do
@@ -29,3 +29,14 @@ for var in "${vars[@]}"; do
     printf '%s=%s\n' "$var" "$line" >> "$GITHUB_ENV"
   fi
 done
+# The cc wrapper applies NIX_LDFLAGS only when the role marker for this
+# machine is present. The suffix is the config triple.
+while IFS= read -r line; do
+  [[ "$line" == *=* ]] || continue
+  var=${line%%=*}
+  case "$var" in
+    NIX_*_WRAPPER_TARGET_HOST_*)
+      printf '%s\n' "$line" >> "$GITHUB_ENV"
+      ;;
+  esac
+done < "$envfile"
