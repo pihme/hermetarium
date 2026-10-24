@@ -15,9 +15,10 @@ permissions:
 
 jobs:
   wake:
-    # Only handoff labels, and only when pihme set them (REGELN.md: labels from other accounts are ignored)
+    # Only handoff labels, and only when pihme set them (REGELN.md: labels from other accounts are ignored).
+    # Compare the immutable numeric user id (14032870 = pihme), not the login name.
     if: >-
-      github.event.sender.login == 'pihme' &&
+      github.event.sender.id == 14032870 &&
       contains(fromJSON('["ready-for-qa","ready-for-maintainer","ready-for-development"]'), github.event.label.name)
     runs-on: ubuntu-latest
     timeout-minutes: 3
