@@ -13,10 +13,6 @@ permissions:
   issues: read
   pull-requests: read
 
-concurrency:
-  group: label-wake-${{ github.repository }}
-  cancel-in-progress: true
-
 jobs:
   wake:
     # Only handoff labels, and only when pihme set them (REGELN.md: labels from other accounts are ignored)
@@ -25,6 +21,10 @@ jobs:
       contains(fromJSON('["ready-for-qa","ready-for-maintainer","ready-for-development"]'), github.event.label.name)
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # Job-level so skipped runs (non-handoff labels) never cancel a waiting batch.
+    concurrency:
+      group: label-wake-${{ github.repository }}
+      cancel-in-progress: true
     steps:
       - name: Collect handoff items and POST one batch
         env:
