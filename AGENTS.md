@@ -12,6 +12,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 
 ## How to work here
 
+- Reference environment: `nix/reference-env` (Go and GNU make) is binding for build and test. Run `nix develop ./nix/reference-env -c make test`. `flake.lock` is committed; Dependabot updates it. KVM for the strong-wall tests is a host device, not part of this shell.
 - Layout is **one directory per process**: `supervisor/`, `firecracker-helper/`, plus `examples/` (stand-in loops), `inhabitants/` (official CLIs), `porter/` (HTTP adapter for those CLIs), and `tests/`. Each example/inhabitant is a pair: Dockerfile plus `squid.conf` for the wall.
 - **Supervisor is Go**: native binary, module `github.com/pihme/hermetarium`, stdlib-first, `os/exec` Docker/Firecracker/Squid. Do not import their SDKs unless exec is proven insufficient. Do not rewrite the supervisor in TypeScript, Rust, JVM, .NET, or a WASM-only runtime.
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
