@@ -6,7 +6,7 @@ The engineering skills (`triage` and friends) speak in canonical roles. This tab
 | --- | --- | --- |
 | category: bug | `bug` | Something is broken |
 | category: enhancement | `enhancement` | New feature or improvement |
-| `needs-triage` | `needs-triage` | Maintainer needs to evaluate this issue |
+| `needs-triage` | `needs-triage` | Owner needs to evaluate this issue |
 | `needs-info` | `needs-info` | Waiting on the reporter for more information |
 | `ready-for-agent` | `ready-for-development` | Larger feature or code work, fully specified, for Developer |
 | (team) | `ready-for-maintainer` | Website, docs fix or smaller change, for Maintainer |
