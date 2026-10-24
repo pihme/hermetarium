@@ -70,8 +70,11 @@ updates:
     groups:
       helper-image-minor-and-patch:
         update-types: [minor, patch]
+  # All Nix shells in one block and one group: one bundled PR per run.
+  # Add every extra shell (nix/<name>/flake.lock) under `directories:`.
   - package-ecosystem: nix
-    directory: /nix/reference-env
+    directories:
+      - /nix/reference-env
     schedule:
       interval: weekly
       day: saturday
@@ -80,3 +83,6 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    groups:
+      nix:
+        patterns: ["*"]

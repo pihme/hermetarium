@@ -1,0 +1,57 @@
+# Batches handoff labels per repo: waits 60 s; a newer label event in the same repo cancels the waiting run.
+# Only the last run sends ONE wake call (with all open items carrying a handoff label) to the Stabschef routine.
+# Cost: jobs whose `if:` is false are skipped without a runner (0 minutes); each batch costs ~1 min runner time.
+name: label-wake
+
+on:
+  issues:
+    types: [labeled]
+  pull_request_target:   # also fires for PRs from forks; no code is checked out
+    types: [labeled]
+
+permissions:
+  issues: read
+  pull-requests: read
+
+jobs:
+  wake:
+    # Only handoff labels, and only when pihme set them (REGELN.md: labels from other accounts are ignored).
+    # Compare the immutable numeric user id (14032870 = pihme), not the login name.
+    if: >-
+      github.event.sender.id == 14032870 &&
+      contains(fromJSON('["ready-for-qa","ready-for-maintainer","ready-for-development"]'), github.event.label.name)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Job-level so skipped runs (non-handoff labels) never cancel a waiting batch.
+    concurrency:
+      group: label-wake-${{ github.repository }}
+      cancel-in-progress: true
+    steps:
+      - name: Collect handoff items and POST one batch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TRIGGER_LABEL: ${{ github.event.label.name }}
+          WAKE_URL: ${{ secrets.WAKE_URL }}
+          WAKE_KEY: ${{ secrets.WAKE_KEY }}
+        run: |
+          if [ -z "$WAKE_URL" ] || [ -z "$WAKE_KEY" ]; then
+            echo "::notice::WAKE_URL/WAKE_KEY not set in this repo, skipping (hourly safety net will pick it up)."
+            exit 0
+          fi
+          # Collect window: a newer label event in this repo cancels this run.
+          sleep 60
+          items='[]'
+          for label in ready-for-qa ready-for-maintainer ready-for-development; do
+            iss=$(gh issue list -R "$REPO" --state open --label "$label" --limit 200 --json number,title,url \
+              | jq -c --arg l "$label" 'map({kind:"issue", number, label:$l, title, url})')
+            prs=$(gh pr list -R "$REPO" --state open --label "$label" --limit 200 --json number,title,url \
+              | jq -c --arg l "$label" 'map({kind:"pull_request", number, label:$l, title, url})')
+            items=$(jq -nc --argjson a "$items" --argjson b "$iss" --argjson c "$prs" '$a + $b + $c')
+          done
+          BODY=$(jq -nc --arg repo "$REPO" --arg trig "$TRIGGER_LABEL" --argjson items "$items" \
+            '{repo:$repo, triggered_by_label:$trig, items:$items}')
+          curl -sS --fail-with-body --retry 2 --max-time 20 -X POST "$WAKE_URL" \
+            -H "Authorization: Bearer $WAKE_KEY" \
+            -H "Content-Type: application/json" \
+            --data "$BODY"
