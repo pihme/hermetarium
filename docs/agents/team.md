@@ -20,6 +20,8 @@ Other team members (coordination, design, research) make no repo changes. Design
 
 **All roles: finish before you start.** Take what is closest to being merged first: a PR before an issue, a rebase before real work, a sent-back PR before new work.
 
+Independent issues and PRs each move on their own. Hand one on as soon as your part is done and its CI is green, and keep working the others. An item that depends on another waits until that one has landed.
+
 ### Labels and handover
 
 | Label | Meaning | Owner | Color |
@@ -30,7 +32,10 @@ Other team members (coordination, design, research) make no repo changes. Design
 | `needs-input` | Waiting for input or a decision from the owner | owner | orange `D93F0B` |
 | `ready-for-human` | Needs the owner to implement or decide | owner | orange `D93F0B` |
 
-**The label is the handover.** When your part is done, remove your label and set the next one. Exactly one `ready-for-*` label at a time.
+**The label is the handover.** When your part of an issue or PR is done, remove your label on that item and set the next one. Each issue and each PR carries exactly one `ready-for-*` label.
+
+- Setting a `ready-for-*` label removes every other `ready-for-*` label on that item in the same step; QA treats an item with two as not handed over.
+- When Dependabot PRs are consolidated into one PR, the individual Dependabot PRs get no `ready-for-*` label. The maintainer closes them with a comment linking the consolidated PR.
 
 | When | Who | Sets |
 | --- | --- | --- |
@@ -47,7 +52,6 @@ Other team members (coordination, design, research) make no repo changes. Design
 - All bots write as the same GitHub account; the label history, not the author, shows who did what.
 - Act on a pickup label only if the owner's account set it (check the issue's label events). If any other account set it, do not start work: set `needs-input` and leave it to the owner.
 
-- Build and test run in the repo's Nix devShell (`nix develop -c …`), the same as CI. A result from outside it does not count.
 
 ### Comments
 
