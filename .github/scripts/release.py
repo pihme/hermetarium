@@ -191,7 +191,20 @@ def fmt_ver(v: Tuple[int, int, int]) -> str:
     return f"{v[0]}.{v[1]}.{v[2]}"
 
 
+def build_checked(c: dict, ver: str) -> None:
+    """Build a static (CGO_ENABLED=0) binary and fail if it could not load on older distros."""
+    build = [a.format(ver=ver) if "{ver}" in a else a for a in c["build"]]
+    os.environ["CGO_ENABLED"] = "0"
+    run(build)
+    run(["bash", os.path.join(os.path.dirname(__file__), "check-glibc-baseline.sh"), os.path.join("dist", c["asset"])])
+
+
 def main() -> int:
+    if "--check-build" in sys.argv:
+        os.makedirs("dist", exist_ok=True)
+        for c in COMPONENTS:
+            build_checked(c, "0.0.0-check")
+        return 0
     dry = "--dry-run" in sys.argv or os.environ.get("RELEASE_DRY_RUN") == "1"
     os.makedirs("dist", exist_ok=True)
     released = False
@@ -222,8 +235,7 @@ def main() -> int:
         print(f"{c['name']}: {prev or '0.0.0'} -> {tag} ({kind})")
         if dry:
             continue
-        build = [a.format(ver=nxt) if "{ver}" in a else a for a in c["build"]]
-        run(build)
+        build_checked(c, nxt)
         sha = os.environ.get("GITHUB_SHA") or run(["git", "rev-parse", "HEAD"])
         # Let GitHub mint the tag (no local git identity needed for git tag -a).
         run(
