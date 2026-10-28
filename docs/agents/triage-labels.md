@@ -11,7 +11,7 @@ The engineering skills (`triage` and friends) speak in canonical roles. This tab
 | `ready-for-agent` | `ready-for-development` | Larger feature or code work, fully specified, for Developer |
 | (team) | `ready-for-maintainer` | Website, docs fix or smaller change, for Maintainer |
 | `ready-for-qa` | `ready-for-qa` | Ready for QA review and independent testing |
-| `ready-for-human` | `ready-for-human` | Needs the owner to implement or decide |
+| `ready-for-human` | `ready-for-human` | Needs the owner to implement or decide; also set by Maintainer on a clean release PR from 1.0.0 on, which only the owner approves and merges |
 | (team) | `needs-input` | Waiting for input or a decision from the owner |
 | `wontfix` | `wontfix` | Will not be actioned |
 
