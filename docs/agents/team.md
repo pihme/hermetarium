@@ -12,7 +12,7 @@ Read **For everyone** first, then the section for your role.
 | --- | --- | --- |
 | **Maintainer** | Website, docs fixes, smaller changes; repo settings and labels; release owner | `ready-for-maintainer` |
 | **Developer** (a team bot or an external coding agent) | Larger feature and code work, as PRs | `ready-for-development` |
-| **QA** | Review, testing, **all merges**, closing issues | `ready-for-qa` |
+| **QA** | Review, testing, all merges except release PRs from 1.0.0 on, closing issues | `ready-for-qa` |
 
 Other team members (coordination, design, research) make no repo changes. Design hands finished files to Maintainer and never approves its own work.
 
@@ -44,6 +44,7 @@ Independent issues and PRs each move on their own. Hand one on as soon as your p
 | Problems found | QA | back to the issue's previous label |
 | Only a rebase or trivial conflict fix needed | QA | `ready-for-maintainer` (also for Developer's PRs) |
 | Review passes | QA | merges, closes linked issues, removes `ready-for-qa` |
+| Release PR from 1.0.0 on clean (chain done, CI green, release checks done) | Maintainer | `ready-for-human` (never `ready-for-qa`), then informs the owner |
 | Dependabot PR, CI green (not during a release) | QA | reviews and merges; conflicts: comment `@dependabot rebase` |
 | Issue already done, nothing to change | Maintainer or Developer | `ready-for-qa` on the issue; QA verifies and closes |
 | Decision or input needed | any role | `needs-input` or `ready-for-human` |
@@ -71,6 +72,7 @@ Before handing anything over, check for duplicate PRs and open work on the same 
 - Exactly one open release PR.
 - During a release no new PRs are started and Dependabot PRs stay open.
 - Versions only via the release PR or a `Release-As:` footer. Never tag, bump or edit published releases by hand.
+- **Release PRs from 1.0.0 on are approved and merged only by the owner** (the release tool's PR, e.g. `chore: release vX.Y.Z`). Neither QA nor Maintainer merges them. When the chain, CI and the release checks are clean, Maintainer sets `ready-for-human` on the release PR (removing every other `ready-for-*` label) and informs the owner. A release PR never gets `ready-for-qa`; QA may at most check it beforehand. If Maintainer holds a release PR back, the label wake-up passes the hold note on. Repos still below 1.0.0 follow this rule from their 1.0.0 release on.
 
 ## Maintainer
 
@@ -78,6 +80,7 @@ Before handing anything over, check for duplicate PRs and open work on the same 
 - Ensures "Automatically delete head branches" is on in every repo, so merged branches are deleted automatically.
 - No larger code work: label it `ready-for-development`.
 - Release owner: prepares the release PR and checks for duplicate release PRs before and after every merge.
+- From 1.0.0 on: when the release PR is clean, sets `ready-for-human` on it (not `ready-for-qa`) and informs the owner, who approves and merges it.
 - Never merges.
 
 **Post-release check:**
@@ -103,11 +106,11 @@ Before handing anything over, check for duplicate PRs and open work on the same 
 - Reviews and tests PRs. Pushes no code.
 - Works on several PRs in parallel, e.g. reviews other PRs while waiting for a test.
 - Never re-runs tests CI already ran; tests only what CI does not cover.
-- **The only role that merges:** all PRs incl. release PRs, squash, after green CI and review. Closes the linked issues.
+- **The only role that merges:** all PRs, squash, after green CI and review. Closes the linked issues. Exception: release PRs from 1.0.0 on are merged only by the owner; QA never merges them. Before 1.0.0 QA merges release PRs as before.
 - Squash-merge titles are Conventional Commits: a change that must ship needs `fix:` or `feat:`; `chore:`/`docs:`/`ci:` do not release.
 - Dependabot PRs keep their title and prefix from `.github/dependabot.yml`; never turn an update into `feat!:`.
 
-**Pre-release check (before merging the release PR):**
+**Pre-release check (before the release PR is merged; from 1.0.0 on the owner merges it):**
 - Release PR content and version bump are correct.
 - Changelog entries match the merged PRs.
 - CI is green on the release PR.
