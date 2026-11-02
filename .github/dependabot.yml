@@ -84,7 +84,7 @@ updates:
     open-pull-requests-limit: 5
     labels: [dependencies, ready-for-maintainer]
     commit-message:
-      # fix, not chore: the Nix lock is a release input (see above).
+      # fix when a lock in this block is a release input (see above), otherwise chore.
       prefix: fix
       include: scope
     groups:
