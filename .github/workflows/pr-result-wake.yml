@@ -1,0 +1,78 @@
+# Second wake-up trigger next to label-wake.yml.
+# When a PR pipeline finishes (green or red), sends ONE wake call to the same coordination webhook as label-wake.yml;
+# the coordination role then decides by the PR's labels who is next.
+# Event: workflow_run (completed). check_suite is not used: it never triggers workflows for suites created by
+# GitHub Actions, and it fires once per app (Actions, SonarCloud, ...), which would mean double wakes.
+# Safety: workflow_run runs in the base repo with the base branch's workflow file. This job never checks out or
+# runs PR code; PR data (branch, title) is only passed through env and jq, never interpolated into the script.
+# Cost: runs whose `if:` is false are skipped without a runner (0 minutes); each wake costs ~1 min runner time.
+name: pr-result-wake
+
+on:
+  workflow_run:
+    # The repo's PR pipelines, by workflow `name:`. Add others (e.g. "Heavy tests") as needed.
+    # Never list label-wake or pr-result-wake: that would loop.
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  wake:
+    # Only PR runs; never this workflow or label-wake itself (loop guard on top of the `workflows:` list).
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.name != 'label-wake' &&
+      github.event.workflow_run.name != github.workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Several PR pipelines finishing for the same commit within the window give one wake (the last one).
+    concurrency:
+      group: pr-result-wake-${{ github.repository }}-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: true
+    steps:
+      - name: Find the PR and POST one wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RESULT: ${{ github.event.workflow_run.conclusion }}
+          PIPELINE: ${{ github.event.workflow_run.name }}
+          WAKE_URL: ${{ secrets.WAKE_URL }}
+          WAKE_KEY: ${{ secrets.WAKE_KEY }}
+        # Runs triggered by Dependabot only see Dependabot secrets. WAKE_URL/WAKE_KEY are deliberately not set as
+        # Dependabot secrets, so those runs skip and the hourly safety net picks the PR up (delay accepted).
+        run: |
+          if [ -z "$WAKE_URL" ] || [ -z "$WAKE_KEY" ]; then
+            echo "::notice::WAKE_URL/WAKE_KEY not set in this repo, skipping (hourly safety net will pick it up)."
+            exit 0
+          fi
+          # Collect window: another PR pipeline finishing for the same commit cancels this run.
+          sleep 60
+          pr="$PR_FROM_EVENT"
+          if [ -z "$pr" ]; then
+            # Fork PRs leave workflow_run.pull_requests empty: look the open PR up by its head commit.
+            pr=$(gh pr list -R "$REPO" --state open --search "$HEAD_SHA" --json number,headRefOid \
+              | jq -r --arg sha "$HEAD_SHA" 'map(select(.headRefOid == $sha)) | .[0].number // empty')
+          fi
+          if [ -z "$pr" ]; then
+            echo "::notice::No open pull request for $HEAD_SHA, no wake."
+            exit 0
+          fi
+          info=$(gh api "repos/$REPO/pulls/$pr")
+          # Same filter as label-wake, by immutable numeric user id: only open PRs from pihme (14032870)
+          # or Dependabot (49699333, dependabot[bot]).
+          if ! jq -e '.state == "open" and (.user.id == 14032870 or .user.id == 49699333)' <<<"$info" >/dev/null; then
+            echo "::notice::PR #$pr is closed or not from pihme/Dependabot, no wake."
+            exit 0
+          fi
+          BODY=$(jq -nc --arg repo "$REPO" --arg pipeline "$PIPELINE" --arg result "$RESULT" --argjson pr "$info" \
+            '{repo:$repo, triggered_by_pipeline:$pipeline,
+              items:[{kind:"pull_request", number:$pr.number, result:$result,
+                      labels:($pr.labels | map(.name)), title:$pr.title, url:$pr.html_url}]}')
+          curl -sS --fail-with-body --retry 2 --max-time 20 -X POST "$WAKE_URL" \
+            -H "Authorization: Bearer $WAKE_KEY" \
+            -H "Content-Type: application/json" \
+            --data "$BODY"
