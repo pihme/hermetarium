@@ -33,6 +33,7 @@ COMPONENTS = [
             "firecracker-helper/",
             "go.mod",
             "Makefile",
+            "nix/reference-env/flake.lock",
         ],
         "asset": "hermetarium-linux-amd64",
         "build": [
@@ -48,7 +49,7 @@ COMPONENTS = [
     {
         "name": "porter",
         "tag_prefix": "porter/v",
-        "paths": ["porter/"],
+        "paths": ["porter/", "nix/reference-env/flake.lock"],
         "asset": "porter-linux-amd64",
         "build": [
             "go",

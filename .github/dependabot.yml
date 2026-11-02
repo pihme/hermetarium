@@ -3,6 +3,9 @@
 #   GitHub Actions -> ci(deps); example/inhabitant base images -> chore(deps): no release,
 #   because examples/ and inhabitants/ are not part of any released artifact
 #   supervisor/helper (the image the supervisor pulls) -> fix(deps): patch release
+#   Nix lock (nix/reference-env/flake.lock) -> fix(deps): patch release of hermetarium and
+#   porter, because the release job builds both binaries with its Go toolchain, so the
+#   lock is a release input (and a release path of both in .github/scripts/release.py)
 version: 2
 updates:
   # One Go module (go.mod at the root; porter and examples are packages inside it)
@@ -81,7 +84,8 @@ updates:
     open-pull-requests-limit: 5
     labels: [dependencies, ready-for-maintainer]
     commit-message:
-      prefix: chore
+      # fix when a lock in this block is a release input (see above), otherwise chore.
+      prefix: fix
       include: scope
     groups:
       nix:

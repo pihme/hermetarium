@@ -12,3 +12,7 @@ inhabitants/claude-code/porter
 # Nix dev shells
 /result
 .pip/
+
+# Python bytecode
+__pycache__/
+*.pyc
