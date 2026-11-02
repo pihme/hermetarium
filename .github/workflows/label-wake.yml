@@ -1,5 +1,5 @@
 # Batches handoff labels per repo: waits 60 s; a newer label event in the same repo cancels the waiting run.
-# Only the last run sends ONE wake call (with all open items carrying a handoff label) to the Stabschef routine.
+# Only the last run sends ONE wake call (with all open items carrying a handoff label) to the coordination routine.
 # Cost: jobs whose `if:` is false are skipped without a runner (0 minutes); each batch costs ~1 min runner time.
 name: label-wake
 
@@ -16,10 +16,12 @@ permissions:
 jobs:
   wake:
     # Only handoff labels, and only when pihme set them (REGELN.md: labels from other accounts are ignored).
-    # Compare the immutable numeric user id (14032870 = pihme), not the login name.
+    # Exception: ready-for-maintainer that Dependabot sets on its own PR through `labels:` in .github/dependabot.yml.
+    # Compare immutable numeric user ids (14032870 = pihme, 49699333 = dependabot[bot]), not login names.
     if: >-
-      github.event.sender.id == 14032870 &&
-      contains(fromJSON('["ready-for-qa","ready-for-maintainer","ready-for-development"]'), github.event.label.name)
+      (github.event.sender.id == 14032870 &&
+       contains(fromJSON('["ready-for-qa","ready-for-maintainer","ready-for-development"]'), github.event.label.name)) ||
+      (github.event.sender.id == 49699333 && github.event.label.name == 'ready-for-maintainer')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     # Job-level so skipped runs (non-handoff labels) never cancel a waiting batch.
@@ -35,6 +37,8 @@ jobs:
           WAKE_URL: ${{ secrets.WAKE_URL }}
           WAKE_KEY: ${{ secrets.WAKE_KEY }}
         run: |
+          # Runs triggered by Dependabot only see Dependabot secrets. WAKE_URL/WAKE_KEY are deliberately not set as
+          # Dependabot secrets, so those runs skip here and the hourly safety net picks the PR up (delay accepted).
           if [ -z "$WAKE_URL" ] || [ -z "$WAKE_KEY" ]; then
             echo "::notice::WAKE_URL/WAKE_KEY not set in this repo, skipping (hourly safety net will pick it up)."
             exit 0
