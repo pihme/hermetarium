@@ -12,7 +12,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 
 ## How to work here
 
-- Reference environment: `nix/reference-env` (Go and GNU make) is binding for build and test. Run `nix develop ./nix/reference-env -c make test`. `flake.lock` is committed; Dependabot updates it. KVM for the strong-wall tests is a host device, not part of this shell.
+- Reference environment: `nix/reference-env` (Go and GNU make) is binding for build and test. Run `nix develop ./nix/reference-env -c make test`. `flake.lock` is committed; Dependabot updates it as `fix(deps):`, which cuts a patch release of hermetarium and porter: CI builds both release binaries inside `nix/reference-env` with its Go toolchain, so the Nix lock is a release input. KVM for the strong-wall tests is a host device, not part of this shell.
 - Layout is **one directory per process**: `supervisor/`, `firecracker-helper/`, plus `examples/` (stand-in loops), `inhabitants/` (official CLIs), `porter/` (HTTP adapter for those CLIs), and `tests/`. Each example/inhabitant is a pair: Dockerfile plus `squid.conf` for the wall.
 - **Supervisor is Go**: native binary, module `github.com/pihme/hermetarium`, stdlib-first, `os/exec` Docker/Firecracker/Squid. Do not import their SDKs unless exec is proven insufficient. Do not rewrite the supervisor in TypeScript, Rust, JVM, .NET, or a WASM-only runtime.
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
@@ -22,12 +22,12 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 
   | Artifact | Tag | Bumped when the commit touches |
   | --- | --- | --- |
-  | hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile` |
-  | porter | `porter/vX.Y.Z` | `porter/` |
+  | hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile`, `nix/reference-env/flake.lock` |
+  | porter | `porter/vX.Y.Z` | `porter/`, `nix/reference-env/flake.lock` |
 
   Docs, tests, examples and inhabitants alone do not bump. After CI on a push to `main`, `.github/scripts/release.py` creates the GitHub Release and attaches a linux-amd64 binary.
 - **Release 1.0** (or any chosen version): an empty commit with one footer per artifact, naming it: `Release-As: hermetarium@1.0.0` and/or `Release-As: porter@1.0.0`, e.g. `git commit --allow-empty -m "chore: release 1.0" -m "Release-As: hermetarium@1.0.0"`. A bare `Release-As: 1.0.0` names no artifact and is ignored with a warning. It releases by itself, regardless of type or paths; upwards only (a version at or below the current one is ignored with a warning). Only use it when the maintainer decided the version.
-- **Dependabot** (`.github/dependabot.yml`): Go modules `fix(deps):` (hermetarium patch release), GitHub Actions `ci(deps):`, example/inhabitant base images `chore(deps):` (no release). Never merge a Dependabot PR on green CI alone. Dependabot PRs arrive with `ready-for-maintainer` (set by `.github/dependabot.yml`); Maintainer reviews the content and sets `ready-for-qa`; QA merges (squash, keep the Dependabot title). Decisions go to the owner with `ready-for-human`. No Dependabot PRs are handed on during a release. Release PRs from 1.0.0 on are merged only by the owner. Details: `docs/agents/team.md`.
+- **Dependabot** (`.github/dependabot.yml`): Go modules `fix(deps):` (hermetarium patch release), the Nix lock (`nix/reference-env/flake.lock`, release input of both binaries) `fix(deps):` (hermetarium and porter patch release), GitHub Actions `ci(deps):`, example/inhabitant base images `chore(deps):` (no release). Never merge a Dependabot PR on green CI alone. Dependabot PRs arrive with `ready-for-maintainer` (set by `.github/dependabot.yml`); Maintainer reviews the content and sets `ready-for-qa`; QA merges (squash, keep the Dependabot title). Decisions go to the owner with `ready-for-human`. No Dependabot PRs are handed on during a release. Release PRs from 1.0.0 on are merged only by the owner. Details: `docs/agents/team.md`.
 - **Changes on main:** keep them small; `make test` should pass on linux-amd64 with Docker and KVM.
 - Outside pull requests are not accepted (see `CONTRIBUTING.md`); issues are.
 - `examples/` = stand-in inhabitant images (echo, agentd). `inhabitants/` = official `claude` / `grok` / `dsh`. `tests/` holds integration tests, vendor-mock, and probe. Do not add Universal APP / TypeScript host / scanners until asked.
