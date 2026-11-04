@@ -137,6 +137,10 @@ make test-live
 
 Unset keys skip that vendor. `make test-live` is `go test -tags live`. On GitHub: Actions → CI → **Run workflow** only (not push/PR). Repository secrets with those names are exported into the job for the supervisor. They must not appear in logs.
 
+## Similar projects
+
+- [boxd self-host](https://github.com/boxd-sh/self-host) runs a complete boxd cluster of forkable, snapshottable microVMs on GCP, AWS, or your own servers, with control, worker, proxy, and console nodes. Hermetarium is meant for a few containers, not many.
+
 ## How this project is built
 
 Hermetarium is developed agent-first. AI coding agents write all code,
