@@ -72,11 +72,11 @@ h2 .hash{display:inline-block;width:.8em;height:.8em;margin-right:.6rem;vertical
 .btn.p:hover{background:color-mix(in srgb,var(--acc-ui) 85%,var(--fg));border-color:color-mix(in srgb,var(--acc-ui) 85%,var(--fg))}
 .card{border-top:3px solid transparent;border-image:linear-gradient(90deg,var(--slate) 0 50%,var(--acc) 50% 100%) 1}
 
-/* 4. Bracket bullets */
+/* 4. Split-square bullets */
 main ul{list-style:none;padding-left:1.4rem}
 main ul>li{position:relative}
-main ul>li::before{content:"";position:absolute;left:-1.25rem;top:.5em;width:.42rem;height:.42rem;padding:0 .14rem;
-  border-inline:var(--pf-w) solid var(--slate);background:var(--acc);background-clip:content-box}
+main ul>li::before{content:"";position:absolute;left:-1.1rem;top:.45em;width:.5em;height:.5em;
+  background:linear-gradient(90deg,var(--slate) 0 50%,var(--acc) 50% 100%);border-radius:2px}
 
 /* 5. Section divider base */
 .pf-div{height:14px;margin:2.4rem 0 0;background-repeat:no-repeat}
