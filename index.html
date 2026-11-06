@@ -116,6 +116,25 @@ main ul>li::before{content:"";position:absolute;left:-1.1rem;top:.45em;width:.5e
   linear-gradient(90deg,var(--slate) 0 50%,var(--acc) 50% 100%) 136px 0/14px 14px no-repeat}
 
 .dx-sub-on{opacity:1}
+/* Hobelbank link on Jigsaw pages (variant A, r2)
+   Family sites are light-only: no dark override. Square corners like .card.
+   --hb-wood: edge/decoration; --hb-wood-text: text (AA, ~5.3:1 on the tint). */
+:root{--hb-wood:#a8742a;--hb-wood-text:#8a5a2b}
+.hb-cap{
+  display:flex;align-items:center;gap:.9rem;max-width:36rem;
+  margin:1.1rem 0 0;padding:.85rem 1.1rem .9rem;
+  border:1.5px solid var(--line);
+  border-top:3px solid transparent;
+  border-image:linear-gradient(90deg,var(--slate) 0 50%,var(--hb-wood) 50% 100%) 1;
+  background:color-mix(in srgb,var(--hb-wood) 6%,var(--bg));
+  text-decoration:none;color:inherit;
+}
+.hb-cap:hover{background:color-mix(in srgb,var(--hb-wood) 11%,var(--bg))}
+.hb-cap:focus-visible{outline:2px solid var(--slate);outline-offset:2px}
+.hb-cap .hb-mark{width:2.25rem;height:2.25rem;flex:none}
+.hb-cap .hb-t{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.hb-cap .hb-t strong{font:700 1rem/1.25 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--fg)}
+.hb-cap .hb-t em{font:italic .9rem/1.35 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--hb-wood-text)}
 </style></head><body class="pf-hermetarium"><aside><a class="brand" href="./"><img class="mark" src="favicon.svg" alt="" width="32" height="32">Hermetarium</a><div class="ver">Go · Docker · Firecracker · Squid</div>
 <div class="lbl">Handbook</div><nav><a href="#what">What it is</a><a href="#status">Current status</a><a href="#concepts">Key concepts</a><a href="#start">Getting started</a><a href="#layout">Architecture &amp; layout</a></nav>
 <div class="lbl ext">Links</div><nav class="ext"><a href="https://github.com/pihme/hermetarium">Repository</a><a href="https://github.com/pihme/hermetarium#readme">Readme</a><a href="https://github.com/pihme/hermetarium/issues">Issues</a><a href="https://github.com/pihme/hermetarium/releases">Releases</a><a href="https://github.com/pihme/hermetarium/blob/main/SPEC.md">Specification</a><a href="https://github.com/pihme/hermetarium/blob/main/USAGE.md">Usage guide</a><a href="https://github.com/pihme/hermetarium/blob/main/CONTRIBUTING.md">Contributing</a></nav>
