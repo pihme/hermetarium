@@ -16,6 +16,8 @@
 
 An agent that can run a shell and install packages should not run on the operator's machine. Hermetarium is the world the agent wakes up in: an **inhabitant** boots inside an OCI image and may use its Linux freely (shell, package managers, rewriting files), as root. It is not a per-command sandbox and not a tool the agent calls.
 
+Part of [Hobelbank](https://pihme.github.io/hobelbank/), a set of projects on building software in the age of AI.
+
 The **wall** is outside the image. A Go **supervisor** boots the image behind either a weak (Docker/`runc`) or strong (Firecracker microVM) wall, starts **Squid** as the only network path with an operator-supplied ACL, and turns Squid's access log into an I/O log. If that path cannot be applied, the habitat does not start (fail closed). API keys never live in the image; Squid injects them from the host-side ACL.
 
 The CLI name is `hermetarium` in full; do not shorten to `herm`.
