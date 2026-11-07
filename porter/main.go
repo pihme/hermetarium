@@ -105,10 +105,12 @@ func (s *server) cmd(prompt string) (*exec.Cmd, error) {
 		)
 		return c, nil
 	case "grok":
-		// --always-approve stays before -p. -p takes the next argument as the prompt.
+		// -p is --single and takes the next argument as the prompt.
+		// --continue must follow that argument. Between -p and the prompt,
+		// Grok treats it as the missing prompt value.
 		args := []string{"--always-approve", "-p", prompt}
 		if s.started {
-			args = []string{"--always-approve", "-p", "--continue", prompt}
+			args = append(args, "--continue")
 		}
 		return exec.Command("grok", args...), nil
 	case "dsh":

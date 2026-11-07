@@ -81,6 +81,8 @@ request_header_add x-api-key "__VENDOR_KEY__" vendorhost
 request_header_add Authorization "Bearer __VENDOR_KEY__" vendorhost
 ```
 
+Grok's file also sets `Host` to `api.x.ai` on that path. xAI answers 403 when the name is still the stand-in host.
+
 Replace `__VENDOR_KEY__` in a copy of the file before `create`. Hermetarium copies that file as you wrote it.
 
 These two lines keep every allowed call on a named peer. The model call uses `vendor`. Your question uses `inhabitant`.

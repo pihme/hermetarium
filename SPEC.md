@@ -96,12 +96,12 @@ How a credentialed destination is attached:
 - The operator’s Squid config allowlists the path and contains the credential headers.
 - That file is copied into `var/<id>/squid.conf` on the **gate** (the box never mounts it).
 - The inhabitant is pointed at an HTTP host on the logged path. It may have no key, or a non-secret placeholder so the program will start.
-- Squid reverse-proxies that host to the vendor over HTTPS and sets the real credential header.
+- Squid reverse-proxies that host to the vendor over HTTPS and sets the real credential header. For xAI it also sets `Host` to `api.x.ai`. xAI answers 403 when that name is still the stand-in. Squid 6.14 has no `forcedomain` peer option, so the gate file replaces the header.
 
 | Vendor | Typical inhabitant origin (HTTP on the path) |
 | --- | --- |
 | Anthropic | `ANTHROPIC_BASE_URL` |
-| xAI | `GROK_CLI_CHAT_PROXY_BASE_URL` (or Grok `config.toml` `base_url`) |
+| xAI | `GROK_XAI_API_BASE_URL`. The image points it at `grok-shim.pl` on `127.0.0.1:18099`, which answers `GET /v1/api-key` and forwards every other call to `http://grok.hermetarium.test`. On Grok 1.0.77, `GROK_CLI_CHAT_PROXY_BASE_URL` does not move the sampler. |
 | DeepSeek | DeepSeek / OpenAI-compatible base URL |
 
 Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` files use `__VENDOR_KEY__` for the inject header; tests substitute a mock key or a live env var before `create`. The supervisor does not read vendor API keys from its environment.

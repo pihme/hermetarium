@@ -39,7 +39,7 @@ func TestCmdContinuesSession(t *testing.T) {
 		want    []string
 	}{
 		{"claude", []string{"--continue", "-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
-		{"grok", []string{"--always-approve", "-p", "--continue", "hi"}},
+		{"grok", []string{"--always-approve", "-p", "hi", "--continue"}},
 		{"dsh", []string{"--profile", "headless", "hi"}},
 	}
 	for _, c := range cases {

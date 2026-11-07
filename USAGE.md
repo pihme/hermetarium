@@ -273,7 +273,7 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 ## Porter in your image
 
-Porter listens on port 8080 and runs `claude`, `grok`, or `dsh` for each POST. Claude and Grok get `--continue` after the first turn. Grok also gets `--always-approve`. DeepSeek's headless profile has no resume flag, so each of its turns is a new task.
+Porter listens on port 8080 and runs `claude`, `grok`, or `dsh` for each POST. Claude and Grok get `--continue` after the first turn. Claude's `-p` is a switch, so `--continue` stays in front of it. Grok's `-p` is `--single` and takes the prompt, so `--continue` follows the prompt. Grok also gets `--always-approve`. DeepSeek's headless profile has no resume flag, so each of its turns is a new task.
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter

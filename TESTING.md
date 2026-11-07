@@ -54,7 +54,7 @@ In-process. No Docker habitat.
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
 | `TestToolCommand` | A tool-use payload `{"command":"id -u"}` yields the command `id -u`. |
 | `TestCmdFirstTurn` | Porter argv for a first turn: `claude -p --output-format text --dangerously-skip-permissions`, `grok --always-approve -p`, `dsh --profile headless`. Claude's environment includes `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. |
-| `TestCmdContinuesSession` | After a turn has run, `claude` and `grok` gain `--continue`. `dsh --profile headless` stays one-shot. |
+| `TestCmdContinuesSession` | After a turn has run, `claude` and `grok` gain `--continue`. Claude's flag stays in front of `-p`. Grok's follows the prompt, because `-p` is `--single`. `dsh --profile headless` stays one-shot. |
 | `TestCmdUnknownHarness` | An unknown `HARNESS` value returns an error. |
 
 Porter tests compare argv. They do not exec `claude`, `grok`, or `dsh`.

@@ -43,6 +43,12 @@ The shared shape of this file is in the [inhabitants README](../README.md). This
    Grok Build ---------------->  anywhere else   closed
 ```
 
+The image points Grok's model client at `http://127.0.0.1:18099/v1` (`GROK_XAI_API_BASE_URL`). `grok-shim.pl` listens there. It answers `GET /v1/api-key` with `{"status":"ok"}`. Every other call is forwarded to `http://grok.hermetarium.test`, and from there through the gate. On Grok 1.0.77 that environment variable is what moves the client. `GROK_CLI_CHAT_PROXY_BASE_URL` only moves feedback and trace calls. Without the model setting, Grok dials `api.x.ai` on port 443, and the closed gate drops that call.
+
+Grok 1.0.77 asks `GET /v1/api-key` before it takes a question. xAI answers 401 for a login session token, and Grok then stops. The shim answers that one call. The gate still attaches the key to the calls that go on to xAI.
+
+Squid opens `api.x.ai` and sets the site name to `api.x.ai`. xAI answers 403 when the name is still `grok.hermetarium.test`. The gate file replaces the Host line on that path. Squid 6.14 has no `forcedomain` option on the peer.
+
 Squid keeps a log of what passed. `hermetarium logs` prints that log.
 
 The container can call the model. The rest of the web is closed. To let it fetch ordinary pages over plain HTTP, edit your copy of `squid.conf`.
