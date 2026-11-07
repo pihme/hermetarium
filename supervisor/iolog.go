@@ -18,6 +18,7 @@ type Record struct {
 	Destination string `json:"destination"`
 	Port        int    `json:"port,omitempty"`
 	Method      string `json:"method,omitempty"`
+	Path        string `json:"path,omitempty"`
 	Allowed     bool   `json:"allowed"`
 	Bytes       int    `json:"bytes,omitempty"`
 }
@@ -42,9 +43,23 @@ func ParseSquidLine(line string) (Record, bool) {
 	rawURL := f[6]
 	dest := rawURL
 	port := 80
+	protocol := "http"
+	path := ""
 	if u, err := url.Parse(rawURL); err == nil {
+		if u.Scheme == "https" || u.Scheme == "http" {
+			protocol = u.Scheme
+		}
 		if u.Hostname() != "" {
 			dest = u.Hostname()
+		}
+		if u.Path != "" && u.Path != "/" {
+			path = u.Path
+		}
+		if u.RawQuery != "" {
+			if path == "" {
+				path = "/"
+			}
+			path += "?" + u.RawQuery
 		}
 		if u.Port() != "" {
 			if p, err := strconv.Atoi(u.Port()); err == nil {
@@ -64,10 +79,11 @@ func ParseSquidLine(line string) (Record, bool) {
 	return Record{
 		Time:        time.Unix(unix, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano),
 		Direction:   dir,
-		Protocol:    "http",
+		Protocol:    protocol,
 		Destination: dest,
 		Port:        port,
 		Method:      f[5],
+		Path:        path,
 		Allowed:     !strings.Contains(status, "DENIED"),
 		Bytes:       bytes,
 	}, true

@@ -10,6 +10,7 @@ ENV HARNESS_WORKDIR=/work
 ENV OPENAI_BASE_URL=http://deepseek.hermetarium.test/v1
 ENV DEEPSEEK_BASE_URL=http://deepseek.hermetarium.test
 ENV DSH_HOME=/root/.dsh
+ENV DSH_PERMISSION_MODE=danger-full-access
 # Dummy so the CLI boots; Squid replaces Authorization on the logged path.
 ENV DEEPSEEK_API_KEY=not-the-supervisor-key
 EXPOSE 8080

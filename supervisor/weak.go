@@ -43,6 +43,19 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		return nil, err
 	}
+	conf, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
+	if err != nil {
+		return nil, err
+	}
+	https := ACLWantsHTTPS(conf)
+	if https {
+		if err := PrepareMITM(dir); err != nil {
+			return nil, err
+		}
+		if err := InitMITMDB(root, dir); err != nil {
+			return nil, err
+		}
+	}
 	network := "htm-" + id
 	gate := "htm-gate-" + id
 	box := "htm-box-" + id
@@ -62,7 +75,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		}
 	}()
 
-	if err := runSquid(gate, dir, []string{
+	if err := runSquid(root, gate, dir, []string{
 		"--network", network, "--ip", sub.Gate,
 		"--add-host", "inhabitant:" + sub.Box,
 		"--sysctl", "net.ipv4.ip_forward=1",
@@ -73,7 +86,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	if err := applyIntercept(gate); err != nil {
+	if err := applyIntercept(gate, https); err != nil {
 		return nil, err
 	}
 	if err := runAfterGate(opts, id, gate); err != nil {
@@ -89,6 +102,9 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	for _, h := range VendorHosts() {
 		boxArgs = append(boxArgs, "--add-host", h+":"+sub.Gate)
 	}
+	if https {
+		boxArgs = append(boxArgs, mitmBoxDockerArgs(dir)...)
+	}
 	boxArgs = append(boxArgs, opts.Image)
 	if _, err := Docker(30*time.Second, boxArgs...); err != nil {
 		return nil, err
@@ -98,6 +114,11 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		"ip route replace default via "+sub.Gate+" || ip route add default via "+sub.Gate,
 	); err != nil {
 		return nil, err
+	}
+	if https {
+		if err := InstallBoxTrust(box); err != nil {
+			return nil, err
+		}
 	}
 
 	hostPort, err := containerHostPort(gate, InboundPort)

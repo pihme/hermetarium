@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -11,7 +12,7 @@ func TestCmdFirstTurn(t *testing.T) {
 		want    []string
 	}{
 		{"claude", []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
-		{"grok", []string{"-p", "hi"}},
+		{"grok", []string{"--always-approve", "-p", "hi"}},
 		{"dsh", []string{"--profile", "headless", "hi"}},
 	}
 	for _, c := range cases {
@@ -22,6 +23,9 @@ func TestCmdFirstTurn(t *testing.T) {
 		}
 		if !slices.Equal(cmd.Args[1:], c.want) {
 			t.Fatalf("%s: got %v want %v", c.harness, cmd.Args[1:], c.want)
+		}
+		if c.harness == "claude" && !strings.Contains(strings.Join(cmd.Env, "\n"), "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1") {
+			t.Fatalf("claude env missing skip-permissions variable: %v", cmd.Env)
 		}
 	}
 }
@@ -35,7 +39,7 @@ func TestCmdContinuesSession(t *testing.T) {
 		want    []string
 	}{
 		{"claude", []string{"--continue", "-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
-		{"grok", []string{"-p", "--continue", "hi"}},
+		{"grok", []string{"--always-approve", "-p", "--continue", "hi"}},
 		{"dsh", []string{"--profile", "headless", "hi"}},
 	}
 	for _, c := range cases {

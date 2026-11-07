@@ -1,12 +1,19 @@
 package supervisor
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+//go:embed squid/Dockerfile
+var squidDockerfile string
+
+// SquidImage is the gate. EnsureSquid builds it from squid/Dockerfile.
+const SquidImage = "hermetarium-squid:local"
 
 func InstallACL(dir, src string) error {
 	if src == "" {
@@ -19,8 +26,30 @@ func InstallACL(dir, src string) error {
 	return os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644)
 }
 
-func EnsureSquidPulled() error {
-	return EnsureImageExists(SquidImage)
+// EnsureSquid builds the OpenSSL gate image once. A later create reuses it
+// while squid/Dockerfile is unchanged.
+func EnsureSquid(root string) error {
+	dir := filepath.Join(CacheDir(root), "squid-build")
+	stamp := filepath.Join(dir, "Dockerfile")
+	have := false
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", SquidImage); err == nil {
+		have = true
+	}
+	old, _ := os.ReadFile(stamp)
+	if have && string(old) == squidDockerfile {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(stamp, []byte(squidDockerfile), 0o644); err != nil {
+		return err
+	}
+	_, err := Docker(5*time.Minute, "build", "-t", SquidImage, dir)
+	if err != nil {
+		return fmt.Errorf("build squid image: %w", err)
+	}
+	return nil
 }
 
 func EnsureNetTools(root string) error {
@@ -39,8 +68,8 @@ func EnsureNetTools(root string) error {
 	return err
 }
 
-func runSquid(name, logDir string, extra []string) error {
-	if err := EnsureSquidPulled(); err != nil {
+func runSquid(root, name, logDir string, extra []string) error {
+	if err := EnsureSquid(root); err != nil {
 		return err
 	}
 	args := []string{"run", "-d", "--name", name}
@@ -55,13 +84,23 @@ func runSquid(name, logDir string, extra []string) error {
 	return err
 }
 
-func applyIntercept(netns string) error {
+func applyIntercept(netns string, https bool) error {
+	if err := redirectPort(netns, "80", "3128"); err != nil {
+		return err
+	}
+	if !https {
+		return nil
+	}
+	return redirectPort(netns, "443", fmt.Sprintf("%d", HTTPSInterceptPort))
+}
+
+func redirectPort(netns, dport, to string) error {
 	_, err := Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+netns,
 		"--cap-add", "NET_ADMIN",
 		NetToolsImage,
-		"iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "80",
-		"-j", "REDIRECT", "--to-ports", "3128",
+		"iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", dport,
+		"-j", "REDIRECT", "--to-ports", to,
 	)
 	return err
 }

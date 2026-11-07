@@ -50,6 +50,23 @@ if [ -f /fc-env ]; then
   . /fc-env
   set +a
 fi
+# Trust the gate certificate when this habitat opened HTTPS. A closed port
+# fails immediately and the guest continues.
+mkdir -p /etc/ssl /usr/local/share/ca-certificates
+if command -v curl >/dev/null 2>&1 && curl -fsS --connect-timeout 1 --max-time 3 -o /etc/ssl/hermetarium-mitm.crt http://172.16.0.1:3131/ca.pem; then
+  cp /etc/ssl/hermetarium-mitm.crt /usr/local/share/ca-certificates/hermetarium-mitm.crt
+  if command -v update-ca-certificates >/dev/null 2>&1; then
+    update-ca-certificates >/dev/null 2>&1 || true
+  elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+    cat /etc/ssl/hermetarium-mitm.crt >> /etc/ssl/certs/ca-certificates.crt
+  fi
+  export SSL_CERT_FILE=/etc/ssl/hermetarium-mitm.crt
+  export NODE_EXTRA_CA_CERTS=/etc/ssl/hermetarium-mitm.crt
+  export REQUESTS_CA_BUNDLE=/etc/ssl/hermetarium-mitm.crt
+  export CURL_CA_BUNDLE=/etc/ssl/hermetarium-mitm.crt
+  export GIT_SSL_CAINFO=/etc/ssl/hermetarium-mitm.crt
+  export PIP_CERT=/etc/ssl/hermetarium-mitm.crt
+fi
 cmd=$(cat /fc-cmd)
 echo "FC_CMD=$cmd"
 exec $cmd

@@ -120,6 +120,18 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		return nil, err
 	}
+	conf, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
+	if err != nil {
+		return nil, err
+	}
+	if ACLWantsHTTPS(conf) {
+		if err := PrepareMITM(dir); err != nil {
+			return nil, err
+		}
+		if err := InitMITMDB(root, dir); err != nil {
+			return nil, err
+		}
+	}
 	helper := "htm-fc-" + id
 	helpers, err := fcHelperDir(root)
 	if err != nil {
@@ -174,7 +186,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if err := runSquid(gate, dir, []string{"--network", "container:" + helper}); err != nil {
+	if err := runSquid(root, gate, dir, []string{"--network", "container:" + helper}); err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
 	}

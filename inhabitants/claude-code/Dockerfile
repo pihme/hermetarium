@@ -13,6 +13,7 @@ ENV HARNESS_WORKDIR=/work
 ENV ANTHROPIC_BASE_URL=http://claude.hermetarium.test
 ENV IS_SANDBOX=1
 ENV CLAUDE_CODE_BUBBLEWRAP=1
+ENV CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1
 ENV CI=true
 # Dummy so the CLI boots; Squid replaces x-api-key on the logged path.
 ENV ANTHROPIC_API_KEY=not-the-supervisor-key

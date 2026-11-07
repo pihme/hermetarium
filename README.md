@@ -14,147 +14,270 @@
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE)
 [![Website](https://img.shields.io/badge/website-pihme.github.io%2Fhermetarium-1f8a6a)](https://pihme.github.io/hermetarium/)
 
-An agent that can run a shell and install packages should not run on the operator's machine. Hermetarium is the world the agent wakes up in: an **inhabitant** boots inside an OCI image and may use its Linux freely (shell, package managers, rewriting files), as root. It is not a per-command sandbox and not a tool the agent calls.
+Hermetarium is a home for a coding assistant. The assistant wakes up inside a container. It may use that container freely: a shell, packages, and files. It runs as root.
+
+The wall is outside the container. A weak wall is Docker. A strong wall is a small virtual machine. [Squid](https://www.squid-cache.org/) is the only door. Your API key stays in the gate file, `squid.conf`, and Squid adds it as the call leaves. The habitat starts only when that door is up.
+
+The command is `hermetarium`.
 
 Part of [Hobelbank](https://pihme.github.io/hobelbank/), a set of projects on building software in the age of AI.
 
-The **wall** is outside the image. A Go **supervisor** boots the image behind either a weak (Docker/`runc`) or strong (Firecracker microVM) wall, starts **Squid** as the only network path with an operator-supplied ACL, and turns Squid's access log into an I/O log. If that path cannot be applied, the habitat does not start (fail closed). API keys never live in the image; Squid injects them from the host-side ACL.
-
-The CLI name is `hermetarium` in full; do not shorten to `herm`.
-
 - [Website](https://pihme.github.io/hermetarium/) — handbook and current status
-- [Specification](SPEC.md) — product spec
+- [Specification](SPEC.md) — what Hermetarium is
 - [Testing](TESTING.md) — what the suite checks
-- [Usage guide](USAGE.md) — walls, Squid, logs, custom images, porter
-- [Contributing](CONTRIBUTING.md) — issues welcome, outside pull requests not accepted for now
+- [Usage guide](USAGE.md) — walls, the gate file, logs, and your own image
+- [Contributing](CONTRIBUTING.md) — issues are welcome; outside pull requests are closed for now
 
-## Getting started
+## A habitat, in pictures
 
-Needs Docker and Go 1.24+ on `PATH`. The strong wall also needs `/dev/kvm` and **x86_64**. First strong `create` or `make test` fetches Firecracker into the cache dir. Firecracker runs in a privileged helper container; no host `sudo`.
+You run `hermetarium` on your machine. That program is the supervisor. It starts the gate and the container.
 
-Firecracker helper scripts are embedded. Squid is a pulled image. `create` needs `--acl FILE` (for example `examples/echo/squid.conf` or `inhabitants/claude-code/squid.conf`).
+```
+                         you
+                          |
+                     hermetarium
+                          |
+                          v
+               +---- Supervisor -----+
+               |   on your machine   |
+               | starts the habitat  |
+               +---------------------+
+```
 
-**From source**
+```
+   hermetarium ---------------->  Squid        the gate
+   hermetarium ---------------->  Hermetarium  the container
+```
+
+You send a question to an address on your own machine. Squid is the gate. The assistant works in the container. When it needs the model, the call goes back out through the same gate, and Squid adds your key.
+
+```
+                         you
+                          |
+                    <your prompt>
+                          |
+                          v
+               +------- Squid -------+
+               |       inbound       |
+               |  you to Hermetarium |
+               +---------------------+
+                          |
+                          v
+               +---- Hermetarium ----+
+               |    the assistant    |
+               |   its container     |
+               |  files and a shell  |
+               +---------------------+
+                          |
+                          |  calls to the model
+                          |  leave through here
+                          v
+               +------- Squid -------+
+               |       vendor        |
+               |  adds your API key  |
+               |    writes a log     |
+               +---------------------+
+                          |
+                          v
+                    the model API
+```
+
+The two Squid boxes are the same gate, drawn twice so each trip has its name.
+
+```
+   you           ---------------->  Hermetarium    through Squid
+   Hermetarium   ---------------->  the model API  key attached
+   Hermetarium   ---------------->  anywhere else  closed
+```
+
+That last line is the default. The assistant READMEs say how to open ordinary HTTP and HTTPS.
+
+Two walls can hold that container. The image is the same.
+
+```
+   weak    a Docker container    shares this machine's kernel
+   strong  its own tiny machine  needs Linux with KVM
+```
+
+On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall, root stays inside the virtual machine.
+
+The same pieces, drawn:
+
+![Hermetarium architecture: the supervisor starts a Squid gate and the wall; operator HTTP and all inhabitant egress pass through Squid, which logs to the instance directory and injects vendor keys per ACL.](docs/images/architecture.svg)
+
+## Run it
+
+<a id="getting-started"></a>
+
+From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container is privileged. The host itself needs no sudo.
+
+From source:
 
 ```bash
 git clone https://github.com/pihme/hermetarium.git
+```
+
+```bash
 cd hermetarium
+```
+
+```bash
 make build
+```
+
+```bash
 ./bin/hermetarium version
 ```
 
-**From a release** (linux-amd64): [hermetarium releases](https://github.com/pihme/hermetarium/releases?q=hermetarium) and [porter releases](https://github.com/pihme/hermetarium/releases?q=porter). Download `hermetarium-linux-amd64`, `chmod +x`, and pass `--acl` a Squid config from the habitat you are running. Porter is copied into inhabitant images, not run next to the supervisor.
+`hermetarium version` and `porter version` print a version number. `make build` stamps the git description, for example `0.4.0-20-g166358c`. A plain `go build` prints `dev`. Release tags are `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`. The Go import path is `github.com/pihme/hermetarium`.
 
-`hermetarium version` and `porter version` print semver. A local `make build` stamps the `git describe` version (for example `0.4.0-20-g166358c`); a plain `go build` prints `dev`. GitHub Releases attach linux-amd64 binaries; tags are `hermetarium/vX.Y.Z` and `porter/vX.Y.Z`. Go import path: `github.com/pihme/hermetarium`.
+From a release, for linux-amd64: [hermetarium releases](https://github.com/pihme/hermetarium/releases?q=hermetarium) and [porter releases](https://github.com/pihme/hermetarium/releases?q=porter). Download `hermetarium-linux-amd64` and mark it executable. Pass `--acl` a Squid config from the habitat you are running. Porter is copied into assistant images, and it runs inside the container.
 
-**Hello world**
+Hello world. This image sends back whatever you send it. It needs no API key.
+
+```bash
+make echo-image
+```
+
+That needs Docker. The image tag is `hermetarium/echo:dev`.
+
+Start it. The command prints an id: `YOUR_ID`. Use that printed line in the commands below. To choose it, add `--id NAME`, for example `--id echo`. The command prints that name.
+
+```bash
+./bin/hermetarium create --image hermetarium/echo:dev --acl examples/echo/squid.conf
+```
+
+Ask where it is listening:
+
+```bash
+./bin/hermetarium url YOUR_ID
+```
+
+That prints an address like `http://127.0.0.1:12345/`. The address reaches the container through Squid. Send a line there:
+
+```bash
+curl -d 'hello' http://127.0.0.1:12345/
+```
+
+See what went in and out:
+
+```bash
+./bin/hermetarium logs YOUR_ID
+```
+
+Stop it:
+
+```bash
+./bin/hermetarium destroy YOUR_ID
+```
+
+To run the same image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM.
+
+```bash
+./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image hermetarium/echo:dev --acl examples/echo/squid.conf
+```
+
+A coding assistant lives in its own folder. Each README says what it is, what the gate file does, and how to run it.
+
+- [Claude Code](inhabitants/claude-code/README.md)
+- [Grok Build](inhabitants/grok-build/README.md)
+- [DeepSeek Harness](inhabitants/deepseek-harness/README.md)
+
+The shared shape of the gate is in the [inhabitants README](inhabitants/README.md). The image holds a stand-in key so the program will start. Your real key stays in `squid.conf`.
+
+## Commands
+
+```text
+hermetarium create --image NAME --acl FILE [--id NAME]
+hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--id NAME]
+hermetarium url YOUR_ID
+hermetarium logs YOUR_ID
+hermetarium destroy YOUR_ID
+hermetarium version
+hermetarium exec YOUR_ID -- <cmd>
+```
+
+`create` starts a habitat and prints an id. `--image` is the container. Something inside must listen on port 8080. `--acl FILE` is the gate file. Hermetarium copies it as you wrote it.
+
+`--id NAME` chooses the id. Leave it off and `create` prints a new one. A name such as `claude` is fine. Use letters, digits, `.`, `_`, and `-`, start with a letter or a digit, and stay within 63 characters. Later commands use that same id.
+
+`--wall strong` is the virtual machine. `--mem` and `--disk` set its size in MiB. The defaults are 512 and 1024. Those two flags belong to the strong wall.
+
+`url` prints the address. `logs` prints what passed the gate. `destroy` stops the habitat.
+
+Ask the assistant over HTTP. `exec` runs a command on the Docker wall.
+
+Walls, the lines a gate file must contain, and an image of your own are in the [usage guide](USAGE.md).
+
+## The pieces
+
+The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wall, copies the gate file, starts Squid, publishes the address, and turns Squid's access log into the I/O log. It starts Docker, Firecracker, and Squid as programs.
+
+**Squid** is the logged path. Squid runs beside the supervisor. Its license stays with Squid. Hermetarium mounts the file you pass with `--acl`. Each example and each assistant ships its gate file next to its Dockerfile. Every setting is described in the [Squid 6 config guide](https://www.squid-cache.org/Versions/v6/cfgman/).
+
+**The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. Message bodies stay out of the log.
+
+**Porter** (`porter/`) is a small program inside the assistant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code and Grok Build. DeepSeek Harness starts a new task each time. You can skip porter and answer on 8080 yourself. The echo image does that.
+
+**Inhabitants** (`inhabitants/`) are the official assistants: Claude Code, Grok Build, and DeepSeek Harness. They run as root. Inside the box they may run commands and edit files without stopping to ask. The wall is outside the image.
+
+[Fregoli](https://github.com/pihme/fregoli) is one program from outside this repo that can live in a habitat. Its image already answers on port 8080. It currently listens only on `127.0.0.1` inside the container, so the gate cannot reach it until [fregoli#1](https://github.com/pihme/fregoli/issues/1) is fixed.
+
+`examples/` is for tests. `examples/echo/` repeats what you send. `examples/agentd/` is a small stand-in that talks to a pretend model, so the tests can check the walls, the key, and root without a live model. The pretend model is `tests/vendormock/`. `make test` uses those. `make test-live` talks to a real model.
+
+## Layout
+
+- `supervisor/` — the `hermetarium` program
+- `firecracker-helper/` — scripts for the strong wall, packed inside the binary
+- `porter/` — the small program that carries a question to Claude, Grok, or DeepSeek
+- `inhabitants/` — Claude Code, Grok Build, and DeepSeek Harness, plus the shared gate README
+- `examples/` — echo, and the agentd stand-in
+- `tests/` — the suite, the pretend model, and the probe
+- `docs/images/` — pictures for this page and the website
+- `var/<id>/` — one habitat's files, under `HERMETARIUM_ROOT`, this checkout, or `~/.local/share/hermetarium`
+
+Firecracker files land in `.cache/` inside the checkout, or in `~/.cache/hermetarium` when you run away from a checkout.
+
+## Tests
+
+What the product promises is in the [specification, section 11](SPEC.md#11-tests). What the suite checks today is in [TESTING.md](TESTING.md).
+
+The usual suite needs no model account. It runs hello-world on both walls, and one agentd turn against the pretend model. The official-assistant tests check that `claude`, `grok`, and `dsh` are installed and that porter answers. GitHub runs this on every push to `main` and on every pull request.
 
 ```bash
 make test
 ```
 
-```bash
-make echo-image
-make build
-id=$(./bin/hermetarium create --wall weak --image hermetarium/echo:dev --acl examples/echo/squid.conf)
-./bin/hermetarium url "$id"
-curl -sS -d 'hello' "$(./bin/hermetarium url "$id")"
-./bin/hermetarium logs "$id"
-./bin/hermetarium destroy "$id"
-```
-
-`make echo-image` needs Docker and tags `hermetarium/echo:dev`. `--image` is any local or pullable OCI image that listens on TCP 8080 (`myorg/claude:dev` below is a placeholder for an image you build). `url` is the host HTTP address that reaches it **through Squid**. `create --wall strong` works the same; `--mem MiB` and `--disk MiB` set the microVM size (default 512 and 1024). More: [usage guide](USAGE.md).
-
-**An official CLI as inhabitant**
-
-```bash
-sed 's/__VENDOR_KEY__/sk-ant-.../' inhabitants/claude-code/squid.conf > /tmp/claude.acl
-id=$(./bin/hermetarium create --wall weak --image myorg/claude:dev --acl /tmp/claude.acl)
-curl -sS -d 'Run id -u' "$(./bin/hermetarium url "$id")"
-```
-
-Dummy env in inhabitant images (`ANTHROPIC_API_KEY=not-the-supervisor-key` and the like) only exist so the CLI will start. Squid still replaces `x-api-key` / `Authorization` from the ACL. Boot flags per CLI: [usage guide](USAGE.md).
-
-**CLI**
-
-```text
-hermetarium create --wall weak|strong --image NAME --acl FILE
-hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB]
-hermetarium url <id>
-hermetarium exec <id> -- <cmd>     # weak wall only, not the product path
-hermetarium logs <id>
-hermetarium destroy <id>
-hermetarium version
-```
-
-## Architecture
-
-![Hermetarium architecture: the supervisor starts a Squid gate and the wall; operator HTTP and all inhabitant egress pass through Squid, which logs to the instance directory and injects vendor keys per ACL.](docs/images/architecture.svg)
-
-The operator reaches the inhabitant only through Squid (`hermetarium url` prints a `127.0.0.1` port published from the gate). Box HTTP is intercepted to `:3128`; the `--acl` file is expected to deny by default and allowlists and key-injects vendor hosts. Squid's `access.log` lives in the host instance directory.
-
-The **supervisor** (`supervisor/`) is a Go binary. It is the only operator-facing command. It creates a habitat: picks a wall (weak Docker/`runc` or strong Firecracker), copies `--acl` into the instance, starts Squid, publishes a localhost URL into the box, and maps Squid's access log into the I/O log. It talks to Docker, Firecracker, and Squid as processes (`os/exec`), not via their SDKs.
-
-**Squid** is the logged path. The supervisor pulls a public Squid image and mounts the ACL you pass with `--acl`. Squid runs as a sibling (GPLv2 stays in Squid; the supervisor does not link it). Each example and inhabitant ships its wall config next to its Dockerfile.
-
-**I/O log.** `hermetarium logs <id>` syncs Squid's `access.log` into `var/<id>/io.jsonl`: time, direction (`in`/`out`), protocol, destination, port, method, allowed, bytes. Bodies are off.
-
-**Porter** (`porter/`) is a small HTTP adapter that lives *inside* the inhabitant image, not next to the supervisor. It listens on TCP 8080, which is what `hermetarium url` reverse-proxies to. Each operator POST is one CLI turn (`claude`, `grok`, or `dsh`); later POSTs continue the same session for `claude`/`grok` (`--continue`). DeepSeek Harness's `headless` profile has no resume flag, so each `dsh` turn is an independent one-shot task, not a continued session. You can omit porter and serve HTTP on 8080 yourself (the echo example does).
-
-**Inhabitants** (`inhabitants/`) are Dockerfiles for official coding CLIs: Claude Code, Grok Build, DeepSeek Harness. They run as **root**, install the real binary, set dummy boot keys and vendor base URLs, and `CMD` porter. They are templates. Build an image, then `create --image <tag> --acl FILE`. The ACL file is where vendor allowlists and key inject live.
-
-One possible inhabitant from outside this repo is [Fregoli](https://github.com/pihme/fregoli), a self-evolving web app whose own Docker image serves HTTP on 8080 directly (no porter). Its server currently binds `127.0.0.1` only, which likely keeps it unreachable through the wall until [fregoli#1](https://github.com/pihme/fregoli/issues/1) is resolved.
-
-`examples/` is the test stand-in, not the official CLIs above. `examples/echo/` is a tiny HTTP echo. `examples/agentd/` is one small Go tool loop against a mock Messages API so CI can prove walls, keys, and uid 0 without a live model. The mock origin is `tests/vendormock/`. `make test` uses those. Official-CLI chat through a real model is `make test-live`.
-
-## Layout
-
-| Path | Contents |
-| --- | --- |
-| `supervisor/` | Go supervisor; entry point `supervisor/cmd/hermetarium` |
-| `firecracker-helper/` | TAP + Firecracker scripts for the strong wall (embedded in the binary) |
-| `porter/` | HTTP → CLI-turn adapter copied into inhabitant images |
-| `inhabitants/` | Claude Code, Grok Build, DeepSeek Harness templates (Dockerfile + `squid.conf`) |
-| `examples/` | Test stand-ins: `echo` (HTTP echo) and `agentd` (tool loop against a mock API) |
-| `tests/` | Integration tests (hello-world, agentd, official-CLI smoke), harness, vendor mock and probe |
-| `docs/images/` | Diagrams used in this README and on the website |
-| `var/<id>/` | Instance state under the data root (`HERMETARIUM_ROOT`, the checkout, or `~/.local/share/hermetarium`) |
-
-Firecracker assets cache in `.cache/` under the checkout, or `~/.cache/hermetarium` off-tree. Off-tree, instance state is `~/.local/share/hermetarium/var/` unless you set `HERMETARIUM_ROOT`.
-
-## Tests
-
-Two suites. Requirements: [specification, section 11](SPEC.md#11-tests). What each test checks: [TESTING.md](TESTING.md).
-
-**Mocked (CI default).** `make test`. No vendor account. Hello-world (both walls, probe, echo) and one agentd example against a mock vendor API. Official-CLI tests only check that `claude` / `grok` / `dsh` are on PATH and porter is up; they do not claim a mock-driven chat session. GitHub Actions job `test` runs this on every push to `main` and on every pull request.
-
-**Live (optional, not a merge gate).** Real CLI to the real vendor. Natural-language “run a command / install something” as root.
+The live suite talks to the real model companies. It is optional. A missing key skips that company.
 
 ```bash
 export HERMETARIUM_ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```bash
 export HERMETARIUM_XAI_API_KEY=xai-...
+```
+
+```bash
 export HERMETARIUM_DEEPSEEK_API_KEY=sk-...
+```
+
+```bash
 make test-live
 ```
 
-Unset keys skip that vendor. `make test-live` is `go test -tags live`. On GitHub: Actions → CI → **Run workflow** only (not push/PR). Repository secrets with those names are exported into the job for the supervisor. They must not appear in logs.
+On GitHub this runs only when someone starts the CI workflow by hand. The job reads repository secrets with those names. Keep the secret values out of the logs.
 
 ## How this project is built
 
-Hermetarium is developed agent-first. AI coding agents write all code,
-tests, and documentation, and review each other's changes, under human
-direction: specs, design decisions, and acceptance based on observed
-behaviour and test results. No human reads the code line by line. This
-is a deliberate choice. Quality rests on automated tests, CI, and
-independent agent review.
+Hermetarium is developed agent-first. AI coding agents write the code, the tests, and the documentation, and they review each other's changes. A person directs the work: the spec, the design choices, and acceptance from what the program does and what the tests show. No person reads the code line by line. That is a deliberate choice. Quality rests on the tests, on CI, and on a second agent's review.
 
-Evaluate the code against your own requirements before you depend on it.
-Found a problem? Open an issue.
+Judge the code against your own needs before you depend on it. Found a problem? Open an issue.
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE). Source-available; not OSI Open Source. Commercial use is not granted. Other licenses can be negotiated with the copyright holder.
+[PolyForm Noncommercial License 1.0.0](LICENSE). Source-available. This is not an OSI Open Source license. Commercial use needs a separate agreement with the copyright holder.
 
-Squid is a separate GPLv2 program, run as a sibling process, not linked into the supervisor.
+Squid is a separate GPLv2 program. Hermetarium runs it beside the supervisor and does not link it in.
 
-Third-party software compiled in or run by Hermetarium, and its licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Other programs Hermetarium compiles in or runs, and their licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

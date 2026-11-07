@@ -33,6 +33,29 @@ func TestResolveCreate(t *testing.T) {
 	}
 }
 
+func TestChooseID(t *testing.T) {
+	id, err := ChooseID(nil)
+	if err != nil || len(id) != 12 {
+		t.Fatalf("generated id %q %v", id, err)
+	}
+	named, err := ChooseID([]string{"--id", "claude"})
+	if err != nil || named != "claude" {
+		t.Fatalf("name %q %v", named, err)
+	}
+	for _, bad := range []string{"", "my agent", "../x", "a/b", "-claude", ".hidden"} {
+		if _, err := ChooseID([]string{"--id", bad}); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	long := "a" + string(bytes.Repeat([]byte("b"), 63))
+	if _, err := ChooseID([]string{"--id", long}); err == nil {
+		t.Fatal("accepted a long name")
+	}
+	if SubnetForID("claude").CIDR == SubnetForID("grok").CIDR {
+		t.Fatal("claude and grok share a subnet")
+	}
+}
+
 func TestCreateRejectsSizeFlagsOnWeakWall(t *testing.T) {
 	code := Run([]string{"create", "--wall", "weak", "--image", "hermetarium/echo:dev", "--acl", "/tmp/acl.conf", "--mem", "2048"})
 	if code != 2 {

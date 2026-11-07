@@ -1,4 +1,5 @@
 {
+  "skipDangerousModePermissionPrompt": true,
   "permissions": {
     "defaultMode": "bypassPermissions",
     "allow": ["Bash(*)", "Read(*)", "Write(*)", "Edit(*)"]

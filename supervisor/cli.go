@@ -37,9 +37,12 @@ func Run(args []string) int {
 			fmt.Fprintln(os.Stderr, "--mem and --disk apply only to --wall strong")
 			return 2
 		}
-		id, err := NewID()
+		id, err := ChooseID(rest)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			if flagPresent(rest, "--id") {
+				return 2
+			}
 			return 1
 		}
 		switch wall {
@@ -186,8 +189,8 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE
-       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB]
+	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--id NAME]
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--id NAME]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>

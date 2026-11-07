@@ -12,6 +12,13 @@ sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null
 sysctl -w net.ipv4.conf.tap0.rp_filter=0 >/dev/null
 iptables -P FORWARD DROP
 iptables -t nat -A PREROUTING -s 172.16.0.0/24 -p tcp --dport 80 -j REDIRECT --to-ports 3128
+# Port 3130 matches HTTPSInterceptPort. Only an uncommented https_port line turns this on.
+if grep -Eq '^[[:space:]]*https_port[[:space:]].*ssl-bump' /log/squid.conf 2>/dev/null; then
+  iptables -t nat -A PREROUTING -s 172.16.0.0/24 -p tcp --dport 443 -j REDIRECT --to-ports 3130
+  if [ -f /log/mitm-pub/ca.pem ]; then
+    busybox httpd -p 172.16.0.1:3131 -h /log/mitm-pub
+  fi
+fi
 
 printf '172.16.0.2 inhabitant\n' >> /etc/hosts
 mkdir -p /log

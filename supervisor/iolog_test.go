@@ -24,4 +24,9 @@ func TestParseSquidLine(t *testing.T) {
 	if !ok || rec.Direction != "in" || rec.Method != "POST" || rec.Bytes != 4 {
 		t.Fatalf("inbound %+v ok=%v", rec, ok)
 	}
+	httpsLine := "1757162698.123     20 10.20.0.3 TCP_MISS/200 100 GET https://deb.debian.org/debian/dists/bookworm/InRelease - HIER_DIRECT/1.2.3.4 text/plain"
+	rec, ok = ParseSquidLine(httpsLine)
+	if !ok || rec.Protocol != "https" || rec.Destination != "deb.debian.org" || rec.Port != 443 || rec.Path != "/debian/dists/bookworm/InRelease" || !rec.Allowed {
+		t.Fatalf("https %+v ok=%v", rec, ok)
+	}
 }

@@ -61,19 +61,19 @@ Operator and outside network both reach that inhabitant only through Squid. Ther
 - Do not mount the operator’s home directory, SSH keys, or host Docker socket unless that is an explicit, logged choice.
 - Root inside the image is allowed. On the weak wall, a kernel exploit is a host exploit. On the strong wall, root is only guest root.
 
-Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI image), `--wall weak|strong`, and `--acl FILE` (Squid config mounted into the gate).
+Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI image), `--wall weak|strong`, `--acl FILE` (Squid config mounted into the gate), and an optional `--id NAME`. Without `--id`, `create` prints a new id. The id may be a name.
 
 ## 7. Network and logging
 
 - No default route except Squid. Setting `HTTP_PROXY` inside the image is not the wall.
 - Fail closed: if the route, firewall, or Squid cannot be applied, do not start.
 - The supervisor **installs an operator-supplied Squid ACL** (`create --acl FILE`, copied to `var/<id>/squid.conf`) and starts Squid against it. Squid stays a **sibling process** (GPLv2). The supervisor does not link Squid. Each example and inhabitant ships its wall config next to its Dockerfile.
-- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, port, method, bytes, allowed or denied. Packet bodies are not captured.
+- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, port, method, path, bytes, allowed or denied. Packet bodies are not captured.
 - Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path. Fail closed on inbound the same as outbound: if the path cannot be applied, do not start.
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
 - Secrets: see §8.
 
-Whether bodies are captured (metadata only versus TLS interception) is not decided.
+Message bodies stay out of the log. Optional decryption of ordinary HTTPS is `OPEN-HTTPS` in the gate file.
 
 **Parked (not this build):** Squid `external_acl_type` helper, Envoy/xDS, OPA/Rego, replacing Squid. ICAP on Squid is the natural plug for a later wall scanner / pseudo-artifactory.
 
@@ -87,7 +87,9 @@ Rust was the alternative. It is not smaller here: even a thin supervisor needs `
 
 Secrets must not live in the inhabitant image, filesystem, or process environment. They belong in the **host-side ACL file** passed to `create --acl` (header inject/replace in Squid). If the inhabitant sends its own `x-api-key` or `Authorization`, that ACL should replace those headers. Direct access from the box to the real vendor origin is denied.
 
-Secrets-in-image is decided: no. This is **not** TLS interception of inhabitant traffic. The inhabitant speaks HTTP to the path; Squid is the HTTPS client to the vendor.
+Secrets-in-image is decided: no. The model path stays plain HTTP inside the container. Squid opens HTTPS to the vendor and adds the key. The container does not encrypt that call.
+
+Ordinary HTTPS from the container is closed unless the gate file's `OPEN-HTTPS` lines are on. Those lines make Squid decrypt that traffic (package downloads, curl, and the like). The I/O log then records the site and the path. Message bodies stay out of the log. The private key stays on the gate. `create` installs the public certificate into the container, so the assistant sets no proxy. The gate image is OpenSSL Squid for every habitat (`supervisor/squid/Dockerfile`, tag `hermetarium-squid:local`). A client that pins its own certificate list and ignores the container trust store still rejects the gate certificate.
 
 How a credentialed destination is attached:
 
@@ -195,7 +197,7 @@ Not run on push or pull_request. Must not be required to merge.
 
 - Supervisor shape beyond the CLI: Compose plus Squid, Kubernetes, or only the Go binary
 - Persistence: ephemeral or long-lived
-- I/O log bodies: metadata only, or optional TLS interception (mitmproxy is a candidate later; not the wall proxy)
+- I/O log bodies stay uncaptured. Optional decryption of the container's ordinary HTTPS is `OPEN-HTTPS` on the Squid gate, not a second proxy.
 - When to revisit Squid: `external_acl_type`, OPA beside Squid, or a different proxy
 - Streaming chat (SSE) on the operator HTTP hop
 

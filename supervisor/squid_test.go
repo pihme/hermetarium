@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestSquidDockerfile(t *testing.T) {
+	if SquidImage != "hermetarium-squid:local" {
+		t.Fatalf("SquidImage = %q", SquidImage)
+	}
+	if !strings.Contains(squidDockerfile, "FROM ubuntu/squid:") {
+		t.Fatalf("dockerfile base:\n%s", squidDockerfile)
+	}
+	if !strings.Contains(squidDockerfile, "squid-openssl") {
+		t.Fatal("dockerfile does not install squid-openssl")
+	}
+	if !strings.Contains(squidDockerfile, "/usr/lib/squid/security_file_certgen") {
+		t.Fatal("dockerfile does not require the certificate helper")
+	}
+}
+
 func TestInstallACL(t *testing.T) {
 	dir := t.TempDir()
 	if err := InstallACL(dir, ""); err == nil {

@@ -41,12 +41,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 ## External programs and images (run, not included)
 
-Hermetarium doesn't contain these. The supervisor runs them as separate processes or containers (see [Getting started](README.md#getting-started)); their own licenses apply to them.
+Hermetarium doesn't contain these. The supervisor runs them as separate processes or containers (see [Run it](README.md#run-it)); their own licenses apply to them.
 
 | Program | License | Used by |
 | --- | --- | --- |
 | [Docker](https://www.docker.com/) / [runc](https://github.com/opencontainers/runc) | Apache-2.0 | Weak wall; also runs the Squid container and the Firecracker helper container |
-| [Squid](https://www.squid-cache.org/), image `ubuntu/squid:6.6-24.04_beta` | GPL-2.0-or-later | The only network path of a habitat; pulled from Docker Hub at `create`. Runs as a sibling process; Hermetarium does not link it |
+| [Squid](https://www.squid-cache.org/), base image in `supervisor/squid/Dockerfile`, Ubuntu package `squid-openssl` | GPL-2.0-or-later | The only network path of a habitat. `create` builds `hermetarium-squid:local` from that base. Runs as a sibling process; Hermetarium does not link it |
 | [Firecracker](https://github.com/firecracker-microvm/firecracker) v1.16.1 | Apache-2.0 | Strong wall; downloaded from its GitHub release into the cache dir on the first strong `create` or `make test` |
 
 **Images you build.** The Dockerfiles in `inhabitants/` and `examples/` install third-party software (base images `debian:bookworm-slim`, `node:26-bookworm-slim`, `alpine:3.24`, and the vendor CLIs they name), each under its own license. This project doesn't publish those images; if you distribute one, its obligations are yours.

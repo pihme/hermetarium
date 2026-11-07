@@ -1,0 +1,9 @@
+# User settings. Project .grok/config.toml does not apply permission_mode.
+[ui]
+permission_mode = "always-approve"
+
+[cli]
+auto_update = false
+
+[sandbox]
+profile = "off"

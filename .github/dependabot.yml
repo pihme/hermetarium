@@ -57,11 +57,12 @@ updates:
       docker-minor-and-patch:
         update-types: [minor, patch]
 
-  # Supervisor helper image. supervisor/ is a hermetarium release path, and the
-  # binary reads this FROM line, so a bump is fix(deps): a patch release.
+  # Supervisor images. supervisor/ is a hermetarium release path, and the
+  # binary reads these FROM lines, so a bump is fix(deps): a patch release.
   - package-ecosystem: docker
     directories:
       - /supervisor/helper
+      - /supervisor/squid
     schedule:
       interval: weekly
       day: saturday

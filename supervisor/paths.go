@@ -4,17 +4,18 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
-	"strconv"
+	"strings"
 )
 
 const ProbeHost = "probe.hermetarium.test"
 const ProbePort = 18080
 const SquidPort = 3128
+const HTTPSInterceptPort = 3130
 const InboundPort = 18081
 
-const SquidImage = "ubuntu/squid:6.6-24.04_beta"
 const BusyboxImage = "busybox:1.36.1"
 const NetToolsImage = "hermetarium-nettools:local"
 
@@ -114,6 +115,38 @@ func NewID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
+// CheckID accepts the generated id and a name used for the same role.
+// The name becomes a directory and part of a Docker container name.
+func CheckID(id string) error {
+	if id == "" {
+		return fmt.Errorf("create --id requires a name")
+	}
+	if len(id) > 63 {
+		return fmt.Errorf("create --id is too long")
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		letter := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		mark := c == '.' || c == '_' || c == '-'
+		if i == 0 && !letter || i > 0 && !letter && !mark {
+			return fmt.Errorf("create --id must use letters, digits, '.', '_' or '-'")
+		}
+	}
+	return nil
+}
+
+// ChooseID returns --id when it is set, otherwise a new generated id.
+func ChooseID(args []string) (string, error) {
+	if !flagPresent(args, "--id") {
+		return NewID()
+	}
+	id := strings.TrimSpace(flag(args, "--id", ""))
+	if err := CheckID(id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 type Subnet struct {
 	CIDR string
 	Gate string
@@ -121,13 +154,9 @@ type Subnet struct {
 }
 
 func SubnetForID(id string) Subnet {
-	n := 20
-	if len(id) >= 2 {
-		v, err := strconv.ParseInt(id[:2], 16, 64)
-		if err == nil {
-			n = int(v%200) + 20
-		}
-	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(id))
+	n := int(h.Sum32()%200) + 20
 	return Subnet{
 		CIDR: fmt.Sprintf("10.%d.0.0/24", n),
 		Gate: fmt.Sprintf("10.%d.0.2", n),

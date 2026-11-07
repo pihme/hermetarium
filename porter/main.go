@@ -101,12 +101,14 @@ func (s *server) cmd(prompt string) (*exec.Cmd, error) {
 			"CI=true",
 			"IS_SANDBOX=1",
 			"CLAUDE_CODE_BUBBLEWRAP=1",
+			"CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1",
 		)
 		return c, nil
 	case "grok":
-		args := []string{"-p", prompt}
+		// --always-approve stays before -p. -p takes the next argument as the prompt.
+		args := []string{"--always-approve", "-p", prompt}
 		if s.started {
-			args = []string{"-p", "--continue", prompt}
+			args = []string{"--always-approve", "-p", "--continue", prompt}
 		}
 		return exec.Command("grok", args...), nil
 	case "dsh":
