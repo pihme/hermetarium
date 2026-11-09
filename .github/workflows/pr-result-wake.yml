@@ -10,7 +10,8 @@ name: pr-result-wake
 
 on:
   workflow_run:
-    # The repo's PR pipelines, by workflow `name:`. Add others (e.g. "Heavy tests") as needed.
+    # Every PR pipeline of the repo, by workflow `name:`. CI is the template default; list each
+    # further PR pipeline the repo has (e.g. "Heavy tests", "Browsers"), or it wakes no one.
     # Never list label-wake or pr-result-wake: that would loop.
     workflows: [CI]
     types: [completed]
