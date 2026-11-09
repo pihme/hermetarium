@@ -1,6 +1,8 @@
-# Batches handoff labels per repo: waits 60 s; a newer label event in the same repo cancels the waiting run.
-# Only the last run sends ONE wake call (with all open items carrying a handoff label) to the coordination routine.
-# Cost: jobs whose `if:` is false are skipped without a runner (0 minutes); each batch costs ~1 min runner time.
+# Batches handoff labels per repo: each run waits 60 s; then only the newest active run of this workflow in the repo
+# sends ONE wake call (with all open items carrying a handoff label) to the coordination routine.
+# Older runs exit successfully without a call. Runs are never cancelled: a cancelled `pull_request_target` run leaves a
+# failed `wake` check on the PR, so there is deliberately no `concurrency` / `cancel-in-progress` here.
+# Cost: jobs whose `if:` is false are skipped without a runner (0 minutes); each handoff label costs ~1 min runner time.
 name: label-wake
 
 on:
@@ -10,6 +12,7 @@ on:
     types: [labeled]
 
 permissions:
+  actions: read          # list this workflow's runs to find the newest one
   issues: read
   pull-requests: read
 
@@ -24,10 +27,6 @@ jobs:
       (github.event.sender.id == 49699333 && github.event.label.name == 'ready-for-maintainer')
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    # Job-level so skipped runs (non-handoff labels) never cancel a waiting batch.
-    concurrency:
-      group: label-wake-${{ github.repository }}
-      cancel-in-progress: true
     steps:
       - name: Collect handoff items and POST one batch
         env:
@@ -43,8 +42,33 @@ jobs:
             echo "::notice::WAKE_URL/WAKE_KEY not set in this repo, skipping (hourly safety net will pick it up)."
             exit 0
           fi
-          # Collect window: a newer label event in this repo cancels this run.
+          # Collect window, then only the newest active run sends; older runs exit 0 so their check stays green.
+          # A newer run of this workflow is active if one of its jobs is queued or in progress. Runs for non-handoff
+          # labels only have a skipped job and do not count. Runs started by Dependabot (49699333) do not count either,
+          # because they skip without a call (see above). A just-created newer run may not list its job yet; that case
+          # is re-checked every 5 s (it is at most seconds old, so if it is real it is still in its own 60 s window).
           sleep 60
+          WF_ID=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID" --jq '.workflow_id')
+          for attempt in 1 2 3 4 5 6; do
+            unresolved=0
+            for id in $(gh api "repos/$REPO/actions/workflows/$WF_ID/runs?per_page=100" --jq \
+                ".workflow_runs[] | select(.id > $GITHUB_RUN_ID and .status != \"completed\"
+                  and (.triggering_actor.id // 0) != 49699333) | .id"); do
+              jobs=$(gh api "repos/$REPO/actions/runs/$id/jobs" \
+                --jq '{total: (.jobs | length), active: ([.jobs[] | select(.status != "completed")] | length)}')
+              if [ "$(jq -r '.active' <<<"$jobs")" -gt 0 ]; then
+                echo "::notice::Newer label-wake run $id is active and sends the batch. Exiting without a call."
+                exit 0
+              fi
+              [ "$(jq -r '.total' <<<"$jobs")" -eq 0 ] && unresolved=1
+            done
+            [ "$unresolved" -eq 0 ] && break
+            if [ "$attempt" -eq 6 ]; then
+              echo "::notice::A newer label-wake run is still starting and sends the batch. Exiting without a call."
+              exit 0
+            fi
+            sleep 5
+          done
           items='[]'
           for label in ready-for-qa ready-for-maintainer ready-for-development; do
             iss=$(gh issue list -R "$REPO" --state open --label "$label" --limit 200 --json number,title,url \
