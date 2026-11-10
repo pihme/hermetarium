@@ -50,22 +50,35 @@ if [ -f /fc-env ]; then
   . /fc-env
   set +a
 fi
-# Trust the gate certificate when this habitat opened HTTPS. A closed port
-# fails immediately and the guest continues.
+# Port 3131 serves the gate CA only when HTTPS is open. busybox wget
+# speaks plain HTTP. curl initializes TLS and blocks in getrandom on the
+# 4.14 guest, before --max-time, so the server never starts.
 mkdir -p /etc/ssl /usr/local/share/ca-certificates
-if command -v curl >/dev/null 2>&1 && curl -fsS --connect-timeout 1 --max-time 3 -o /etc/ssl/hermetarium-mitm.crt http://172.16.0.1:3131/ca.pem; then
-  cp /etc/ssl/hermetarium-mitm.crt /usr/local/share/ca-certificates/hermetarium-mitm.crt
+ca=/etc/ssl/hermetarium-mitm.crt
+ca_url=http://172.16.0.1:3131/ca.pem
+fetched=0
+if [ -x /bin/busybox ]; then
+  if /bin/busybox timeout 3 /bin/busybox wget -q -T 2 -O "$ca" "$ca_url"; then
+    fetched=1
+  fi
+elif command -v timeout >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  if timeout 3 curl -fsS --connect-timeout 1 --max-time 2 -o "$ca" "$ca_url"; then
+    fetched=1
+  fi
+fi
+if [ "$fetched" -eq 1 ]; then
+  cp "$ca" /usr/local/share/ca-certificates/hermetarium-mitm.crt
   if command -v update-ca-certificates >/dev/null 2>&1; then
     update-ca-certificates >/dev/null 2>&1 || true
   elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-    cat /etc/ssl/hermetarium-mitm.crt >> /etc/ssl/certs/ca-certificates.crt
+    cat "$ca" >> /etc/ssl/certs/ca-certificates.crt
   fi
-  export SSL_CERT_FILE=/etc/ssl/hermetarium-mitm.crt
-  export NODE_EXTRA_CA_CERTS=/etc/ssl/hermetarium-mitm.crt
-  export REQUESTS_CA_BUNDLE=/etc/ssl/hermetarium-mitm.crt
-  export CURL_CA_BUNDLE=/etc/ssl/hermetarium-mitm.crt
-  export GIT_SSL_CAINFO=/etc/ssl/hermetarium-mitm.crt
-  export PIP_CERT=/etc/ssl/hermetarium-mitm.crt
+  export SSL_CERT_FILE="$ca"
+  export NODE_EXTRA_CA_CERTS="$ca"
+  export REQUESTS_CA_BUNDLE="$ca"
+  export CURL_CA_BUNDLE="$ca"
+  export GIT_SSL_CAINFO="$ca"
+  export PIP_CERT="$ca"
 fi
 cmd=$(cat /fc-cmd)
 echo "FC_CMD=$cmd"

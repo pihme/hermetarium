@@ -37,6 +37,9 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "rootfs.ext4") {
 		t.Fatalf("pack-oci.sh missing rootfs.ext4:\n%s", b)
 	}
+	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
+		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
+	}
 
 	st1, err := os.Stat(ep)
 	if err != nil {
