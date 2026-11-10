@@ -6,33 +6,7 @@ You send a question to an address on your own machine. The assistant works in it
 
 Inside the box, it may run commands and edit files without stopping to ask. Each message is a new task. Put the whole question in that message.
 
-## A question, in pictures
-
-```
-                         you
-                          |
-                    <your prompt>
-                          |
-                          v
-               +---- Hermetarium ----+
-               |  DeepSeek Harness   |
-               |   its container     |
-               |  one task, then it  |
-               |      finishes       |
-               +---------------------+
-                          |
-                          |  calls to the model
-                          |  leave through here
-                          v
-               +------- Squid -------+
-               |  adds your API key  |
-               |  writes a log       |
-               +---------------------+
-                          |
-                          v
-                      DeepSeek
-                  api.deepseek.com
-```
+The picture of the gate is in the [inhabitants README](../README.md). In that picture the model company is DeepSeek, `api.deepseek.com`.
 
 ## squid.conf
 
@@ -147,8 +121,4 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-To run the same image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM.
-
-```bash
-./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image dsh --acl /tmp/dsh.acl
-```
+Firecracker has not been shown to work for this inhabitant. Use the Docker wall.

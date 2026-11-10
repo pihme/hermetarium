@@ -6,32 +6,7 @@ You send a question to an address on your own machine. Claude reads files and ru
 
 Inside the box, Claude may run commands and edit files without stopping to ask. `settings.json` is what turns that on. A second question to the same address continues the same conversation.
 
-## A question, in pictures
-
-```
-                         you
-                          |
-                    <your prompt>
-                          |
-                          v
-               +---- Hermetarium ----+
-               |     Claude Code     |
-               |   its container     |
-               |  files and a shell  |
-               +---------------------+
-                          |
-                          |  calls to the model
-                          |  leave through here
-                          v
-               +------- Squid -------+
-               |  adds your API key  |
-               |  writes a log       |
-               +---------------------+
-                          |
-                          v
-                      Anthropic
-                  api.anthropic.com
-```
+The picture of the gate is in the [inhabitants README](../README.md). In that picture the model company is Anthropic, `api.anthropic.com`.
 
 ## squid.conf
 
@@ -146,8 +121,4 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-To run the same image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM.
-
-```bash
-./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image claude --acl /tmp/claude.acl
-```
+Firecracker has not been shown to work for this inhabitant. Use the Docker wall.

@@ -28,80 +28,11 @@ Part of [Hobelbank](https://pihme.github.io/hobelbank/), a set of projects on bu
 - [Usage guide](USAGE.md) — walls, the gate file, logs, and your own image
 - [Contributing](CONTRIBUTING.md) — issues are welcome; outside pull requests are closed for now
 
-## A habitat, in pictures
+## A habitat
 
-You run `hermetarium` on your machine. That program is the supervisor. It starts the gate and the container.
+You run `hermetarium` on your machine. That program is the supervisor. It starts the gate and the container. You send a question to an address on your own machine. Squid is the gate. The assistant works in the container. When it needs the model, the call goes back out through the same gate, and Squid adds your key. Calls to anywhere else are closed. The assistant READMEs say how to open ordinary HTTP and HTTPS.
 
-```
-                         you
-                          |
-                     hermetarium
-                          |
-                          v
-               +---- Supervisor -----+
-               |   on your machine   |
-               | starts the habitat  |
-               +---------------------+
-```
-
-```
-   hermetarium ---------------->  Squid        the gate
-   hermetarium ---------------->  Hermetarium  the container
-```
-
-You send a question to an address on your own machine. Squid is the gate. The assistant works in the container. When it needs the model, the call goes back out through the same gate, and Squid adds your key.
-
-```
-                         you
-                          |
-                    <your prompt>
-                          |
-                          v
-               +------- Squid -------+
-               |       inbound       |
-               |  you to Hermetarium |
-               +---------------------+
-                          |
-                          v
-               +---- Hermetarium ----+
-               |    the assistant    |
-               |   its container     |
-               |  files and a shell  |
-               +---------------------+
-                          |
-                          |  calls to the model
-                          |  leave through here
-                          v
-               +------- Squid -------+
-               |       vendor        |
-               |  adds your API key  |
-               |    writes a log     |
-               +---------------------+
-                          |
-                          v
-                    the model API
-```
-
-The two Squid boxes are the same gate, drawn twice so each trip has its name.
-
-```
-   you           ---------------->  Hermetarium    through Squid
-   Hermetarium   ---------------->  the model API  key attached
-   Hermetarium   ---------------->  anywhere else  closed
-```
-
-That last line is the default. The assistant READMEs say how to open ordinary HTTP and HTTPS.
-
-Two walls can hold that container. The image is the same.
-
-```
-   weak    a Docker container    shares this machine's kernel
-   strong  its own tiny machine  needs Linux with KVM
-```
-
-On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall, root stays inside the virtual machine.
-
-The same pieces, drawn:
+Two walls can hold that container. The container image is the same on both. A weak wall is a Docker container and shares this machine's kernel. A strong wall is its own machine and needs Linux with KVM. On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall, root stays inside the virtual machine. No inhabitant has been shown to work on the strong wall.
 
 ![Hermetarium architecture: the supervisor starts a Squid gate and the wall; operator HTTP and all inhabitant egress pass through Squid, which logs to the instance directory and injects vendor keys per ACL.](docs/images/architecture.svg)
 
@@ -171,7 +102,7 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-To run the same image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM.
+To run the echo image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM. No inhabitant has been shown to work on that wall.
 
 ```bash
 ./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image hermetarium/echo:dev --acl examples/echo/squid.conf

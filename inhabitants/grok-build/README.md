@@ -6,32 +6,7 @@ You send a question to an address on your own machine. Grok reads files and runs
 
 Inside the box, Grok may run commands and edit files without stopping to ask. `config.toml` is what turns that on. A second question to the same address continues the same conversation.
 
-## A question, in pictures
-
-```
-                         you
-                          |
-                    <your prompt>
-                          |
-                          v
-               +---- Hermetarium ----+
-               |     Grok Build      |
-               |   its container     |
-               |  files and a shell  |
-               +---------------------+
-                          |
-                          |  calls to the model
-                          |  leave through here
-                          v
-               +------- Squid -------+
-               |  adds your API key  |
-               |  writes a log       |
-               +---------------------+
-                          |
-                          v
-                         xAI
-                      api.x.ai
-```
+The picture of the gate is in the [inhabitants README](../README.md). In that picture the model company is xAI, `api.x.ai`.
 
 ## squid.conf
 
@@ -43,9 +18,9 @@ The shared shape of this file is in the [inhabitants README](../README.md). This
    Grok Build ---------------->  anywhere else   closed
 ```
 
-The image points Grok's model client at `http://127.0.0.1:18099/v1` (`GROK_XAI_API_BASE_URL`). `grok-shim.pl` listens there. It answers `GET /v1/api-key` with `{"status":"ok"}`. Every other call is forwarded to `http://grok.hermetarium.test`, and from there through the gate. On Grok 1.0.77 that environment variable is what moves the client. `GROK_CLI_CHAT_PROXY_BASE_URL` only moves feedback and trace calls. Without the model setting, Grok dials `api.x.ai` on port 443, and the closed gate drops that call.
+The image points Grok's model client at `http://grok.hermetarium.test/v1` (`GROK_XAI_API_BASE_URL`). On Grok 1.0.77 that environment variable is what moves the client. `GROK_CLI_CHAT_PROXY_BASE_URL` only moves feedback and trace calls. Without the model setting, Grok dials `api.x.ai` on port 443, and the closed gate drops that call.
 
-Grok 1.0.77 asks `GET /v1/api-key` before it takes a question. xAI answers 401 for a login session token, and Grok then stops. The shim answers that one call. The gate still attaches the key to the calls that go on to xAI.
+`__VENDOR_KEY__` must be an xAI API key. Grok asks `GET /v1/api-key` before it takes a question. xAI answers 200 for an API key. A login session token, the kind `grok login` stores, gets 401, and Grok then stops. The gate attaches that API key to the calls that go on to xAI.
 
 Squid opens `api.x.ai` and sets the site name to `api.x.ai`. xAI answers 403 when the name is still `grok.hermetarium.test`. The gate file replaces the Host line on that path. Squid 6.14 has no `forcedomain` option on the peer.
 
@@ -114,7 +89,7 @@ go build -o inhabitants/grok-build/porter ./porter
 docker build -t grok inhabitants/grok-build
 ```
 
-Copy the gate file and replace `__VENDOR_KEY__` with your xAI key:
+Copy the gate file and replace `__VENDOR_KEY__` with your xAI API key. A login token from `grok login` is not that key.
 
 ```bash
 cp inhabitants/grok-build/squid.conf /tmp/grok.acl
@@ -152,8 +127,4 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-To run the same image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM.
-
-```bash
-./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image grok --acl /tmp/grok.acl
-```
+Firecracker has not been shown to work for any inhabitant. This image was started on that wall, and a question never came back. Use the Docker wall.
