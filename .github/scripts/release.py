@@ -15,6 +15,9 @@ empty commit triggers it (one footer line per artifact):
 The bare form "Release-As: X.Y.Z" is ignored with a warning: it names no artifact.
 Upwards only: a version at or below the current one is ignored with a warning.
 Several footers for one artifact: the highest wins.
+A "Release-Notes:" trailer on that same commit is copied into the GitHub release
+notes (one bullet per trailer line). Without it, the notes fall back to
+"version set by a Release-As footer in <sha>".
 """
 from __future__ import annotations
 
@@ -178,6 +181,17 @@ def release_as(since: Optional[str], name: str) -> Optional[Tuple[Tuple[int, int
     return best
 
 
+def release_as_note_lines(sha: str) -> List[str]:
+    """Release-Notes trailers on the Release-As commit; otherwise a fallback line."""
+    out = subprocess.run(
+        ["git", "log", "-1", "--format=%(trailers:key=Release-Notes,valueonly,separator=%x1d)", sha],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    lines = [v.strip() for v in out.split("\x1d") if v.strip()]
+    return lines or [f"version set by a Release-As footer in {sha}"]
+
+
 def strongest(kinds: List[str]) -> Optional[str]:
     if "major" in kinds:
         return "major"
@@ -221,7 +235,7 @@ def main() -> int:
             forced = None
         if forced:
             kind = "Release-As " + forced[1]
-            kinds_subj = kinds_subj + [("", f"version set by a Release-As footer in {forced[1]}")]
+            kinds_subj = kinds_subj + [("", line) for line in release_as_note_lines(forced[1])]
         if not kind:
             touched = run(["git", "rev-list", "-1", "HEAD", "--"] + c["paths"], check=False)
             if not prev and touched:
