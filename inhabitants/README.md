@@ -70,13 +70,13 @@ cache_peer inhabitant parent 8080 ... name=inhabitant
 cache_peer <the model API> parent 443 ... name=vendor
 ```
 
-The key lines drop any key the container sends, then add yours on the vendor host only:
+The key lines drop any key the container sends, then add yours on the vendor host only, and not on the inbound port:
 
 ```
 request_header_access x-api-key deny all
 request_header_access Authorization deny all
-request_header_add x-api-key "__VENDOR_KEY__" vendorhost
-request_header_add Authorization "Bearer __VENDOR_KEY__" vendorhost
+request_header_add x-api-key "__VENDOR_KEY__" vendorhost !inbound
+request_header_add Authorization "Bearer __VENDOR_KEY__" vendorhost !inbound
 ```
 
 Both files also set `Host` to the real API name on that path (`api.x.ai`, `api.anthropic.com`). The services in front of the APIs answer 403 when the name is still the stand-in host.
@@ -92,12 +92,19 @@ always_direct deny all
 never_direct allow all
 ```
 
-Then who may pass:
+Then who may pass. A request on the inbound port with the vendor host is denied; it never reaches the vendor and never carries the key:
 
 ```
+http_access deny inbound vendorhost
 http_access allow inbound
 http_access allow vendorhost
 http_access deny all
+```
+
+```
+cache_peer_access vendor deny inbound
+cache_peer_access vendor allow vendorhost
+cache_peer_access vendor deny all
 ```
 
 The container's plain HTTP to the rest of the web is present as comments marked `OPEN-IN` and `OPEN-OUT`. Ordinary HTTPS is the block marked `OPEN-HTTPS`. Squid decrypts those calls, and the assistant does not set a proxy. The gate is an OpenSSL Squid.  Each inhabitant README says which lines to comment in and which to comment out.

@@ -41,6 +41,8 @@ func probeOfficial(t *testing.T, root, name string, versionCmd []string, vendorH
 	}
 	t.Logf("official CLI: %s", strings.TrimSpace(out+" "+errOut))
 	harness.AssertNoKeyInBox(t, inst)
+	harness.AssertInboundNoVendor(t, inst.InboundURL, vendorHost)
+	t.Log("inbound port does not forward the vendor host")
 
 	got, err := supervisor.CallTimeout(inst.InboundURL, "Run id -u and reply with only the number.", 20*time.Second)
 	if err != nil {

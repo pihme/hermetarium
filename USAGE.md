@@ -159,7 +159,7 @@ http_access allow inbound
 http_access deny all
 ```
 
-A vendor allowlist, and the lines that add your key, are yours to write. `examples/agentd/squid.conf` and the files under `inhabitants/` are the examples.
+A vendor allowlist, and the lines that add your key, are yours to write. `examples/agentd/squid.conf` and the files under `inhabitants/` are the examples. A request that arrives on the inbound port (18081) with the vendor Host must be denied. If you omit that deny, or add the key on `vendorhost` without `!inbound`, the key can leak on that port. The shared snippet is in the [inhabitants README](inhabitants/README.md#what-every-squidconf-shares).
 
 The wall sends the container's port 80 to Squid. Other ports from the container stay closed. Each assistant README says which lines to comment in, and which to comment out, to allow plain HTTP.
 

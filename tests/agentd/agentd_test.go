@@ -27,6 +27,7 @@ func testWall(t *testing.T, root string, strong bool) {
 			t.Fatal(err)
 		}
 		defer supervisor.DestroyStrong(id)
+		harness.AssertInboundNoVendor(t, inst.InboundURL, supervisor.ClaudeHost)
 		harness.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath, supervisor.ClaudeHost)
 		return
 	}
@@ -36,5 +37,6 @@ func testWall(t *testing.T, root string, strong bool) {
 	}
 	defer supervisor.DestroyWeak(id)
 	harness.AssertNoKeyInBox(t, inst)
+	harness.AssertInboundNoVendor(t, inst.InboundURL, supervisor.ClaudeHost)
 	harness.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath, supervisor.ClaudeHost)
 }

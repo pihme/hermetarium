@@ -91,7 +91,8 @@ func runSquid(root, name, logDir string, extra []string) error {
 
 // applyIntercept redirects the box's web traffic (source cidr) to Squid and
 // stops the gate from routing anything else. Other containers on the default
-// bridge can reach the gate but are not redirected.
+// bridge cannot reach the gate: lockGate drops their traffic and only lets the
+// bridge gateway reach the inbound port.
 func applyIntercept(netns, cidr string, https bool) error {
 	if _, err := Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+netns,
