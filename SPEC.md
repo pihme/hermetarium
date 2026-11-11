@@ -1,6 +1,6 @@
 # Hermetarium
 
-A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Operator-supplied Squid ACL (`create --acl`). One agentd coding-agent example with mock tests. Official CLIs (Claude Code, Grok Build, DeepSeek Harness) as inhabitant templates.
+A sealed habitat for software agents. Status: hello-world implemented in Go with Squid (both walls, fail-closed egress, probe, I/O log, inbound echo). Same OCI image on Firecracker. Operator-supplied Squid ACL (`create --acl`). One agentd coding-agent example with mock tests. Official CLIs (Claude Code, Grok Build) as inhabitant templates.
 
 ## 1. Name
 
@@ -102,7 +102,6 @@ How a credentialed destination is attached:
 | --- | --- |
 | Anthropic | `ANTHROPIC_BASE_URL` |
 | xAI | `GROK_XAI_API_BASE_URL` set to `http://grok.hermetarium.test/v1`. On Grok 1.0.77, `GROK_CLI_CHAT_PROXY_BASE_URL` does not move the sampler. The gate credential must be an xAI API key. A login session token gets 401 from `GET /v1/api-key`, and Grok stops. |
-| DeepSeek | DeepSeek / OpenAI-compatible base URL |
 
 Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` files use `__VENDOR_KEY__` for the inject header; tests substitute a mock key or a live env var before `create`. The supervisor does not read vendor API keys from its environment.
 
@@ -129,13 +128,13 @@ TLS and auth on this hop (operator → supervisor URL) are not decided.
 
 ### 9c. Coding-agent example
 
-`examples/agentd/`. Same inhabitant shape as echo: HTTP on 8080, one open session, a bash tool, Anthropic-shaped origin on the logged path (`claude.hermetarium.test`). It is a stand-in loop, not Claude Code / Grok Build / DeepSeek Harness. Those official CLIs are `inhabitants/` (porter + the real binary).
+`examples/agentd/`. Same inhabitant shape as echo: HTTP on 8080, one open session, a bash tool, Anthropic-shaped origin on the logged path (`claude.hermetarium.test`). It is a stand-in loop, not Claude Code / Grok Build. Those official CLIs are `inhabitants/` (porter + the real binary).
 
 Shared with those inhabitants:
 
 - Same OCI image on **both** walls. Runs as **root** inside the image (guest root on the strong wall).
 - HTTP server that **stays up** and holds **one open session** for the life of the habitat.
-- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. For Claude Code and Grok Build, a later POST is the next turn in the **same** session (not a new process per message). DeepSeek Harness's `headless` profile has no resume flag, so each of its turns is an independent one-shot task.
+- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. For Claude Code and Grok Build, a later POST is the next turn in the **same** session (not a new process per message).
 - Model “home” uses §8. Direct vendor API from the box is denied.
 - No SSE/WebSocket. A turn is still call-and-wait.
 - The operator path is this HTTP server, not a harness TUI or local web UI.
@@ -159,7 +158,7 @@ Both walls, fail-closed egress, probe, I/O log, inbound echo. Command: `make tes
 
 ### Coding-agent mock suite (required, CI default)
 
-Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls. One §9c image (`examples/agentd/`). Official-CLI smoke (`inhabitants/`) only checks that `claude` / `grok` / `dsh` are on PATH and porter answers.
+Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls. One §9c image (`examples/agentd/`). Official-CLI smoke (`inhabitants/`) only checks that `claude` / `grok` are on PATH and porter answers.
 
 **Mock the vendor HTTP API.** The agentd image runs a small tool loop, not an official CLI. A mock origin on the gate (like the probe) speaks enough of the Anthropic Messages API to:
 
@@ -191,7 +190,7 @@ Not run on push or pull_request. Must not be required to merge.
 ### CI
 
 - **Always:** job `test` runs `make test` (hello-world + agentd mock suite + official-CLI smoke).
-- **Optional / manual:** job `test-live` on `workflow_dispatch` only. The pipeline supplies keys as repository secrets (`HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, `HERMETARIUM_DEEPSEEK_API_KEY`) and exports whichever are set so tests can substitute them into the habitat ACL. Secrets are not written into the image, logs, or the inhabitant. Cases whose secret is empty skip.
+- **Optional / manual:** job `test-live` on `workflow_dispatch` only. The pipeline supplies keys as repository secrets (`HERMETARIUM_ANTHROPIC_API_KEY`, and `HERMETARIUM_XAI_API_KEY`) and exports whichever are set so tests can substitute them into the habitat ACL. Secrets are not written into the image, logs, or the inhabitant. Cases whose secret is empty skip.
 
 ## 12. Open questions
 

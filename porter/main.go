@@ -114,11 +114,6 @@ func (s *server) cmd(prompt string) (*exec.Cmd, error) {
 			args = append(args, "--continue")
 		}
 		return exec.Command("grok", args...), nil
-	case "dsh":
-		// dsh --profile headless has no session-resume flag (it answers one
-		// task and exits); each POST is an independent one-shot task, not a
-		// continued session like claude/grok.
-		return exec.Command("dsh", "--profile", "headless", prompt), nil
 	default:
 		return nil, fmt.Errorf("unknown HARNESS %q", s.harness)
 	}

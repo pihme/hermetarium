@@ -1,20 +1,19 @@
 # Inhabitants
 
-An inhabitant is a coding assistant in its own container. [Squid](https://www.squid-cache.org/) is the gate in front of that container. The three `squid.conf` files share one shape. Each file names a different model company.
+An inhabitant is a coding assistant in its own container. [Squid](https://www.squid-cache.org/) is the gate in front of that container. The two `squid.conf` files share one shape. Each file names a different model company.
 
 | Folder | Hermetarium runs | Vendor is | Docker | Firecracker |
 | --- | --- | --- | --- | --- |
 | [claude-code](claude-code/README.md) | Claude Code | Anthropic, `api.anthropic.com` | untested | not shown to work |
 | [grok-build](grok-build/README.md) | Grok Build | xAI, `api.x.ai` | tested | tested |
-| [deepseek-harness](deepseek-harness/README.md) | DeepSeek Harness | DeepSeek, `api.deepseek.com` | untested | not shown to work |
 
-Grok Build has been run on Firecracker by hand. Claude Code and DeepSeek Harness have no successful run there.
+Grok Build has been run on Firecracker by hand. Claude Code has no successful run there.
 
 ## Who is who
 
 **Hermetarium** is the container `create` starts. In `squid.conf` that container is the peer named `inhabitant`. The assistant inside listens on port 8080.
 
-**Vendor** is the model company's API. In `squid.conf` that API is the peer named `vendor`. The container does not call the company by its real name. It calls a stand-in host (`claude.hermetarium.test`, `grok.hermetarium.test`, or `deepseek.hermetarium.test`). Squid is the one that connects to the real API.
+**Vendor** is the model company's API. In `squid.conf` that API is the peer named `vendor`. The container does not call the company by its real name. It calls a stand-in host (`claude.hermetarium.test` or `grok.hermetarium.test`). Squid is the one that connects to the real API.
 
 **Squid** is one gate with two jobs. Your question comes in through `inbound` and is handed to Hermetarium. Hermetarium's call to the model goes out through `vendor`, and Squid attaches the key from `__VENDOR_KEY__` on that trip. The key stays in `squid.conf`.
 

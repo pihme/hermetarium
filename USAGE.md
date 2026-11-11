@@ -195,11 +195,9 @@ Claude Code refuses `--dangerously-skip-permissions` when it is root, unless it 
 
 Grok Build starts with `--always-approve`. `config.toml` sets `permission_mode` to `always-approve` and turns the sandbox off.
 
-DeepSeek Harness starts with `DSH_PERMISSION_MODE=danger-full-access`. That is full access, and no approval prompt.
-
 ## Your own image
 
-`inhabitants/claude-code/`, `inhabitants/grok-build/`, and `inhabitants/deepseek-harness/` are starting points. Build and run steps for each one are in that folder's README. Copy one, install the program you want, and keep this contract:
+`inhabitants/claude-code/` and `inhabitants/grok-build/` are starting points. Build and run steps for each one are in that folder's README. Copy one, install the program you want, and keep this contract:
 
 The image listens on port 8080. A POST is one turn. A GET may answer `ok`.
 
@@ -207,7 +205,7 @@ The image runs as root.
 
 The image contains `iproute2`, and usually `iptables`, so the wall can set the default route.
 
-Model calls go to the stand-in host on the gate: `http://claude.hermetarium.test`, `http://grok.hermetarium.test`, or `http://deepseek.hermetarium.test`. Squid is the one that connects to the real API.
+Model calls go to the stand-in host on the gate: `http://claude.hermetarium.test` or `http://grok.hermetarium.test`. Squid is the one that connects to the real API.
 
 The image may set a stand-in key, `not-the-supervisor-key`, so the program will start. Squid replaces the header from the gate file.
 
@@ -269,11 +267,11 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 **Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official assistants. KinD wants more still.
 
-**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. Grok Build has been run there by hand; Claude Code and DeepSeek Harness have no successful run. The kernel has no random-number device, so porter credits a seed from the kernel command line to the entropy pool; a program that calls `getrandom()` before porter starts can still block. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
+**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. Grok Build has been run there by hand; Claude Code has no successful run. The kernel has no random-number device, so porter credits a seed from the kernel command line to the entropy pool; a program that calls `getrandom()` before porter starts can still block. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
 
 ## Porter in your image
 
-Porter listens on port 8080 and runs `claude`, `grok`, or `dsh` for each POST. Claude and Grok get `--continue` after the first turn. Claude's `-p` is a switch, so `--continue` stays in front of it. Grok's `-p` is `--single` and takes the prompt, so `--continue` follows the prompt. Grok also gets `--always-approve`. DeepSeek's headless profile has no resume flag, so each of its turns is a new task.
+Porter listens on port 8080 and runs `claude` or `grok` for each POST. Claude and Grok get `--continue` after the first turn. Claude's `-p` is a switch, so `--continue` stays in front of it. Grok's `-p` is `--single` and takes the prompt, so `--continue` follows the prompt. Grok also gets `--always-approve`.
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
@@ -289,6 +287,6 @@ EXPOSE 8080
 CMD ["/usr/local/bin/porter"]
 ```
 
-`HARNESS` picks the command. Use `claude`, `grok`, or `dsh`, and put that program on `PATH`. The matching lines are in `porter/main.go`. Porter holds no real API key. Point the assistant at the stand-in host, and let Squid add the key.
+`HARNESS` picks the command. Use `claude` or `grok`, and put that program on `PATH`. The matching lines are in `porter/main.go`. Porter holds no real API key. Point the assistant at the stand-in host, and let Squid add the key.
 
 You can skip porter and serve HTTP yourself on 8080. Echo does. Porter is the piece that turns one POST into one turn of an official assistant.

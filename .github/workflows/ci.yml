@@ -66,7 +66,6 @@ jobs:
     env:
       HERMETARIUM_ANTHROPIC_API_KEY: ${{ secrets.HERMETARIUM_ANTHROPIC_API_KEY }}
       HERMETARIUM_XAI_API_KEY: ${{ secrets.HERMETARIUM_XAI_API_KEY }}
-      HERMETARIUM_DEEPSEEK_API_KEY: ${{ secrets.HERMETARIUM_DEEPSEEK_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
@@ -92,7 +91,7 @@ jobs:
 
       - name: Live tests
         run: |
-          if [ -z "$HERMETARIUM_ANTHROPIC_API_KEY$HERMETARIUM_XAI_API_KEY$HERMETARIUM_DEEPSEEK_API_KEY" ]; then
+          if [ -z "$HERMETARIUM_ANTHROPIC_API_KEY$HERMETARIUM_XAI_API_KEY" ]; then
             echo "no live keys set; skip"
             exit 0
           fi

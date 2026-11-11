@@ -44,7 +44,6 @@ updates:
       - /examples/agentd
       - /inhabitants/claude-code
       - /inhabitants/grok-build
-      - /inhabitants/deepseek-harness
     schedule:
       interval: weekly
       day: saturday
