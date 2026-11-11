@@ -1,0 +1,33 @@
+# Throwaway: why does the weak probe time out with daemon DNS? Do not merge.
+name: diag
+on: pull_request
+jobs:
+  weak-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [dns-global, dns-prebuild-only]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: bash .github/scripts/load-nix-env.sh ./nix/reference-env
+      - name: Docker DNS
+        run: |
+          echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+      - name: Prebuild Squid, then drop the DNS override
+        if: matrix.variant == 'dns-prebuild-only'
+        run: |
+          docker build -t hermetarium-squid:local supervisor/squid
+          sudo rm /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker image inspect hermetarium-squid:local >/dev/null
+      - name: Weak probe
+        run: go test ./tests/hello-world -run 'TestHelloWorld/weak' -count=1 -v -timeout 10m
+      - name: Squid logs
+        if: always()
+        run: |
+          for f in var/*/cache.log; do echo "== $f"; tail -30 "$f"; done
+          docker ps -a --format '{{.Names}} {{.Status}}'
