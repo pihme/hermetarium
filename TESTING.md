@@ -63,7 +63,7 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 
 `tests/hello-world` `TestHelloWorld`. Image `examples/echo`.
 
-**Weak.** `ping -c 1 -W 2 1.1.1.1` exits non-zero. `curl` of `http://probe.hermetarium.test/hello` returns `hermetarium-ok`. The I/O log contains destination `probe.hermetarium.test` or the gate IP. Then the echo exercise below.
+**Weak.** `ping -c 1 -W 2 1.1.1.1` exits non-zero in the box, while a TCP connect to `1.1.1.1:443` from the gate succeeds (the gate is the only way out). `curl` of `http://probe.hermetarium.test/hello` returns `hermetarium-ok`. The I/O log contains destination `probe.hermetarium.test` or the gate IP. Then the echo exercise below.
 
 **Strong.** Guest serial shows `GUEST_UNAME` different from the host kernel in `/proc/sys/kernel/osrelease`, and contains `LEAK_FAIL`. Then the echo exercise. The strong guest does not fetch the probe.
 

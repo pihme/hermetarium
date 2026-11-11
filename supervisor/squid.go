@@ -84,22 +84,33 @@ func runSquid(root, name, logDir string, extra []string) error {
 	return err
 }
 
-func applyIntercept(netns string, https bool) error {
-	if err := redirectPort(netns, "80", "3128"); err != nil {
+// applyIntercept redirects the box's web traffic (source cidr) to Squid and
+// stops the gate from routing anything else. Other containers on the default
+// bridge can reach the gate but are not redirected.
+func applyIntercept(netns, cidr string, https bool) error {
+	if _, err := Docker(30*time.Second, "run", "--rm",
+		"--network", "container:"+netns,
+		"--cap-add", "NET_ADMIN",
+		NetToolsImage,
+		"iptables", "-P", "FORWARD", "DROP",
+	); err != nil {
+		return err
+	}
+	if err := redirectPort(netns, cidr, "80", "3128"); err != nil {
 		return err
 	}
 	if !https {
 		return nil
 	}
-	return redirectPort(netns, "443", fmt.Sprintf("%d", HTTPSInterceptPort))
+	return redirectPort(netns, cidr, "443", fmt.Sprintf("%d", HTTPSInterceptPort))
 }
 
-func redirectPort(netns, dport, to string) error {
+func redirectPort(netns, cidr, dport, to string) error {
 	_, err := Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+netns,
 		"--cap-add", "NET_ADMIN",
 		NetToolsImage,
-		"iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", dport,
+		"iptables", "-t", "nat", "-A", "PREROUTING", "-s", cidr, "-p", "tcp", "--dport", dport,
 		"-j", "REDIRECT", "--to-ports", to,
 	)
 	return err
