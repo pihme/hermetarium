@@ -127,4 +127,4 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-Firecracker has not been shown to work for any inhabitant. This image was started on that wall, and a question never came back. Use the Docker wall.
+This image also runs on the Firecracker wall (`--wall strong`). The guest kernel has no random-number device, so the supervisor passes a seed on the kernel command line and porter credits it to the entropy pool at start. Without that, Grok waits forever in `getrandom()`.
