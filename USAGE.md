@@ -35,7 +35,7 @@ The assistant image is the same on either wall. The wall is outside the image.
    strong  its own tiny machine  needs Linux with KVM
 ```
 
-On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the container is a virtual machine with its own kernel, and root stays inside it. No inhabitant has been shown to work on the strong wall.
+On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the container is a virtual machine with its own kernel, and root stays inside it.
 
 Build the hello-world image. It needs Docker. The tag is `hermetarium/echo:dev`.
 
