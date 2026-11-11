@@ -91,6 +91,9 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
+	if err := lockGate(gate, sub.Gate); err != nil {
+		return nil, err
+	}
 	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
 		return nil, err
 	}

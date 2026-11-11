@@ -46,11 +46,11 @@ A private address such as `10.98.0.3` cannot talk to the Internet by itself. The
 - The gate sits on that network and also on Docker's default bridge. The default bridge does NAT. That is the only way out, and Squid is the only program in the gate that uses it.
 - In the gate, forwarding is switched off (`iptables -P FORWARD DROP`). Web calls from the assistant's own subnet (port 80, and 443 if you open HTTPS) are redirected into Squid. Anything else the assistant sends dies in the gate.
 - The assistant has `NET_ADMIN` and may change its own routes. Pointing its default route at the host bridge reaches nothing, because the network is internal.
-- Other containers on the default bridge can reach the gate, but their traffic is not redirected into Squid. They cannot borrow your key.
+- The gate has an address on the default bridge, and Squid listens on all addresses. So the gate also drops everything arriving from the bridge (`iptables -P INPUT DROP`). It accepts only the habitat network, loopback, replies, and your question on port 18081 from the bridge gateway, where the published port arrives. Another container on the default bridge cannot connect to Squid, so it cannot borrow your key. The habitat side is matched by network interface, not address, because a container can forge an address.
 
 You need no firewall change on the host. Do not add a masquerade rule for the habitat networks: it would be the only thing that could let an assistant out.
 
-**Firecracker wall.** The virtual machine sits on a TAP device inside a helper container. Squid runs in the same container. The helper forwards nothing (`FORWARD DROP`) and has no NAT rule for the TAP device, and web calls from the machine are redirected into Squid. The machine cannot get out, and Squid reaches the Internet through the helper's own Docker network.
+**Firecracker wall.** The virtual machine sits on a TAP device inside a helper container. Squid runs in the same container. The helper forwards nothing (`FORWARD DROP`) and has no NAT rule for the TAP device, and web calls from the machine are redirected into Squid. It also drops everything arriving on its Docker bridge address, except your question on port 18081 from the bridge gateway, so other containers cannot reach Squid. The machine cannot get out, and Squid reaches the Internet through the helper's own Docker network.
 
 ## What every squid.conf shares
 
