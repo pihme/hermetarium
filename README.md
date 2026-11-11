@@ -32,7 +32,7 @@ Part of [Hobelbank](https://pihme.github.io/hobelbank/), a set of projects on bu
 
 You run `hermetarium` on your machine. That program is the supervisor. It starts the gate and the container. You send a question to an address on your own machine. Squid is the gate. The assistant works in the container. When it needs the model, the call goes back out through the same gate, and Squid adds your key. Calls to anywhere else are closed. The assistant READMEs say how to open ordinary HTTP and HTTPS.
 
-Two walls can hold that container. The container image is the same on both. A weak wall is a Docker container and shares this machine's kernel. A strong wall is its own machine and needs Linux with KVM. On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall, root stays inside the virtual machine. No inhabitant has been shown to work on the strong wall.
+Two walls can hold that container. The container image is the same on both. A weak wall is a Docker container and shares this machine's kernel. A strong wall is its own machine and needs Linux with KVM. On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall, root stays inside the virtual machine.
 
 ![Hermetarium architecture: the supervisor starts a Squid gate and the wall; operator HTTP and all inhabitant egress pass through Squid, which logs to the instance directory and injects vendor keys per ACL.](docs/images/architecture.svg)
 
@@ -102,7 +102,7 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-To run the echo image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM. No inhabitant has been shown to work on that wall.
+To run the echo image in its own virtual machine, give it 2 GB of memory and 2 GB of disk. This needs a Linux machine with KVM.
 
 ```bash
 ./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image hermetarium/echo:dev --acl examples/echo/squid.conf
