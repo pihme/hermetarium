@@ -117,7 +117,7 @@ Job `release` runs after `test` on push to `main`. It does not run the suite.
 
 ## Named in SPEC §11 and not asserted here
 
-- Strong-wall fetch of the probe, strong-wall official CLIs, and strong-wall live runs. No inhabitant has been shown to work on the strong wall. Grok was tried by hand: the guest starts, and a question never comes back.
+- Strong-wall fetch of the probe, strong-wall official CLIs, and strong-wall live runs. Grok was run on the strong wall by hand and answered; no automated test covers it.
 - A second agentd live turn, and the text of the official-CLI live second turn.
 - The vendor key absent from the inhabitant filesystem. The weak-wall check is `printenv` only.
 - A direct request from the box to the vendor origin failing.

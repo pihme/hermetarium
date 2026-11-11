@@ -269,7 +269,7 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 **Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official assistants. KinD wants more still.
 
-**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. No inhabitant has been shown to work on that wall. Grok was started there, and a question never came back. Claude Code and DeepSeek Harness have no successful run. Use the Docker wall for an assistant. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
+**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. Grok Build has been run there by hand; Claude Code and DeepSeek Harness have no successful run. The kernel has no random-number device, so porter credits a seed from the kernel command line to the entropy pool; a program that calls `getrandom()` before porter starts can still block. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
 
 ## Porter in your image
 

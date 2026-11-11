@@ -5,10 +5,10 @@ An inhabitant is a coding assistant in its own container. [Squid](https://www.sq
 | Folder | Hermetarium runs | Vendor is | Docker | Firecracker |
 | --- | --- | --- | --- | --- |
 | [claude-code](claude-code/README.md) | Claude Code | Anthropic, `api.anthropic.com` | untested | not shown to work |
-| [grok-build](grok-build/README.md) | Grok Build | xAI, `api.x.ai` | tested | does not work |
+| [grok-build](grok-build/README.md) | Grok Build | xAI, `api.x.ai` | tested | tested |
 | [deepseek-harness](deepseek-harness/README.md) | DeepSeek Harness | DeepSeek, `api.deepseek.com` | untested | not shown to work |
 
-No inhabitant has been shown to work on Firecracker. Grok was started on that wall, and a question never came back. Claude Code and DeepSeek Harness have no successful run there.
+Grok Build has been run on Firecracker by hand. Claude Code and DeepSeek Harness have no successful run there.
 
 ## Who is who
 

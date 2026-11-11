@@ -1,6 +1,8 @@
 package supervisor
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -138,10 +140,16 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	helperScript := filepath.Join(helpers, "entrypoint.sh")
+	// The 4.14 guest kernel has no virtio-rng; porter credits this seed
+	// to the entropy pool so getrandom() does not block (see porter/seed.go).
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
+		return nil, err
+	}
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
-			"boot_args":         "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init",
+			"boot_args":         "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init hermetarium.seed=" + hex.EncodeToString(seed),
 		},
 		"drives": []map[string]any{{
 			"drive_id":       "rootfs",
