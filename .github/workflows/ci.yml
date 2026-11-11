@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  test-matrix:
     name: test (${{ matrix.name }})
     strategy:
       fail-fast: false
@@ -72,6 +72,17 @@ jobs:
       - name: Release binaries are static (glibc baseline)
         if: matrix.name == 'unit'
         run: python3 .github/scripts/release.py --check-build
+
+
+  test:
+    name: test
+    needs: test-matrix
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: All matrix legs passed
+        run: test "${{ needs.test-matrix.result }}" = "success"
 
   test-live:
     if: github.event_name == 'workflow_dispatch'
