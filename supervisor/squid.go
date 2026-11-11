@@ -23,6 +23,11 @@ func InstallACL(dir, src string) error {
 	if err != nil {
 		return fmt.Errorf("read ACL %s: %w", src, err)
 	}
+	// A habitat id can be reused after destroy. Squid refuses to start when the
+	// old squid.pid is still in the instance dir.
+	if err := os.Remove(filepath.Join(dir, "squid.pid")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644)
 }
 
