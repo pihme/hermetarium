@@ -32,6 +32,13 @@ jobs:
           test -c /dev/kvm
           ls -l /dev/kvm
 
+      - name: Docker DNS
+        # The runner's Azure resolver (168.63.129.16) intermittently fails to
+        # resolve archive.ubuntu.com, which breaks the Squid image build.
+        run: |
+          echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - uses: actions/cache@v6
         with:
           path: .cache
@@ -64,6 +71,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           test -c /dev/kvm
+      - name: Docker DNS
+        # The runner's Azure resolver (168.63.129.16) intermittently fails to
+        # resolve archive.ubuntu.com, which breaks the Squid image build.
+        run: |
+          echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - name: Live tests
         run: |
           if [ -z "$HERMETARIUM_ANTHROPIC_API_KEY$HERMETARIUM_XAI_API_KEY$HERMETARIUM_DEEPSEEK_API_KEY" ]; then
