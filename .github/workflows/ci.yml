@@ -14,7 +14,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  test-matrix:
+    name: test (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agentd
+            pkgs: ./tests/agentd
+          - name: hello-world
+            pkgs: ./tests/hello-world
+          - name: inhabitants
+            pkgs: ./tests/inhabitants
+          - name: unit
+            pkgs: ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/echo ./tests/harness ./tests/vendormock
     # x86_64: Firecracker binary and kernel in the strong-wall test are x86_64.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -48,16 +61,28 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .cache
-          key: ${{ runner.os }}-fc-${{ hashFiles('supervisor/strong.go', 'supervisor/oci.go', 'firecracker-helper/pack-oci.sh', 'examples/**') }}
+          key: ${{ runner.os }}-fc-${{ matrix.name }}-${{ hashFiles('supervisor/strong.go', 'supervisor/oci.go', 'firecracker-helper/pack-oci.sh', 'examples/**') }}
 
       - name: Build
         run: make build
 
       - name: Test
-        run: make test
+        run: make test TEST_PKGS="${{ matrix.pkgs }}"
 
       - name: Release binaries are static (glibc baseline)
+        if: matrix.name == 'unit'
         run: python3 .github/scripts/release.py --check-build
+
+
+  test:
+    name: test
+    needs: test-matrix
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: All matrix legs passed
+        run: test "${{ needs.test-matrix.result }}" = "success"
 
   test-live:
     if: github.event_name == 'workflow_dispatch'

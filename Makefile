@@ -12,8 +12,10 @@ build:
 	$(GO) build -ldflags='-s -w -X github.com/pihme/hermetarium/supervisor.Version=$(HVER)' -o bin/hermetarium ./supervisor/cmd/hermetarium
 	$(GO) build -ldflags='-s -w -X main.Version=$(PVER)' -o bin/porter ./porter
 
+TEST_PKGS ?= ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/...
+
 test:
-	$(GO) test ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/... -count=1 -p 1 -timeout 15m -v
+	$(GO) test $(TEST_PKGS) -count=1 -p 1 -timeout 15m -v
 
 test-live:
 	$(GO) test -tags live ./tests/agentd ./tests/inhabitants -count=1 -p 1 -timeout 15m -v
