@@ -13,7 +13,6 @@ func TestCmdFirstTurn(t *testing.T) {
 	}{
 		{"claude", []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
 		{"grok", []string{"--always-approve", "-p", "hi"}},
-		{"dsh", []string{"--profile", "headless", "hi"}},
 	}
 	for _, c := range cases {
 		s := &server{harness: c.harness}
@@ -31,8 +30,7 @@ func TestCmdFirstTurn(t *testing.T) {
 }
 
 // claude and grok carry --continue once a turn has already run, so a later
-// POST continues the same session (SPEC.md §9c). dsh --profile headless has
-// no resume flag and stays one-shot per turn regardless of s.started.
+// POST continues the same session (SPEC.md §9c).
 func TestCmdContinuesSession(t *testing.T) {
 	cases := []struct {
 		harness string
@@ -40,7 +38,6 @@ func TestCmdContinuesSession(t *testing.T) {
 	}{
 		{"claude", []string{"--continue", "-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
 		{"grok", []string{"--always-approve", "-p", "hi", "--continue"}},
-		{"dsh", []string{"--profile", "headless", "hi"}},
 	}
 	for _, c := range cases {
 		s := &server{harness: c.harness, started: true}

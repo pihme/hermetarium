@@ -35,7 +35,7 @@ done
 $IP link set eth0 up 2>/dev/null || true
 $IP addr add 172.16.0.2/24 dev eth0 2>/dev/null || true
 $IP route add default via 172.16.0.1 2>/dev/null || true
-printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test deepseek.hermetarium.test\n' >> /etc/hosts
+printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test\n' >> /etc/hosts
 echo "GUEST_UNAME=$(uname -r)"
 if [ -x /bin/busybox ] && /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
   echo LEAK_OK

@@ -9,7 +9,6 @@ squid/vendor-mock
 *.iml
 inhabitants/claude-code/porter
 inhabitants/grok-build/porter
-inhabitants/deepseek-harness/porter
 
 # Nix dev shells
 /result

@@ -22,7 +22,6 @@ func TestOfficialCLILive(t *testing.T) {
 	}{
 		{harness.InhabitantClaude, "HERMETARIUM_ANTHROPIC_API_KEY"},
 		{harness.InhabitantGrok, "HERMETARIUM_XAI_API_KEY"},
-		{harness.InhabitantDeepseek, "HERMETARIUM_DEEPSEEK_API_KEY"},
 	}
 	for _, tc := range cases {
 		tc := tc

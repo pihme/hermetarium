@@ -20,9 +20,6 @@ func TestOfficialCLIs(t *testing.T) {
 	t.Run("grok-build", func(t *testing.T) {
 		probeOfficial(t, root, harness.InhabitantGrok, []string{"/usr/local/bin/grok", "--version"}, supervisor.GrokHost)
 	})
-	t.Run("deepseek-harness", func(t *testing.T) {
-		probeOfficial(t, root, harness.InhabitantDeepseek, []string{"/usr/local/bin/dsh", "--help"}, supervisor.DeepseekHost)
-	})
 }
 
 func probeOfficial(t *testing.T, root, name string, versionCmd []string, vendorHost string) {

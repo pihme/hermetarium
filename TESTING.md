@@ -20,8 +20,8 @@ Habitats are created through the supervisor Go API. Chat and echo are HTTP POST 
 `tests/harness` builds images and fills a temp ACL before `create`.
 
 - Echo and agentd: `hermetarium-echo:local` and `hermetarium-agentd:local`, 128 MiB / 256 MB, ACL from `examples/<name>/squid.conf`.
-- Official CLIs: `hermetarium-in-claude:local`, `hermetarium-in-grok:local`, `hermetarium-in-dsh:local`, 2048 MiB / 2048 MB, ACL from `inhabitants/<name>/squid.conf`. Porter is copied into the image build.
-- Mock runs replace the habitat `cache_peer` with `127.0.0.1 parent 18082` and `__VENDOR_KEY__` with `htm-test-key`. Live runs keep the real vendor peer and substitute `HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, or `HERMETARIUM_DEEPSEEK_API_KEY`. The supervisor does not read those variables.
+- Official CLIs: `hermetarium-in-claude:local`, and `hermetarium-in-grok:local`, 2048 MiB / 2048 MB, ACL from `inhabitants/<name>/squid.conf`. Porter is copied into the image build.
+- Mock runs replace the habitat `cache_peer` with `127.0.0.1 parent 18082` and `__VENDOR_KEY__` with `htm-test-key`. Live runs keep the real vendor peer and substitute `HERMETARIUM_ANTHROPIC_API_KEY` or `HERMETARIUM_XAI_API_KEY`. The supervisor does not read those variables.
 - Echo creates start a probe httpd on the gate (`tests/probe`, port 18080, body `hermetarium-ok`). Mock creates start `tests/vendormock` on the gate. The mock requires `x-api-key` or `Authorization: Bearer` equal to `htm-test-key`. `/v1/messages` and `/v1/chat/completions` return a bash tool call `id -u`, then the text `0` after a tool result.
 
 ## `make test`
@@ -47,17 +47,17 @@ In-process. No Docker habitat.
 | `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. |
 | `TestACLWantsHTTPS` | A commented `https_port` line leaves interception off. An active `https_port` with `ssl-bump` turns it on. |
 | `TestPrepareMITM` | `PrepareMITM` writes a CA certificate and keeps the private key out of the public directory. |
-| `TestInhabitantHTTPSStaysCommented` | The three inhabitant gate files ship `OPEN-HTTPS` commented out. |
+| `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcHelperDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-helper/` directory there. |
 | `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4`. A second extract leaves the entrypoint mtime unchanged. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
 | `TestToolCommand` | A tool-use payload `{"command":"id -u"}` yields the command `id -u`. |
-| `TestCmdFirstTurn` | Porter argv for a first turn: `claude -p --output-format text --dangerously-skip-permissions`, `grok --always-approve -p`, `dsh --profile headless`. Claude's environment includes `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. |
-| `TestCmdContinuesSession` | After a turn has run, `claude` and `grok` gain `--continue`. Claude's flag stays in front of `-p`. Grok's follows the prompt, because `-p` is `--single`. `dsh --profile headless` stays one-shot. |
+| `TestCmdFirstTurn` | Porter argv for a first turn: `claude -p --output-format text --dangerously-skip-permissions` and `grok --always-approve -p`. Claude's environment includes `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. |
+| `TestCmdContinuesSession` | After a turn has run, `claude` and `grok` gain `--continue`. Claude's flag stays in front of `-p`. Grok's follows the prompt, because `-p` is `--single`. |
 | `TestCmdUnknownHarness` | An unknown `HARNESS` value returns an error. |
 
-Porter tests compare argv. They do not exec `claude`, `grok`, or `dsh`.
+Porter tests compare argv. They do not exec `claude` or `grok`.
 
 ### Hello-world
 
@@ -87,7 +87,6 @@ Porter tests compare argv. They do not exec `claude`, `grok`, or `dsh`.
 | --- | --- | --- |
 | `claude-code` | `/usr/local/bin/claude --version` | `claude.hermetarium.test` |
 | `grok-build` | `/usr/local/bin/grok --version` | `grok.hermetarium.test` |
-| `deepseek-harness` | `/usr/local/bin/dsh --help` | `deepseek.hermetarium.test` |
 
 `printenv` does not contain `htm-test-key`. A POST `Run id -u and reply with only the number.` is attempted with a 20s timeout. A failed call ends the subtest successfully. A successful call continues into the agentd exercise (two further POSTs, reply contains `0`, inbound and vendor host in the I/O log).
 
@@ -103,7 +102,6 @@ Real vendor peer. A case whose key variable is empty calls `t.Skip`.
 | --- | --- |
 | `claude-code` | `HERMETARIUM_ANTHROPIC_API_KEY` |
 | `grok-build` | `HERMETARIUM_XAI_API_KEY` |
-| `deepseek-harness` | `HERMETARIUM_DEEPSEEK_API_KEY` |
 
 Turn one is the same `id -u` prompt; the reply contains `0`. Turn two POSTs `What number did you just report?` to the same URL and logs the body.
 
@@ -111,7 +109,7 @@ Turn one is the same `id -u` prompt; the reply contains `0`. Turn two POSTs `Wha
 
 Job `test` (ubuntu-24.04, 40 minutes) opens `/dev/kvm`, caches `.cache`, runs `make build`, then `make test`.
 
-Job `test-live` (ubuntu-24.04, 30 minutes) exports `HERMETARIUM_ANTHROPIC_API_KEY`, `HERMETARIUM_XAI_API_KEY`, and `HERMETARIUM_DEEPSEEK_API_KEY` from repository secrets. If all three are empty, the job exits 0 without calling `make test-live`.
+Job `test-live` (ubuntu-24.04, 30 minutes) exports `HERMETARIUM_ANTHROPIC_API_KEY`, and `HERMETARIUM_XAI_API_KEY` from repository secrets. If both are empty, the job exits 0 without calling `make test-live`.
 
 Job `release` runs after `test` on push to `main`. It does not run the suite.
 

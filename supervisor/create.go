@@ -1,9 +1,8 @@
 package supervisor
 
 const (
-	ClaudeHost   = "claude.hermetarium.test"
-	GrokHost     = "grok.hermetarium.test"
-	DeepseekHost = "deepseek.hermetarium.test"
+	ClaudeHost = "claude.hermetarium.test"
+	GrokHost   = "grok.hermetarium.test"
 )
 
 // CreateOpts is the product create input: an OCI image and a Squid ACL file.
@@ -20,7 +19,7 @@ type CreateOpts struct {
 }
 
 func VendorHosts() []string {
-	return []string{ClaudeHost, GrokHost, DeepseekHost}
+	return []string{ClaudeHost, GrokHost}
 }
 
 func memMiB(o CreateOpts) int {

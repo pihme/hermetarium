@@ -11,12 +11,11 @@ import (
 )
 
 const (
-	TestVendorKey    = "htm-test-key"
-	VendorMockPort   = 18082
-	MockVendorPeer   = "127.0.0.1 parent 18082 0 no-query no-digest originserver"
-	ClaudeLivePeer   = "api.anthropic.com parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
-	GrokLivePeer     = "api.x.ai parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
-	DeepseekLivePeer = "api.deepseek.com parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
+	TestVendorKey  = "htm-test-key"
+	VendorMockPort = 18082
+	MockVendorPeer = "127.0.0.1 parent 18082 0 no-query no-digest originserver"
+	ClaudeLivePeer = "api.anthropic.com parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
+	GrokLivePeer   = "api.x.ai parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
 )
 
 func StartProbe(root, id, netns string) error {
@@ -114,8 +113,6 @@ func inhabitantOpts(root, name string, mock bool) (supervisor.CreateOpts, error)
 		image, peer, keyEnv = InClaudeImage, ClaudeLivePeer, "HERMETARIUM_ANTHROPIC_API_KEY"
 	case InhabitantGrok:
 		image, peer, keyEnv = InGrokImage, GrokLivePeer, "HERMETARIUM_XAI_API_KEY"
-	case InhabitantDeepseek:
-		image, peer, keyEnv = InDeepseekImage, DeepseekLivePeer, "HERMETARIUM_DEEPSEEK_API_KEY"
 	default:
 		return supervisor.CreateOpts{}, fmt.Errorf("unknown inhabitant %q", name)
 	}
