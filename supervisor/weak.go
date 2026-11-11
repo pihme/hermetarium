@@ -61,8 +61,10 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	box := "htm-box-" + id
 
 	if _, err := Docker(30*time.Second,
-		"network", "create", "--driver", "bridge", "--subnet", sub.CIDR,
-		"-o", "com.docker.network.bridge.enable_ip_masquerade=false",
+		// --internal makes Docker block every route out of this network, so
+		// the box cannot leave even with NET_ADMIN. The gate also joins the
+		// default bridge below, which is the only path to the Internet.
+		"network", "create", "--driver", "bridge", "--internal", "--subnet", sub.CIDR,
 		network,
 	); err != nil {
 		return nil, err
@@ -76,17 +78,23 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	}()
 
 	if err := runSquid(root, gate, dir, []string{
-		"--network", network, "--ip", sub.Gate,
+		"--network", "bridge",
 		"--add-host", "inhabitant:" + sub.Box,
 		"--sysctl", "net.ipv4.ip_forward=1",
 		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
 	}); err != nil {
 		return nil, err
 	}
+	if _, err := Docker(30*time.Second, "network", "connect", "--ip", sub.Gate, network, gate); err != nil {
+		return nil, err
+	}
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	if err := applyIntercept(gate, https); err != nil {
+	if err := lockGate(gate, sub.Gate); err != nil {
+		return nil, err
+	}
+	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
 		return nil, err
 	}
 	if err := runAfterGate(opts, id, gate); err != nil {

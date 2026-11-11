@@ -12,6 +12,10 @@ The picture of the gate is in the [inhabitants README](../README.md). In that pi
 
 The shared shape of this file is in the [inhabitants README](../README.md). This file is the gate. [Squid](https://www.squid-cache.org/) reads it. Every setting is described in the [Squid 6 config guide](https://www.squid-cache.org/Versions/v6/cfgman/). Hermetarium copies the file as you wrote it. Put your real key in a copy of the file before you start. The word to replace is `__VENDOR_KEY__`.
 
+`__VENDOR_KEY__` must be an Anthropic API key (`sk-ant-api...`) that stays valid for as long as the habitat lives. Use a long-lived key. Hermetarium copies the file once, at `create`. A key that expires, or a short-lived test key, makes every call fail with 401 or 403 until you run `destroy` and `create` again with a new key. Claude Code reads no key from the container.
+
+The image points Claude at `http://claude.hermetarium.test`, a stand-in host on the gate. Squid opens `api.anthropic.com` and sets the site name to `api.anthropic.com`. Cloudflare in front of the API answers 403 when the name is still `claude.hermetarium.test`, so the gate file replaces the Host line on that path. Squid 6.14 has no `forcedomain` option on the peer.
+
 ```
    you         ---------------->  Claude Code         open
    Claude Code ---------------->  api.anthropic.com   open, key attached
@@ -83,7 +87,7 @@ go build -o inhabitants/claude-code/porter ./porter
 docker build -t claude inhabitants/claude-code
 ```
 
-Copy the gate file and replace `__VENDOR_KEY__` with your Anthropic key:
+Copy the gate file and replace `__VENDOR_KEY__` with your long-lived Anthropic API key:
 
 ```bash
 cp inhabitants/claude-code/squid.conf /tmp/claude.acl
@@ -91,9 +95,19 @@ cp inhabitants/claude-code/squid.conf /tmp/claude.acl
 
 Start it. The command prints an id: `YOUR_ID`. Use that printed line in the commands below. To choose it, add `--id NAME`, for example `--id claude`. The command prints that name.
 
+On the Docker wall:
+
 ```bash
-./bin/hermetarium create --image claude --acl /tmp/claude.acl
+./bin/hermetarium create --wall weak --image claude --acl /tmp/claude.acl
 ```
+
+On the Firecracker wall. It needs `/dev/kvm`, and Claude Code wants more memory than the default:
+
+```bash
+./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image claude --acl /tmp/claude.acl
+```
+
+How each wall lets only the gate reach the Internet is in the [inhabitants README](../README.md#how-the-gate-reaches-the-internet).
 
 Ask where it is listening:
 
@@ -121,4 +135,4 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-Firecracker has not been shown to work for this inhabitant. Use the Docker wall.
+This image runs on both walls. On Firecracker the guest kernel has no random-number device, so the supervisor passes a seed on the kernel command line and porter credits it to the entropy pool at start. Without that, a program that asks for random bytes waits forever.

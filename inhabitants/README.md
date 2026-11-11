@@ -4,10 +4,10 @@ An inhabitant is a coding assistant in its own container. [Squid](https://www.sq
 
 | Folder | Hermetarium runs | Vendor is | Docker | Firecracker |
 | --- | --- | --- | --- | --- |
-| [claude-code](claude-code/README.md) | Claude Code | Anthropic, `api.anthropic.com` | untested | not shown to work |
+| [claude-code](claude-code/README.md) | Claude Code | Anthropic, `api.anthropic.com` | tested | tested |
 | [grok-build](grok-build/README.md) | Grok Build | xAI, `api.x.ai` | tested | tested |
 
-Grok Build has been run on Firecracker by hand. Claude Code has no successful run there.
+Both inhabitants have been run on both walls by hand, with a real key: a question, then a second question that continues the conversation. The automated tests use a stand-in model and do not cover that.
 
 ## Who is who
 
@@ -26,6 +26,31 @@ The two trips through Squid are the same gate.
    vendor    Hermetarium   ---------------->  the model API, key attached
    closed    Hermetarium   ---------------->  anywhere else
 ```
+
+## How the gate reaches the Internet
+
+The assistant must not reach the Internet. Squid must. Both walls do this with the network, not with a rule inside the assistant. The assistant is root, so a rule inside it would not hold.
+
+A private address such as `10.98.0.3` cannot talk to the Internet by itself. The host has to rewrite the source address to its own on the way out, and rewrite the reply on the way back. That rewrite is NAT (network address translation). Without it, packets leave and no reply can come back, so the connection hangs. Without NAT, a program cannot get out. With NAT, any program on that network can.
+
+**Docker wall.**
+
+```
+   assistant ──▶ gate (Squid) ──▶ Docker's default bridge ──NAT──▶ Internet
+        └──────────────┘
+        habitat network: --internal, no NAT
+```
+
+- Each habitat gets its own network, `htm-<id>`. It is created `--internal`, so Docker drops all traffic between that network and the outside. No NAT is applied to it.
+- The assistant sits only on that network. Its default route points at the gate.
+- The gate sits on that network and also on Docker's default bridge. The default bridge does NAT. That is the only way out, and Squid is the only program in the gate that uses it.
+- In the gate, forwarding is switched off (`iptables -P FORWARD DROP`). Web calls from the assistant's own subnet (port 80, and 443 if you open HTTPS) are redirected into Squid. Anything else the assistant sends dies in the gate.
+- The assistant has `NET_ADMIN` and may change its own routes. Pointing its default route at the host bridge reaches nothing, because the network is internal.
+- The gate has an address on the default bridge, and Squid listens on all addresses. So the gate also drops everything arriving from the bridge (`iptables -P INPUT DROP`). It accepts only the habitat network, loopback, replies, and your question on port 18081 from the bridge gateway, where the published port arrives. Another container on the default bridge cannot connect to Squid, so it cannot borrow your key. The habitat side is matched by network interface, not address, because a container can forge an address.
+
+You need no firewall change on the host. Do not add a masquerade rule for the habitat networks: it would be the only thing that could let an assistant out.
+
+**Firecracker wall.** The virtual machine sits on a TAP device inside a helper container. Squid runs in the same container. The helper forwards nothing (`FORWARD DROP`) and has no NAT rule for the TAP device, and web calls from the machine are redirected into Squid. It also drops everything arriving on its Docker bridge address, except your question on port 18081 from the bridge gateway, so other containers cannot reach Squid. The machine cannot get out, and Squid reaches the Internet through the helper's own Docker network.
 
 ## What every squid.conf shares
 
@@ -54,7 +79,9 @@ request_header_add x-api-key "__VENDOR_KEY__" vendorhost
 request_header_add Authorization "Bearer __VENDOR_KEY__" vendorhost
 ```
 
-Grok's file also sets `Host` to `api.x.ai` on that path. xAI answers 403 when the name is still the stand-in host. The value that replaces `__VENDOR_KEY__` in that file must be an xAI API key. A login session token is rejected.
+Both files also set `Host` to the real API name on that path (`api.x.ai`, `api.anthropic.com`). The services in front of the APIs answer 403 when the name is still the stand-in host.
+
+The value that replaces `__VENDOR_KEY__` must be an API key. For xAI, a login session token is rejected. For Anthropic, use a long-lived API key: the key is copied into the habitat when you run `create`, and a new key means creating the habitat again. A key that expires while the habitat runs makes every call fail until then.
 
 Replace `__VENDOR_KEY__` in a copy of the file before `create`. Hermetarium copies that file as you wrote it.
 

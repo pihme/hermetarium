@@ -37,6 +37,8 @@ The assistant image is the same on either wall. The wall is outside the image.
 
 On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the container is a virtual machine with its own kernel, and root stays inside it.
 
+Both walls let only the gate reach the Internet. The Docker wall puts the container on an internal network with no NAT, and gives only the gate a second path out. [How that works](inhabitants/README.md#how-the-gate-reaches-the-internet).
+
 Build the hello-world image. It needs Docker. The tag is `hermetarium/echo:dev`.
 
 ```bash
@@ -267,7 +269,7 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 **Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official assistants. KinD wants more still.
 
-**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. Grok Build has been run there by hand; Claude Code has no successful run. The kernel has no random-number device, so porter credits a seed from the kernel command line to the entropy pool; a program that calls `getrandom()` before porter starts can still block. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
+**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. Grok Build and Claude Code have been run there by hand. The kernel has no random-number device, so porter credits a seed from the kernel command line to the entropy pool; a program that calls `getrandom()` before porter starts can still block. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
 
 ## Porter in your image
 

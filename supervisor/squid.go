@@ -23,6 +23,11 @@ func InstallACL(dir, src string) error {
 	if err != nil {
 		return fmt.Errorf("read ACL %s: %w", src, err)
 	}
+	// A habitat id can be reused after destroy. Squid refuses to start when the
+	// old squid.pid is still in the instance dir.
+	if err := os.Remove(filepath.Join(dir, "squid.pid")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644)
 }
 
@@ -84,22 +89,67 @@ func runSquid(root, name, logDir string, extra []string) error {
 	return err
 }
 
-func applyIntercept(netns string, https bool) error {
-	if err := redirectPort(netns, "80", "3128"); err != nil {
+// applyIntercept redirects the box's web traffic (source cidr) to Squid and
+// stops the gate from routing anything else. Other containers on the default
+// bridge can reach the gate but are not redirected.
+func applyIntercept(netns, cidr string, https bool) error {
+	if _, err := Docker(30*time.Second, "run", "--rm",
+		"--network", "container:"+netns,
+		"--cap-add", "NET_ADMIN",
+		NetToolsImage,
+		"iptables", "-P", "FORWARD", "DROP",
+	); err != nil {
+		return err
+	}
+	if err := redirectPort(netns, cidr, "80", "3128"); err != nil {
 		return err
 	}
 	if !https {
 		return nil
 	}
-	return redirectPort(netns, "443", fmt.Sprintf("%d", HTTPSInterceptPort))
+	return redirectPort(netns, cidr, "443", fmt.Sprintf("%d", HTTPSInterceptPort))
 }
 
-func redirectPort(netns, dport, to string) error {
+// lockGate stops other containers on Docker's default bridge from using the
+// gate. Squid listens on 0.0.0.0, and the gate has an address on that bridge,
+// so without this a neighbor could send requests straight to Squid and get the
+// vendor key injected. Only the habitat-side interface, loopback, replies, and
+// the operator's inbound port (from the bridge gateway, where the published
+// port arrives) may reach the gate. The habitat side is matched by interface,
+// not source address, because a neighbor can spoof an address.
+func lockGate(gate, gateIP string) error {
+	gw, err := Docker(15*time.Second, "inspect", "-f", "{{.NetworkSettings.Networks.bridge.Gateway}}", gate)
+	if err != nil {
+		return err
+	}
+	gw = strings.TrimSpace(gw)
+	if gw == "" {
+		return fmt.Errorf("gate %s: no bridge gateway", gate)
+	}
+	script := `set -e
+hab=$(ip -o -4 addr show | awk -v ip="$GATE_IP" 'index($4, ip "/") == 1 {print $2; exit}')
+test -n "$hab"
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -i "$hab" -j ACCEPT
+iptables -A INPUT -s "$BRIDGE_GW" -p tcp --dport ` + fmt.Sprint(InboundPort) + ` -j ACCEPT
+iptables -P INPUT DROP`
+	_, err = Docker(30*time.Second, "run", "--rm",
+		"--network", "container:"+gate,
+		"--cap-add", "NET_ADMIN",
+		"-e", "GATE_IP="+gateIP, "-e", "BRIDGE_GW="+gw,
+		"--entrypoint", "sh",
+		NetToolsImage, "-c", script,
+	)
+	return err
+}
+
+func redirectPort(netns, cidr, dport, to string) error {
 	_, err := Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+netns,
 		"--cap-add", "NET_ADMIN",
 		NetToolsImage,
-		"iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", dport,
+		"iptables", "-t", "nat", "-A", "PREROUTING", "-s", cidr, "-p", "tcp", "--dport", dport,
 		"-j", "REDIRECT", "--to-ports", to,
 	)
 	return err

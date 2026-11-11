@@ -42,3 +42,21 @@ func TestInstallACL(t *testing.T) {
 		t.Fatal(string(b))
 	}
 }
+
+func TestInstallACLRemovesStalePid(t *testing.T) {
+	dir := t.TempDir()
+	acl := filepath.Join(dir, "in.conf")
+	pid := filepath.Join(dir, "squid.pid")
+	if err := os.WriteFile(acl, []byte("http_port 3128\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pid, []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallACL(dir, acl); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(pid); !os.IsNotExist(err) {
+		t.Fatalf("squid.pid should be gone, stat err: %v", err)
+	}
+}

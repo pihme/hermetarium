@@ -65,6 +65,15 @@ func testWeak(t *testing.T, root string) {
 	}
 	t.Log("weak wall: direct egress failed (fail-closed)")
 
+	// The gate, unlike the box, must reach the Internet (Squid forwards to the vendor).
+	if _, err := supervisor.Docker(20*time.Second, "exec", inst.Gate, "bash", "-c", "echo > /dev/tcp/1.1.1.1/443"); err != nil {
+		t.Fatalf("weak gate cannot reach the Internet: %v", err)
+	}
+	t.Log("weak wall: gate reaches the Internet")
+
+	harness.AssertNeighborBlocked(t, inst.Gate)
+	t.Log("weak wall: a neighbor container on the default bridge cannot reach the gate")
+
 	out, errs, code := supervisor.ExecWeak(inst, []string{
 		"curl", "-sS", "--max-time", "8", "http://" + supervisor.ProbeHost + "/hello",
 	})
@@ -125,6 +134,8 @@ func testStrong(t *testing.T, root string) {
 		t.Fatalf("strong wall: leak did not fail\n%s", tail(serial, 2000))
 	}
 	t.Log("strong wall: direct egress failed (fail-closed)")
+	harness.AssertNeighborBlocked(t, inst.Helper)
+	t.Log("strong wall: a neighbor container on the default bridge cannot reach the gate")
 	if err := supervisor.SyncInstanceLog(inst.Dir); err != nil {
 		t.Fatal(err)
 	}

@@ -63,7 +63,7 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 
 `tests/hello-world` `TestHelloWorld`. Image `examples/echo`.
 
-**Weak.** `ping -c 1 -W 2 1.1.1.1` exits non-zero. `curl` of `http://probe.hermetarium.test/hello` returns `hermetarium-ok`. The I/O log contains destination `probe.hermetarium.test` or the gate IP. Then the echo exercise below.
+**Weak.** `ping -c 1 -W 2 1.1.1.1` exits non-zero in the box, while a TCP connect to `1.1.1.1:443` from the gate succeeds (the gate is the only way out). `curl` of `http://probe.hermetarium.test/hello` returns `hermetarium-ok`. The I/O log contains destination `probe.hermetarium.test` or the gate IP. Then the echo exercise below.
 
 **Strong.** Guest serial shows `GUEST_UNAME` different from the host kernel in `/proc/sys/kernel/osrelease`, and contains `LEAK_FAIL`. Then the echo exercise. The strong guest does not fetch the probe.
 
@@ -115,7 +115,7 @@ Job `release` runs after `test` on push to `main`. It does not run the suite.
 
 ## Named in SPEC §11 and not asserted here
 
-- Strong-wall fetch of the probe, strong-wall official CLIs, and strong-wall live runs. Grok was run on the strong wall by hand and answered; no automated test covers it.
+- Strong-wall fetch of the probe, strong-wall official CLIs, and strong-wall live runs. Grok Build and Claude Code were run on the strong wall by hand and answered; no automated test covers it.
 - A second agentd live turn, and the text of the official-CLI live second turn.
 - The vendor key absent from the inhabitant filesystem. The weak-wall check is `printenv` only.
 - A direct request from the box to the vendor origin failing.
