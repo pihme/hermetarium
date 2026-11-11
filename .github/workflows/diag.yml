@@ -1,0 +1,36 @@
+# Throwaway diagnosis of `docker build` DNS failures on the runner. Do not merge.
+name: diag
+on: pull_request
+jobs:
+  squid-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, daemon-dns, host-network]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Environment
+        run: |
+          grep -m3 -E 'Image|Version' /etc/os-release || true
+          cat /etc/resolv.conf
+          resolvectl status 2>&1 | head -20 || true
+          docker version --format '{{.Server.Version}}'
+          docker info 2>&1 | grep -i -E 'dns|cgroup|storage|runtime|Server Version'
+          cat /etc/docker/daemon.json 2>&1 || true
+          getent hosts archive.ubuntu.com || echo "host cannot resolve"
+      - name: Daemon DNS
+        if: matrix.variant == 'daemon-dns'
+        run: |
+          echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+      - name: Container DNS
+        run: |
+          docker run --rm alpine cat /etc/resolv.conf
+          docker run --rm alpine nslookup archive.ubuntu.com || echo "container cannot resolve"
+      - name: Build the Squid image
+        run: |
+          net=""
+          [ "${{ matrix.variant }}" = host-network ] && net="--network host"
+          docker build $net -t hermetarium-squid:diag supervisor/squid
