@@ -130,7 +130,7 @@ func TestBackupWhileWriting(t *testing.T) {
 		"RESTIC_CACHE_DIR=" + cache,
 		"PATH=" + pathWith(resticBin),
 	})
-	initCmd := exec.Command("restic", "init")
+	initCmd := exec.Command(resticArg(resticBin), "init")
 	initCmd.Env = env
 	if out, err := initCmd.CombinedOutput(); err != nil {
 		t.Fatalf("restic init: %v\n%s", err, out)
@@ -160,7 +160,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	}
 
 	restore := filepath.Join(t.TempDir(), "restore")
-	restoreCmd := exec.Command("restic", "restore", "latest", "--target", restore)
+	restoreCmd := exec.Command(resticArg(resticBin), "restore", "latest", "--target", restore)
 	restoreCmd.Env = env
 	if out, err := restoreCmd.CombinedOutput(); err != nil {
 		t.Fatalf("restic restore: %v\n%s", err, out)
@@ -179,7 +179,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	assertTreeMissing(t, restore, gateKey)
 	assertTreeMissing(t, repo, modelKey)
 	assertTreeMissing(t, repo, gateKey)
-	ls := resticLS(t, env)
+	ls := resticLS(t, resticBin, env)
 	for _, bad := range []string{"squid.conf", "ca.key"} {
 		if strings.Contains(ls, bad) {
 			t.Fatalf("snapshot lists %s\n%s", bad, ls)
@@ -306,9 +306,9 @@ func treeScan(t *testing.T, root, needle string) bool {
 	return found
 }
 
-func resticLS(t *testing.T, env []string) string {
+func resticLS(t *testing.T, bin string, env []string) string {
 	t.Helper()
-	cmd := exec.Command("restic", "ls", "latest")
+	cmd := exec.Command(resticArg(bin), "ls", "latest")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -335,6 +335,17 @@ func backupEnv(t *testing.T, extra []string) []string {
 		env = append(env, kv)
 	}
 	return append(env, extra...)
+}
+
+// resticArg is the path passed to exec.Command. Go resolves a bare name
+// with the test process PATH, before cmd.Env, so a downloaded binary
+// has to be named by its absolute path. An empty bin means PATH already
+// has restic.
+func resticArg(bin string) string {
+	if bin == "" {
+		return "restic"
+	}
+	return bin
 }
 
 func pathWith(resticBin string) string {
