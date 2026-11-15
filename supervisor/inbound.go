@@ -57,6 +57,8 @@ func inboundPublish(noInbound bool) []string {
 }
 
 func finishInbound(container string, noInbound bool, timeout time.Duration) (string, error) {
+	// The weak wall has no guest console to watch. The strong wall already
+	// waited for GUEST_UNAME= before calling this.
 	if noInbound {
 		return "", nil
 	}

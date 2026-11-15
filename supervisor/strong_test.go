@@ -7,7 +7,68 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
+
+func TestWaitGuestUname(t *testing.T) {
+	t.Run("serial", func(t *testing.T) {
+		dir := t.TempDir()
+		serial := filepath.Join(dir, "serial.log")
+		if err := os.WriteFile(serial, []byte("GUEST_UNAME=6.1.188\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := waitGuestUname(dir, time.Second, func() (string, bool) {
+			b, err := os.ReadFile(serial)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(b), true
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("dead", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "serial.log"), []byte("still booting\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		const reason = "rejected machine config vcpu_count"
+		if err := os.WriteFile(filepath.Join(dir, "fc.log"), []byte(reason+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		err := waitGuestUname(dir, time.Minute, func() (string, bool) {
+			b, readErr := os.ReadFile(filepath.Join(dir, "serial.log"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			return string(b), false
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if time.Since(start) > 2*time.Second {
+			t.Fatalf("dead container waited %s", time.Since(start))
+		}
+		if !strings.Contains(err.Error(), reason) {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("mount", func(t *testing.T) {
+		err := waitGuestUname(t.TempDir(), time.Minute, func() (string, bool) {
+			return "DATA_MOUNT_FAIL\n", false
+		})
+		if err == nil || !strings.Contains(err.Error(), "did not mount") {
+			t.Fatal(err)
+		}
+		if strings.Contains(err.Error(), "guest did not boot") {
+			t.Fatal(err)
+		}
+	})
+}
 
 func TestFcHelperDirExtractsWithoutTree(t *testing.T) {
 	root := t.TempDir()
