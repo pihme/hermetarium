@@ -62,6 +62,9 @@ func PrepareMITM(dir string) error {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	mitm := filepath.Join(dir, "mitm")
 	pub := filepath.Join(dir, "mitm-pub")
+	if err := removeTree(mitm); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(mitm, 0o755); err != nil {
 		return err
 	}
@@ -75,6 +78,26 @@ func PrepareMITM(dir string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(pub, "ca.pem"), certPEM, 0o644)
+}
+
+// The gate user may own path. The root container mounts only this directory.
+func removeTree(path string) error {
+	if err := os.RemoveAll(path); err == nil {
+		return nil
+	}
+	base := filepath.Base(path)
+	if base == "." || base == ".." || strings.ContainsRune(base, os.PathSeparator) {
+		return fmt.Errorf("refuse to delete %s", path)
+	}
+	if _, err := Docker(60*time.Second, "run", "--rm",
+		"-v", path+":/log",
+		"--entrypoint", "find",
+		AlpineImage,
+		"/log", "-mindepth", "1", "-delete",
+	); err != nil {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return os.RemoveAll(path)
 }
 
 // InitMITMDB builds the certificate store Squid uses to sign per-site certificates.
