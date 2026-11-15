@@ -138,7 +138,7 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 `tests/backup` `TestBackupWhileWriting`. Needs Docker and `/dev/kvm`. `restic` comes from `PATH`. When it is missing, the test downloads the pinned official linux-amd64 binary into `.cache` and does not commit it. Strong wall, `--no-inbound`, a 32 MiB data disk. The image includes `sshd`, because strong attach is SSH, and `fsfreeze` from `util-linux`. The guest keeps rewriting `/data/churn` after writing `/data/known`. `omakase/backup.sh` freezes `/data` with `fsfreeze` through `hermetarium attach`, then Restic reads the host file. A restore to another directory passes `e2fsck -fn`, and `/data/known` is `known-v1`. A fake model key that exists only in the gate file, and a fake gate private key planted at `mitm/ca.key`, are absent from the snapshot listing and from the restored tree. A second backup, while the guest has changed the disk only a little, adds little data. The guest is still writing after the script returns.
 
-`tests/backup` `TestSecretRefusal`. Runs `omakase/backup.sh` with stand-in `restic`, `docker`, and `hermetarium` binaries. No Docker daemon and no KVM. The disk or the journal is `squid.conf`, a symlink to `squid.conf`, a `..` path that reaches `squid.conf`, `mitm/ca.key`, `var/<id>/`, `var/<id>`, `/`, another habitat's `squid.conf`, the directory that holds it, the data directory that contains `var/`, or a hard link to `squid.conf` when the filesystem allows one. The script exits with the refusal and does not run `restic backup`.
+`tests/backup` `TestSecretRefusal`. Runs `omakase/backup.sh` with stand-in `restic`, `docker`, and `hermetarium` binaries. No Docker daemon and no KVM. The disk or the journal is `squid.conf`, a symlink to `squid.conf`, a `..` path that reaches `squid.conf`, `mitm/ca.key`, `var/<id>/`, `var/<id>`, `/`, another habitat's `squid.conf`, the directory that holds it, the data directory that contains `var/`, a hard link to `squid.conf`, or a directory that contains only a hard link to `squid.conf`, when the filesystem allows a hard link. The script exits with the refusal and does not run `restic backup`.
 
 `tests/backup` `TestHelperNotThisRoot`. No Docker daemon and no KVM. The stand-in `docker inspect` reports a `/log` mount that is not `var/<id>` under `HERMETARIUM_ROOT`. The script refuses that helper and does not run `restic backup`.
 
@@ -146,7 +146,11 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 `tests/backup` `TestFreezeBound`. No Docker daemon and no KVM. A stand-in `restic backup` sleeps. `HERMETARIUM_FREEZE_SECONDS=1` stops it and the script thaws.
 
-`tests/backup` `TestGuestThawAfterKill`. No Docker daemon and no KVM. The stand-in `hermetarium attach` runs the guest freeze command on the host, and a stand-in `fsfreeze` is ahead of the real one on `PATH`, so the host `/data` is not frozen. The test kills the script after the freeze. The detached timer still runs `fsfreeze -u`.
+`tests/backup` `TestGuestThawAfterKill`. No Docker daemon and no KVM. The stand-in `hermetarium attach` runs the guest freeze command on the host, and a stand-in `fsfreeze` is ahead of the real one on `PATH`, so the host `/data` is not frozen. The test kills the script after the freeze. The detached timer, armed when the freeze returns, still runs `fsfreeze -u`. Cleanup matches the token this run wrote and signals that pid, not another process group.
+
+`tests/backup` `TestFreezeSecondsTooLarge`. No Docker daemon and no KVM. `HERMETARIUM_FREEZE_SECONDS` of more than 9 digits, or above 21600, is refused before the guest delay is computed. 21600 is accepted. The same checks run under `bash` when it is installed.
+
+`tests/backup` `TestConsumedTokenIsNotStayedFrozen`. No Docker daemon and no KVM. After the freeze, the stand-in `restic` marks this run's thaw token consumed. `fsfreeze -u` fails if it is called. The script exits without saying the disk stayed frozen.
 
 `tests/backup` `TestBackupThawOnResticFailure`. Needs Docker and `/dev/kvm`. Same writing habitat as `TestBackupWhileWriting`. A `restic` ahead of the real binary on `PATH` exits non-zero for `backup` after the guest is frozen. The script fails, and the guest writes a later `WRITE_n`, so the EXIT trap thawed `/data`.
 

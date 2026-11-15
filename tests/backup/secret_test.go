@@ -101,6 +101,21 @@ func TestSecretRefusal(t *testing.T) {
 			journal string
 		}{name: "hardlink", disk: safeDisk, journal: hard})
 	}
+	// A directory that is not an ancestor of var/ and does not contain the
+	// canonical path, only another name for the same inode.
+	hardDir := filepath.Join(root, "hard-journal")
+	if err := os.MkdirAll(hardDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(squid, filepath.Join(hardDir, "alias.conf")); err != nil {
+		t.Logf("hard link not supported: %v", err)
+	} else {
+		cases = append(cases, struct {
+			name    string
+			disk    string
+			journal string
+		}{name: "hardlink-dir", disk: safeDisk, journal: hardDir})
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stamp := filepath.Join(t.TempDir(), "backup-started")
@@ -209,9 +224,9 @@ func scriptEnv(t *testing.T, root, bin, herm, id, disk, journal string, extra []
 func thawLines(log string) int {
 	n := 0
 	for _, line := range strings.Split(log, "\n") {
-		// The freeze script's text also contains "fsfreeze -u". A real thaw
-		// is its own attach, with no shell.
-		if strings.Contains(line, "-- fsfreeze -u /data") && !strings.Contains(line, "sh -c") {
+		// The freeze script's sleeper text also contains "fsfreeze -u",
+		// on the setsid line. A thaw is its own attach.
+		if strings.Contains(line, "fsfreeze -u /data") && !strings.Contains(line, "setsid") {
 			n++
 		}
 	}
@@ -362,13 +377,15 @@ func TestGuestThawAfterKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	killMatching("hermetarium-thaw.current")
+	// Do not match hermetarium-thaw.current: a live host attach has that
+	// path in its argv. The stamp is the token this run writes.
 	killMatching("hermetarium-restic-hang")
-	_ = os.Remove("/tmp/hermetarium-thaw.current")
+	var stamp string
 	t.Cleanup(func() {
+		if validThawStamp(stamp) {
+			killMatching(stamp)
+		}
 		killMatching("hermetarium-restic-hang")
-		killMatching("hermetarium-thaw.current")
-		_ = os.Remove("/tmp/hermetarium-thaw.current")
 	})
 
 	root := t.TempDir()
@@ -379,7 +396,7 @@ func TestGuestThawAfterKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	freezeLog := filepath.Join(t.TempDir(), "fsfreeze")
-	stamp := filepath.Join(t.TempDir(), "backup-started")
+	backupStamp := filepath.Join(t.TempDir(), "backup-started")
 	// Ahead of the real fsfreeze, so this test cannot freeze the host.
 	writeExe(t, filepath.Join(bin, "fsfreeze"), "#!/bin/sh\nprintf '%s %s\\n' \"$(date +%s)\" \"$*\" >> \"$FSFREEZE_LOG\"\nexit 0\n")
 	writeExe(t, filepath.Join(bin, "restic"), "#!/bin/sh\nif [ \"$1\" = backup ]; then\n  : > \"$BACKUP_STAMP\"\n  exec sh -c 'i=0; while [ \"$i\" -lt 120 ]; do i=$((i+1)); sleep 1; done' hermetarium-restic-hang\nfi\nexit 0\n")
@@ -402,7 +419,7 @@ shift
 exec "$@"
 `)
 	env := scriptEnv(t, root, bin, herm, id, disk, journal, []string{
-		"BACKUP_STAMP=" + stamp,
+		"BACKUP_STAMP=" + backupStamp,
 		"FSFREEZE_LOG=" + freezeLog,
 		"HERMETARIUM_FREEZE_SECONDS=5",
 	})
@@ -432,7 +449,7 @@ exec "$@"
 		default:
 		}
 		body, _ := os.ReadFile(freezeLog)
-		if _, err := os.Stat(stamp); err == nil && strings.Contains(string(body), "-f /data") {
+		if _, err := os.Stat(backupStamp); err == nil && strings.Contains(string(body), "-f /data") {
 			seenFreeze = time.Now()
 			break
 		}
@@ -441,6 +458,11 @@ exec "$@"
 	if seenFreeze.IsZero() {
 		t.Fatalf("disk was not frozen\n%s\n%s", out.String(), mustRead(freezeLog))
 	}
+	stamp = strings.TrimSpace(mustRead("/tmp/hermetarium-thaw.current"))
+	if !validThawStamp(stamp) {
+		t.Fatalf("thaw stamp missing\n%s", mustRead("/tmp/hermetarium-thaw.current"))
+	}
+	// pgid is the process group Setpgid started for this backup.sh.
 	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +476,8 @@ exec "$@"
 	}
 	killMatching("hermetarium-restic-hang")
 
-	// Guest sleep is HERMETARIUM_FREEZE_SECONDS+30. An immediate thaw is the trap.
+	// Sleep is HERMETARIUM_FREEZE_SECONDS+30, started after fsfreeze -f.
+	// An immediate thaw is the trap, not this timer.
 	until := time.Now().Add(50 * time.Second)
 	for time.Now().Before(until) {
 		if strings.Contains(mustRead(freezeLog), "-u /data") {
@@ -470,6 +493,135 @@ exec "$@"
 	}
 }
 
+// A value bash would wrap in $(( )) must be rejected before that arithmetic.
+func TestFreezeSecondsTooLarge(t *testing.T) {
+	checkout, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(checkout, "omakase", "backup.sh")
+	journal := filepath.Join(t.TempDir(), "journal")
+	if err := os.WriteFile(journal, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shells := []string{"sh"}
+	if _, err := exec.LookPath("bash"); err == nil {
+		shells = append(shells, "bash")
+	}
+	tooBig := []string{"18446744073709551616", "21601", "000000000021601"}
+	for _, sh := range shells {
+		for _, value := range tooBig {
+			t.Run(sh+"/"+value, func(t *testing.T) {
+				cmd := exec.Command(sh, script)
+				cmd.Env = append(backupEnv(t, nil),
+					"RESTIC_REPOSITORY="+t.TempDir(),
+					"RESTIC_PASSWORD=test-password",
+					"HERMETARIUM_ID=hab1",
+					"HERMETARIUM_DATA_DISK="+journal,
+					"GIT_WARDEN_JOURNAL="+journal,
+					"HERMETARIUM_FREEZE_SECONDS="+value,
+				)
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					t.Fatalf("backup.sh exited 0\n%s", out)
+				}
+				if !strings.Contains(string(out), "HERMETARIUM_FREEZE_SECONDS is too large") {
+					t.Fatalf("bound accepted\n%s", out)
+				}
+			})
+		}
+		t.Run(sh+"/21600", func(t *testing.T) {
+			cmd := exec.Command(sh, script)
+			cmd.Env = append(backupEnv(t, nil),
+				"RESTIC_REPOSITORY="+t.TempDir(),
+				"RESTIC_PASSWORD=test-password",
+				"HERMETARIUM_ID=hab1",
+				"HERMETARIUM_DATA_DISK="+journal,
+				"GIT_WARDEN_JOURNAL="+journal,
+				"HERMETARIUM_FREEZE_SECONDS=21600",
+			)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("backup.sh exited 0\n%s", out)
+			}
+			if strings.Contains(string(out), "too large") {
+				t.Fatalf("6 hour bound rejected\n%s", out)
+			}
+		})
+	}
+}
+
+// The backstop already consumed the token. A later fsfreeze -u failure is not
+// "stayed frozen": this run no longer owns the freeze.
+func TestConsumedTokenIsNotStayedFrozen(t *testing.T) {
+	checkout, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	id := "hab1"
+	disk, journal := writeHabitat(t, root, id)
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	freezeLog := filepath.Join(t.TempDir(), "fsfreeze")
+	tokenCopy := filepath.Join(t.TempDir(), "token")
+	var stamp string
+	t.Cleanup(func() {
+		if !validThawStamp(stamp) {
+			stamp = strings.TrimSpace(mustRead(tokenCopy))
+		}
+		if !validThawStamp(stamp) {
+			stamp = strings.TrimSpace(mustRead("/tmp/hermetarium-thaw.current"))
+		}
+		if validThawStamp(stamp) {
+			killMatching(stamp)
+		}
+	})
+	writeExe(t, filepath.Join(bin, "fsfreeze"), "#!/bin/sh\nprintf '%s %s\\n' \"$(date +%s)\" \"$*\" >> \"$FSFREEZE_LOG\"\nif [ \"$1\" = -u ]; then exit 1; fi\nexit 0\n")
+	writeExe(t, filepath.Join(bin, "restic"), "#!/bin/sh\nif [ \"$1\" = backup ]; then\n  cp /tmp/hermetarium-thaw.current \"$TOKEN_STAMP\" || exit 1\n  printf 'done\\n' > /tmp/hermetarium-thaw.current\nfi\nexit 0\n")
+	writeDockerStub(t, filepath.Join(bin, "docker"))
+	herm := filepath.Join(root, "hermetarium")
+	writeExe(t, herm, `#!/bin/sh
+if [ "$1" = logs ]; then
+  exit 0
+fi
+if [ "$1" != attach ]; then
+  exit 1
+fi
+shift
+shift
+if [ "$1" != "--" ]; then
+  exit 1
+fi
+shift
+exec "$@"
+`)
+	env := scriptEnv(t, root, bin, herm, id, disk, journal, []string{
+		"FSFREEZE_LOG=" + freezeLog,
+		"TOKEN_STAMP=" + tokenCopy,
+		"HERMETARIUM_FREEZE_SECONDS=30",
+	})
+	cmd := exec.Command(filepath.Join(checkout, "omakase", "backup.sh"))
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	stamp = strings.TrimSpace(mustRead(tokenCopy))
+	if err != nil {
+		t.Fatalf("backup.sh: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "stayed frozen") {
+		t.Fatalf("consumed token reported a frozen disk\n%s", out)
+	}
+	log := mustRead(freezeLog)
+	if !strings.Contains(log, "-f /data") {
+		t.Fatalf("disk was not frozen\n%s", log)
+	}
+	if strings.Contains(log, "-u /data") {
+		t.Fatalf("thaw ran after the token was consumed\n%s", log)
+	}
+}
+
 func mustRead(path string) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -478,7 +630,30 @@ func mustRead(path string) string {
 	return string(b)
 }
 
+// validThawStamp is the token backup.sh wrote (epoch-pid). It is not a
+// path, so pgrep -f cannot land on a live hermetarium attach.
+func validThawStamp(s string) bool {
+	left, right, ok := strings.Cut(s, "-")
+	if !ok || left == "" || right == "" {
+		return false
+	}
+	for _, part := range []string{left, right} {
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// killMatching signals processes whose command line contains pattern.
+// It does not signal a process group: the matched pid may lead a group
+// this test did not start.
 func killMatching(pattern string) {
+	if !validThawStamp(pattern) && pattern != "hermetarium-restic-hang" {
+		return
+	}
 	out, err := exec.Command("pgrep", "-f", pattern).Output()
 	if err != nil {
 		return
@@ -489,7 +664,18 @@ func killMatching(pattern string) {
 		if err != nil || pid <= 1 || pid == self {
 			continue
 		}
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		killPID(pid)
+	}
+}
+
+func killPID(pid int) {
+	out, _ := exec.Command("pgrep", "-P", strconv.Itoa(pid)).Output()
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	for _, field := range strings.Fields(string(out)) {
+		child, err := strconv.Atoi(field)
+		if err != nil || child <= 1 || child == pid {
+			continue
+		}
+		_ = syscall.Kill(child, syscall.SIGKILL)
 	}
 }
