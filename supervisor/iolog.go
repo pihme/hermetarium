@@ -17,9 +17,7 @@ type Record struct {
 	Direction   string `json:"direction"`
 	Protocol    string `json:"protocol"`
 	Destination string `json:"destination"`
-	// Upstream is the CONNECT server address: %<a, or the IP authority when
-	// that peer is "-". url.Parse treats host:port as a scheme, so SNI would
-	// otherwise replace this address. The name stays in Destination.
+	// Upstream is the CONNECT server address (`%<a`, or the IP authority when that peer is "-").
 	Upstream string `json:"upstream,omitempty"`
 	Port     int    `json:"port,omitempty"`
 	Method   string `json:"method,omitempty"`
@@ -28,7 +26,6 @@ type Record struct {
 	Allowed  bool   `json:"allowed"`
 	Bytes    int    `json:"bytes,omitempty"`
 	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
-	// When CONNECT names only an address, Destination is the SNI.
 	TLS string `json:"tls,omitempty"`
 }
 
@@ -56,6 +53,7 @@ func ParseSquidLine(line string) (Record, bool) {
 	path := ""
 	parsedHost := false
 	portSet := false
+	portRejected := false
 	authorityHost := ""
 	if u, err := url.Parse(rawURL); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
 		protocol = u.Scheme
@@ -81,14 +79,20 @@ func ParseSquidLine(line string) (Record, bool) {
 			port = 443
 			portSet = true
 		}
-	} else if host, p, ok := splitAuthority(rawURL); ok {
+	} else if host, p, ok := splitAuthority(rawURL); host != "" {
 		// An IP is not a name. SNI names that connection.
 		authorityHost = host
 		dest = host
-		port = p
-		portSet = true
 		if net.ParseIP(host) == nil {
 			parsedHost = true
+		}
+		if ok {
+			port = p
+			portSet = true
+		} else {
+			// The authority named a port, and it was not 1..65535.
+			port = 0
+			portRejected = true
 		}
 	}
 	status := f[3]
@@ -114,7 +118,7 @@ func ParseSquidLine(line string) (Record, bool) {
 	upstream := ""
 	if f[5] == "CONNECT" {
 		protocol = "https"
-		if !portSet {
+		if !portSet && !portRejected {
 			port = 443
 		}
 		if len(f) >= 9 {
@@ -139,15 +143,15 @@ func ParseSquidLine(line string) (Record, bool) {
 	}, true
 }
 
-// splitAuthority parses a CONNECT authority. url.Parse treats host:port as a scheme.
+// splitAuthority parses host:port. A port outside 1..65535 returns the host and ok false.
 func splitAuthority(raw string) (string, int, bool) {
 	host, text, err := net.SplitHostPort(raw)
 	if err != nil || host == "" {
 		return "", 0, false
 	}
 	port, err := strconv.Atoi(text)
-	if err != nil {
-		return "", 0, false
+	if err != nil || port < 1 || port > 65535 {
+		return host, 0, false
 	}
 	return host, port, true
 }

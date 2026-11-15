@@ -76,6 +76,24 @@ func TestParseSquidLine(t *testing.T) {
 	if len(recs) != 3 || recs[0].Upstream != "10.60.0.2" || recs[0].Destination != "api.github.com" || recs[0].Protocol != "https" || recs[0].Port != 443 || recs[1].Upstream != "10.60.0.2" || recs[1].Destination != "pinned.example" || recs[2].Upstream != "10.60.0.2" {
 		t.Fatalf("decoded %+v", recs)
 	}
+	// A colon with a port outside 1..65535 must not become 443.
+	for _, bad := range []string{"abc", "-1", "0", "99999", "65536"} {
+		raw := "1757162698.123 5 10.20.0.3 TCP_TUNNEL/200 0 CONNECT pinned.example:" + bad + " - HIER_DIRECT/10.1.0.2 - 3130 splice pinned.example"
+		rec, ok = ParseSquidLine(raw)
+		if !ok || rec.Protocol != "https" || rec.Port != 0 || rec.Destination != "pinned.example" || rec.Upstream != "10.1.0.2" || rec.TLS != "passthrough" {
+			t.Fatalf("bad port %s %+v ok=%v", bad, rec, ok)
+		}
+	}
+	high := "1757162698.123 5 10.20.0.3 TCP_TUNNEL/200 0 CONNECT 10.60.0.2:65536 - HIER_NONE/- - 443 splice pinned.example"
+	rec, ok = ParseSquidLine(high)
+	if !ok || rec.Protocol != "https" || rec.Port != 0 || rec.Destination != "pinned.example" || rec.Upstream != "10.60.0.2" {
+		t.Fatalf("high %+v ok=%v", rec, ok)
+	}
+	top := "1757162698.123 5 10.20.0.3 TCP_TUNNEL/200 0 CONNECT pinned.example:65535 - HIER_DIRECT/10.1.0.2 - 3130 splice pinned.example"
+	rec, ok = ParseSquidLine(top)
+	if !ok || rec.Protocol != "https" || rec.Port != 65535 || rec.Destination != "pinned.example" || rec.Upstream != "10.1.0.2" {
+		t.Fatalf("top %+v ok=%v", rec, ok)
+	}
 }
 
 func TestSyncMergesDNS(t *testing.T) {

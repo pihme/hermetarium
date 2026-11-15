@@ -207,7 +207,7 @@ The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test
 ./bin/hermetarium logs YOUR_ID
 ```
 
-That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. A CONNECT line is protocol `https`, with the port from the authority. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI, and the server address stays in `upstream`. A DNS query is the same file with `protocol` `dns`, the name in `destination`, the type in `method`, and the answer in `result`. Message bodies stay out of the log.
+That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. A CONNECT line is protocol `https`, with the port from the authority. Every CONNECT line keeps the server address in `upstream` (`%<a`, or the IP authority when the peer is `-`), whether `tls` is `decrypted` or `passthrough`. HTTP and HTTPS request lines, and DNS lines, do not have `upstream`. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI. A DNS query is the same file with `protocol` `dns`, the name in `destination`, the type in `method`, and the answer in `result`. Message bodies stay out of the log.
 
 The same directory holds:
 
