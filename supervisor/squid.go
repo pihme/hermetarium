@@ -84,14 +84,18 @@ func EnsureSquid(root string) error {
 	return nil
 }
 
-// EnsureNetTools builds the iptables image once. A later create reuses it
-// while the Dockerfile stamp is unchanged.
+func netToolsDockerfile() string {
+	// iptables is nf_tables. iptables-legacy is the other filter hook: a drop
+	// there is invisible to nft list, and an accept in one does not cover it.
+	// busybox-extras supplies /usr/sbin/httpd. Alpine busybox has no httpd
+	// applet, and the strong helper serves the gate CA with it.
+	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2 busybox-extras\n"
+}
+
 func EnsureNetTools(root string) error {
 	dir := filepath.Join(CacheDir(root), "nettools-build")
 	stamp := filepath.Join(dir, "Dockerfile")
-	// busybox-extras supplies /usr/sbin/httpd. The base busybox has no httpd applet,
-	// and the strong helper serves the gate CA with it when HTTPS is open.
-	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iproute2 busybox-extras\n"
+	df := netToolsDockerfile()
 	have := false
 	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err == nil {
 		have = true
@@ -106,10 +110,9 @@ func EnsureNetTools(root string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	// Docker reads the Dockerfile from the context before the build. Leave the
-	// new bytes as the stamp only when that build succeeds; a failure restores
-	// the previous stamp, or removes it when there was none, so the next
-	// create tries again instead of trusting the old image.
+	// Docker needs the Dockerfile in the context. It is also the stamp, and it
+	// may match this Dockerfile only after the build succeeds: a failed rebuild
+	// would otherwise leave the new stamp on the previous image.
 	if err := os.WriteFile(stamp, []byte(df), 0o644); err != nil {
 		return err
 	}
