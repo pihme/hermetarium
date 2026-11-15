@@ -103,19 +103,35 @@ const (
 	seekHole = 4
 )
 
+// habitatRootfsPath is the private disk CreateStrong bind-mounts. It is not
+// the shared cache (rootfs-<image>-<size>.ext4).
+func habitatRootfsPath(dir string) string {
+	return filepath.Join(dir, "rootfs.ext4")
+}
+
 // habitatRootfs is one habitat's disk. The cache from EnsureImageRootfs is
 // keyed only by image and size, so mounting it would publish guest writes
 // to every later habitat that shares that image.
+//
+// The bytes go to rootfs.ext4.partial and are renamed into place. Opening
+// the destination with O_TRUNC would follow a symlink onto the cache, and
+// would shrink a disk the helper already has open.
 func habitatRootfs(dir, cached string) (string, error) {
-	dest := filepath.Join(dir, "rootfs.ext4")
-	if err := copySparse(cached, dest); err != nil {
+	dest := habitatRootfsPath(dir)
+	partial := dest + ".partial"
+	if err := copySparse(cached, partial); err != nil {
+		return "", err
+	}
+	if err := os.Rename(partial, dest); err != nil {
+		_ = os.Remove(partial)
 		return "", err
 	}
 	return dest, nil
 }
 
 // copySparse keeps holes. A large --disk is mostly empty; copying the holes
-// would write the whole disk out.
+// would write the whole disk out. dst is created with O_EXCL. On failure
+// only that name is removed.
 func copySparse(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
@@ -129,7 +145,7 @@ func copySparse(src, dst string) (err error) {
 	if !st.Mode().IsRegular() {
 		return fmt.Errorf("copy rootfs: %s is not a regular file", src)
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}

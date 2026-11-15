@@ -135,7 +135,7 @@ func Run(args []string) int {
 		}
 		id := rest[0]
 		_ = DestroyWeak(id)
-		_ = DestroyStrong(id)
+		endStrong(id, filepath.Join(VarDir(root), id))
 		return 0
 	default:
 		usage()
