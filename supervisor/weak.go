@@ -18,6 +18,7 @@ type WeakInstance struct {
 	GateIP     string `json:"gateIp"`
 	BoxIP      string `json:"boxIp"`
 	InboundURL string `json:"inboundUrl"`
+	NoInbound  bool   `json:"noInbound"`
 	LogPath    string `json:"logPath"`
 	Dir        string `json:"dir"`
 }
@@ -142,7 +143,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	inst := &WeakInstance{
 		ID: id, Wall: "weak", Network: network, Gate: gate, Box: box,
-		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url,
+		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")

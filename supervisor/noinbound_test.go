@@ -15,12 +15,31 @@ import (
 
 func TestNoInboundURLMessage(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "instance.json"), []byte(`{"inboundUrl":""}`), 0o644); err != nil {
-		t.Fatal(err)
+	write := func(name, body string) string {
+		t.Helper()
+		sub := filepath.Join(dir, name)
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "instance.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return sub
 	}
-	_, err := InboundURLFromDir(dir)
-	if !errors.Is(err, errNoInbound) {
-		t.Fatalf("got %v", err)
+
+	_, err := InboundURLFromDir(write("flag", `{"noInbound":true,"inboundUrl":""}`))
+	if !errors.Is(err, errNoInbound) || err.Error() != "this habitat has no inbound address" {
+		t.Fatalf("no-inbound: %v", err)
+	}
+
+	got, err := InboundURLFromDir(write("url", `{"noInbound":false,"inboundUrl":"http://127.0.0.1:9/"}`))
+	if err != nil || got != "http://127.0.0.1:9/" {
+		t.Fatalf("url: %q %v", got, err)
+	}
+
+	_, err = InboundURLFromDir(write("empty", `{"inboundUrl":""}`))
+	if !errors.Is(err, errEmptyInboundURL) {
+		t.Fatalf("empty url: %v", err)
 	}
 }
 

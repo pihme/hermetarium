@@ -37,6 +37,7 @@ type StrongInstance struct {
 	Wall       string `json:"wall"`
 	Helper     string `json:"helper"`
 	InboundURL string `json:"inboundUrl"`
+	NoInbound  bool   `json:"noInbound"`
 	LogPath    string `json:"logPath"`
 	SerialPath string `json:"serialPath"`
 	Dir        string `json:"dir"`
@@ -359,7 +360,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", Helper: helper, InboundURL: url,
+		ID: id, Wall: "strong", Helper: helper, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
