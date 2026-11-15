@@ -145,6 +145,8 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	const key = "htm-secret-key"
 	writePeerConf := func(cafile string) {
 		t.Helper()
+		// Squid names a certificate error at section 83 level 3. Default
+		// logging hides it, and an empty peer log does not prove a rejection.
 		conf := "" +
 			"http_port 127.0.0.1:3128 accel defaultsite=vendor.example\n" +
 			"visible_hostname hermetarium\n" +
@@ -152,6 +154,7 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 			"coredump_dir /tmp\n" +
 			"cache_log /log/cache.log\n" +
 			"access_log stdio:/log/access.log\n" +
+			"debug_options 83,3\n" +
 			"cache deny all\n" +
 			"cache_peer 127.0.0.1 parent 18443 0 no-query no-digest originserver ssl ssldomain=vendor.example tls-cafile=" + cafile + " name=vendor\n" +
 			"cache_peer_access vendor allow all\n" +
@@ -167,12 +170,8 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 
 	name := "htm-gate-" + id
 	writePeerConf("/etc/ssl/certs/ca-certificates.crt")
-	if err := runSquid(root, name, dir, []string{"--network", "container:" + holder}); err != nil {
-		t.Fatal(err)
-	}
-	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
-		t.Fatal(err)
-	}
+	// Peer first. Squid's startup probe marks a parent dead when nothing is
+	// listening, and a later request then never attempts certificate checks.
 	if _, err := Docker(30*time.Second, "run", "-d", "--name", "htm-peer-"+id,
 		"--network", "container:"+holder,
 		"-e", "CERT=/log/server.pem", "-e", "KEY=/log/server.key",
@@ -183,7 +182,28 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	// An empty peer log is also what a refused connect looks like. badpeer
+	// shares this network namespace and binds 127.0.0.1:18443.
+	peerUp := time.Now().Add(20 * time.Second)
+	var dialErr error
+	for {
+		_, dialErr = Docker(5*time.Second, "run", "--rm", "--network", "container:"+holder,
+			BusyboxImage, "nc", "-z", "-w", "1", "127.0.0.1", "18443")
+		if dialErr == nil {
+			break
+		}
+		if time.Now().After(peerUp) {
+			logs, _ := Docker(5*time.Second, "logs", "htm-peer-"+id)
+			t.Fatalf("127.0.0.1:18443 did not accept a connection: %v\n%s", dialErr, logs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err := runSquid(root, name, dir, []string{"--network", "container:" + holder}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
+		t.Fatal(err)
+	}
 	ask := func() {
 		t.Helper()
 		_, _ = Docker(20*time.Second, "run", "--rm", "--network", "container:"+holder,
@@ -192,6 +212,24 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	ask()
 	if got := peerLog(t, dir); strings.TrimSpace(got) != "" {
 		t.Fatalf("untrusted vendor saw a request: %q", got)
+	}
+	clog, err := os.ReadFile(filepath.Join(dir, "cache.log"))
+	var cacheLog string
+	if err == nil {
+		cacheLog = string(clog)
+	} else if os.IsPermission(err) {
+		// The proxy user owns cache.log, and the unit job has no nettools image to chmod it.
+		cacheLog, err = Docker(15*time.Second, "exec", "-u", "root", name, "cat", "/log/cache.log")
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cacheLog, "X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY") &&
+		!strings.Contains(cacheLog, "unable to get local issuer certificate") &&
+		!strings.Contains(cacheLog, "certificate verify failed") {
+		t.Fatalf("untrusted certificate was not rejected:\n%s", cacheLog)
 	}
 
 	// The same certificate, signed by a CA the gate is told to trust, does get the key.
