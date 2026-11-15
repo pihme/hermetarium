@@ -3,6 +3,7 @@ package supervisor
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -182,17 +183,55 @@ func DestroyWeak(id string) error {
 }
 
 func networkIPv4Gateway(network string) (string, error) {
-	out, err := Docker(15*time.Second, "network", "inspect", "-f", "{{range .IPAM.Config}}{{println .Gateway}}{{end}}", network)
+	out, err := Docker(15*time.Second, "network", "inspect", "-f", "{{range .IPAM.Config}}{{.Gateway}}|{{.Subnet}}\n{{end}}", network)
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, ".") {
-			return line, nil
+	// Docker omits Gateway unless create passed --gateway. The bridge still
+	// owns the first address of the subnet.
+	addr, ok := bridgeIPv4(out)
+	if !ok {
+		return "", fmt.Errorf("network %s: no IPv4 gateway", network)
+	}
+	return addr, nil
+}
+
+func bridgeIPv4(inspect string) (string, bool) {
+	var gateway string
+	var subnet *net.IPNet
+	for _, line := range strings.Split(inspect, "\n") {
+		gw, cidr, ok := strings.Cut(strings.TrimSpace(line), "|")
+		if !ok {
+			continue
+		}
+		if gateway == "" {
+			if ip := net.ParseIP(strings.TrimSpace(gw)); ip != nil && ip.To4() != nil {
+				gateway = ip.To4().String()
+			}
+		}
+		if subnet == nil {
+			if _, n, err := net.ParseCIDR(strings.TrimSpace(cidr)); err == nil && n.IP.To4() != nil {
+				subnet = n
+			}
 		}
 	}
-	return "", fmt.Errorf("network %s: no IPv4 gateway", network)
+	if gateway != "" {
+		return gateway, true
+	}
+	if subnet == nil {
+		return "", false
+	}
+	host := append(net.IP(nil), subnet.IP.To4()...)
+	for i := len(host) - 1; i >= 0; i-- {
+		host[i]++
+		if host[i] != 0 {
+			break
+		}
+	}
+	if !subnet.Contains(host) {
+		return "", false
+	}
+	return host.String(), true
 }
 
 func runOnHostNet(script, gw string) error {

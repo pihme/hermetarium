@@ -26,7 +26,7 @@ func TestWeakBridgeForwardAccept(t *testing.T) {
 		DockerIgnore("network", "rm", network)
 	})
 	if _, err := Docker(30*time.Second, "network", "create", "--driver", "bridge", "--internal",
-		"--subnet", "10.254.254.0/24", "--gateway", "10.254.254.1", network); err != nil {
+		"--subnet", "10.254.254.0/24", network); err != nil {
 		t.Fatal(err)
 	}
 	if err := acceptSameBridge(network); err != nil {
@@ -40,6 +40,18 @@ func TestWeakBridgeForwardAccept(t *testing.T) {
 	}
 	if bridgeForwardRule(t, network, "iptables-nft") || bridgeForwardRule(t, network, "iptables-legacy") {
 		t.Fatal("forward accept still present")
+	}
+}
+
+func TestBridgeIPv4(t *testing.T) {
+	if got, ok := bridgeIPv4("10.20.0.9|10.20.0.0/24\n"); !ok || got != "10.20.0.9" {
+		t.Fatalf("gateway = %q %v", got, ok)
+	}
+	if got, ok := bridgeIPv4("|10.41.0.0/24\n"); !ok || got != "10.41.0.1" {
+		t.Fatalf("subnet = %q %v", got, ok)
+	}
+	if got, ok := bridgeIPv4("|\n"); ok {
+		t.Fatalf("empty = %q", got)
 	}
 }
 
