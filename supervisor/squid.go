@@ -45,7 +45,10 @@ while IFS= read -r line; do
     http://model.hermetarium.test*|https://model.hermetarium.test*)
       scheme=${url%%://*}
       rest=${url#*://}
-      rest=${rest#*/}
+      case $rest in
+        */*) rest=${rest#*/} ;;
+        *) rest= ;;
+      esac
       printf 'OK rewrite-url="%s://model.hermetarium.test%s/%s"\n' "$scheme" "$prefix" "$rest"
       ;;
     *)
