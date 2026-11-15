@@ -67,7 +67,7 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out.
 
-`--cpus N` works on both walls. The strong wall gives the guest that many processors. The Docker wall sets that CPU quota (`--cpus`). Leave it off and the guest has one processor, and the Docker wall has no quota.
+`--cpus N` works on both walls. The strong wall gives the guest that many processors, from 1 to 32. The Docker wall sets that CPU quota (`--cpus`), from 1 up to the host's CPU count. A value outside that range is rejected before a virtual machine or container starts. Leave it off and the guest has one processor, and the Docker wall has no quota.
 
 `--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. An existing file that is not ext4 is refused. If the guest cannot mount the data disk, create fails and the habitat is removed. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
 
