@@ -59,6 +59,8 @@ restic init
 
 `backup.env` sets `HERMETARIUM_BACKUP_SCRIPT` and a `PATH` that contains `restic`. The systemd user manager does not use a login `PATH`. An empty `HERMETARIUM_ROOT` is not a script path.
 
+`chmod 600` the restic password file and `backup.env`. `backup.env` contains the password when `RESTIC_PASSWORD` is set.
+
 ## Timer
 
 ```bash
