@@ -124,8 +124,10 @@ case $b64 in
   *[!A-Za-z0-9+/=]*|"") b64="" ;;
 esac
 if [ -n "$b64" ] && [ -x /usr/sbin/sshd ]; then
-  mkdir -p /root/.ssh /var/empty
+  # The tmpfs on /run hides the directory Debian's sshd requires.
+  mkdir -p /root/.ssh /var/empty /run/sshd
   chmod 700 /root /root/.ssh
+  chmod 755 /run/sshd
   printf 'ssh-ed25519 %s hermetarium\n' "$b64" > /root/.ssh/authorized_keys
   chmod 600 /root/.ssh/authorized_keys
   if [ -x /usr/bin/ssh-keygen ]; then

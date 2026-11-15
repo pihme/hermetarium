@@ -44,9 +44,6 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 	if err != nil {
 		return 1, err
 	}
-	// Escape sequences from the habitat must reach the operator unchanged.
-	restore := ttyRaw(in)
-	defer restore()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGWINCH)
 	defer signal.Stop(sig)
@@ -58,6 +55,9 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 		if inst.Box == "" {
 			return 1, fmt.Errorf("attach: habitat %s has no container", id)
 		}
+		// Escape sequences from the habitat must reach the operator unchanged.
+		restore := ttyRaw(in)
+		defer restore()
 		return attachDocker(inst.Box, argv, in, out, errOut, sig, stop)
 	case "strong":
 		helper := inst.Helper
@@ -106,10 +106,26 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 	if err := EnsureNetTools(root); err != nil {
 		return 1, err
 	}
+	// stty raw clears ISIG. Ctrl-C has to interrupt the image build above.
+	// Escape sequences from the habitat must reach the operator unchanged.
+	restore := ttyRaw(in)
+	defer restore()
 	key := attachKeyPath(root, id)
 	if _, err := os.Stat(key); err != nil {
 		return 1, fmt.Errorf("attach: %w", err)
 	}
+	// Without a pty the guest command's stderr is on the client's stderr.
+	// ssh -E keeps connect and auth failures in this file instead.
+	logFile, err := os.CreateTemp("", "hermetarium-ssh-")
+	if err != nil {
+		return 1, err
+	}
+	logPath := logFile.Name()
+	if err := logFile.Close(); err != nil {
+		_ = os.Remove(logPath)
+		return 1, err
+	}
+	defer os.Remove(logPath)
 	args := []string{"run", "--rm", "-i"}
 	tty := isTTY(in)
 	if tty {
@@ -118,6 +134,7 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 	args = append(args,
 		"--network", "container:"+helper,
 		"-v", key+":/key:ro",
+		"-v", logPath+":/ssh.log",
 		"--entrypoint", "ssh",
 		NetToolsImage,
 	)
@@ -125,6 +142,7 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 		args = append(args, "-tt")
 	}
 	args = append(args,
+		"-E", "/ssh.log",
 		"-i", "/key",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "PreferredAuthentications=publickey",
@@ -142,17 +160,16 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = in
 	cmd.Stdout = out
-	var diag bytes.Buffer
-	cmd.Stderr = io.MultiWriter(errOut, &diag)
+	cmd.Stderr = errOut
 	code, err := waitSignal(cmd, sig, stop)
 	if err != nil {
 		return 1, err
 	}
-	if sshConnectFailed(diag.String()) {
-		msg := strings.TrimSpace(diag.String())
-		if msg == "" {
-			msg = "ssh connect failed"
-		}
+	diag, err := os.ReadFile(logPath)
+	if err != nil {
+		return 1, err
+	}
+	if msg := strings.TrimSpace(string(diag)); msg != "" {
 		return 1, fmt.Errorf("attach: %s", msg)
 	}
 	return code, nil
@@ -198,27 +215,6 @@ func sshRemoteCommand(argv []string) string {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
-}
-
-func sshConnectFailed(s string) bool {
-	if strings.Contains(s, "Permission denied (publickey)") || strings.Contains(s, "ssh: connect to host") {
-		return true
-	}
-	for _, m := range []string{
-		"Connection refused",
-		"Connection timed out",
-		"No route to host",
-		"Could not resolve hostname",
-		"banner exchange",
-		"too open",
-		"UNPROTECTED PRIVATE KEY",
-		"Bad owner or permissions",
-	} {
-		if strings.Contains(s, m) {
-			return true
-		}
-	}
-	return false
 }
 
 // attachKeyDir is mode 0700 and outside the instance directory. runSquid

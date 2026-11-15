@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,9 +144,23 @@ func TestAttachKeyOutsideGate(t *testing.T) {
 	if strings.Contains(string(att), `"-p"`) || !strings.Contains(string(att), `--network", "container:"`) || !strings.Contains(string(att), `":/key:ro"`) {
 		t.Fatal("attach publishes a port or does not keep the key on the client mount")
 	}
+	sshFn := string(att)
+	start := strings.Index(sshFn, "func attachSSH")
+	end := strings.Index(sshFn, "func waitSignal")
+	if start < 0 || end < start {
+		t.Fatal("attachSSH")
+	}
+	body := sshFn[start:end]
+	if strings.Index(body, "EnsureNetTools(") < 0 || strings.Index(body, "ttyRaw(") < 0 || strings.Index(body, "EnsureNetTools(") > strings.Index(body, "ttyRaw(") {
+		t.Fatal("raw mode is set before the nettools image is ensured")
+	}
+	strong := sshFn[strings.Index(sshFn, `case "strong":`):strings.Index(sshFn, "default:")]
+	if strings.Contains(strong, "ttyRaw") {
+		t.Fatal("strong attach sets raw mode before the nettools image is ensured")
+	}
 }
 
-func TestAttachTTY(t *testing.T) {
+func TestAttachGuestStderr(t *testing.T) {
 	if _, err := Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +168,126 @@ func TestAttachTTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	image := buildAttachImage(t)
+	acl := writeClosedACL(t)
+	id := newTestID(t)
+	t.Cleanup(func() {
+		_ = DestroyWeak(id)
+		endStrong(id, filepath.Join(VarDir(root), id))
+	})
+	if _, err := CreateStrong(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 256}); err != nil {
+		t.Fatal(err)
+	}
+	// A non-nil error is what mustDrive retries. This command exits 0, so
+	// one accepted attach must be the end of it.
+	script := "echo Connection refused >&2; echo 'Connection timed out' >&2; echo 'No route to host' >&2; echo 'banner exchange' >&2; echo 'too open' >&2; n=0; [ -f /tmp/hits ] && n=$(cat /tmp/hits); echo $((n + 1)) > /tmp/hits; echo OUT"
+	deadline := time.Now().Add(90 * time.Second)
+	var code int
+	var stdout, stderr string
+	for {
+		code, stdout, stderr, err = runAttach(id, []string{"sh", "-c", script})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("attach code %d\nstdout:\n%s\nstderr:\n%s\n%s", code, stdout, stderr, helperLogs("htm-fc-"+id))
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if strings.Contains(stderr, "attach:") {
+		t.Fatalf("guest stderr was an attach error\n%s", stderr)
+	}
+	for _, phrase := range []string{"Connection refused", "Connection timed out", "No route to host", "banner exchange", "too open"} {
+		if !strings.Contains(stderr, phrase) {
+			t.Fatalf("stderr missing %q\n%s", phrase, stderr)
+		}
+	}
+	if !strings.Contains(stdout, "OUT") {
+		t.Fatalf("stdout:\n%s", stdout)
+	}
+	code, stdout, stderr, err = runAttach(id, []string{"cat", "/tmp/hits"})
+	if err != nil || code != 0 || strings.TrimSpace(stdout) != "1" {
+		t.Fatalf("attach ran the command more than once: code=%d err=%v stdout=%q stderr=%q", code, err, stdout, stderr)
+	}
+}
+
+func TestDebianSshdPrivsep(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "pack-oci.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	init := fcInitFromPack(t, string(pack))
+	const mkdirLine = "mkdir -p /root/.ssh /var/empty /run/sshd"
+	const chmodLine = "chmod 755 /run/sshd"
+	start := strings.Index(init, "/usr/sbin/sshd -f /fc-sshd.conf")
+	if strings.Index(init, mkdirLine) < 0 || strings.Index(init, chmodLine) < 0 || start < 0 || !(strings.Index(init, mkdirLine) < strings.Index(init, chmodLine) && strings.Index(init, chmodLine) < start) {
+		t.Fatal("fc-init does not create /run/sshd before sshd")
+	}
+	conf := sshdConfFromInit(t, init)
+	script := "set -eu\n" +
+		"export DEBIAN_FRONTEND=noninteractive\n" +
+		"apt-get update -qq\n" +
+		"apt-get install -y -qq openssh-server >/dev/null\n" +
+		"if [ -x /usr/bin/ssh-keygen ]; then /usr/bin/ssh-keygen -A >/dev/null 2>&1 || true; fi\n" +
+		"cat > /fc-sshd.conf << 'END'\n" + conf + "END\n" +
+		"rm -rf /run/sshd\n" +
+		"set +e\n" +
+		"msg=$(/usr/sbin/sshd -t -f /fc-sshd.conf 2>&1)\n" +
+		"rc=$?\n" +
+		"set -e\n" +
+		"printf 'WITHOUT %s rc=%s\\n' \"$msg\" \"$rc\"\n" +
+		"if [ \"$rc\" -eq 0 ]; then echo STARTED_WITHOUT_DIR; exit 1; fi\n" +
+		mkdirLine + "\n" +
+		chmodLine + "\n" +
+		"/usr/sbin/sshd -t -f /fc-sshd.conf\n" +
+		"echo PRIVSEP_OK\n"
+	out, err := Docker(5*time.Minute, "run", "--rm", "debian:bookworm-slim", "bash", "-lc", script)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Missing privilege separation directory: /run/sshd") || !strings.Contains(out, "PRIVSEP_OK") || strings.Contains(out, "STARTED_WITHOUT_DIR") {
+		t.Fatalf("debian sshd:\n%s", out)
+	}
+}
+
+func fcInitFromPack(t *testing.T, pack string) string {
+	t.Helper()
+	const start = "cat > /rootfs/fc-init << 'EOF'\n"
+	i := strings.Index(pack, start)
+	if i < 0 {
+		t.Fatal("pack-oci.sh has no fc-init heredoc")
+	}
+	rest := pack[i+len(start):]
+	j := strings.Index(rest, "\nEOF\n")
+	if j < 0 {
+		t.Fatal("pack-oci.sh fc-init heredoc is not closed")
+	}
+	return rest[:j]
+}
+
+func sshdConfFromInit(t *testing.T, init string) string {
+	t.Helper()
+	const start = "cat > /fc-sshd.conf << 'END'\n"
+	i := strings.Index(init, start)
+	if i < 0 {
+		t.Fatal("fc-init has no sshd config")
+	}
+	rest := init[i+len(start):]
+	j := strings.Index(rest, "\nEND\n")
+	if j < 0 {
+		t.Fatal("fc-init sshd config is not closed")
+	}
+	return rest[:j+1]
+}
+
+func buildAttachImage(t *testing.T) string {
+	t.Helper()
 	image := "hermetarium-attach:local"
 	ctx := t.TempDir()
 	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache openssh tmux\nCMD [\"sleep\", \"3600\"]\n"
@@ -162,6 +297,11 @@ func TestAttachTTY(t *testing.T) {
 	if _, err := Docker(5*time.Minute, "build", "-t", image, ctx); err != nil {
 		t.Fatal(err)
 	}
+	return image
+}
+
+func writeClosedACL(t *testing.T) string {
+	t.Helper()
 	acl := filepath.Join(t.TempDir(), "squid.conf")
 	conf := "" +
 		"http_port 127.0.0.1:3129\n" +
@@ -180,6 +320,49 @@ func TestAttachTTY(t *testing.T) {
 	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return acl
+}
+
+// runAttach is `hermetarium attach ID -- CMD` with a pipe, not a terminal.
+func runAttach(id string, argv []string) (code int, stdout, stderr string, err error) {
+	in, err := os.Open("/dev/null")
+	if err != nil {
+		return 1, "", "", err
+	}
+	defer in.Close()
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		return 1, "", "", err
+	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		return 1, "", "", err
+	}
+	defer outR.Close()
+	defer errR.Close()
+	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = in, outW, errW
+	defer func() {
+		os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr
+	}()
+	code = Run(append([]string{"attach", id, "--"}, argv...))
+	_ = outW.Close()
+	_ = errW.Close()
+	ob, err1 := io.ReadAll(outR)
+	eb, err2 := io.ReadAll(errR)
+	return code, string(ob), string(eb), errors.Join(err1, err2)
+}
+
+func TestAttachTTY(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := buildAttachImage(t)
+	acl := writeClosedACL(t)
 	opts := CreateOpts{Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 256}
 	sizeCmd := []string{"sh", "-c", "echo TTY=$(tty); echo SIZE1=$(stty size); sleep 3; echo SIZE2=$(stty size); echo ATTACH_DONE"}
 
