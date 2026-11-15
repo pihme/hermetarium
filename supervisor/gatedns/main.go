@@ -383,14 +383,15 @@ func (g *gateDNS) writeLine(line []byte) {
 }
 
 func (g *gateDNS) rotate() {
-	// Rename replaces .1. On failure the open file and logN stay, so later
-	// lines still append instead of truncating or discarding the log.
+	// Rename replaces .1. If the new file cannot be opened, put the name
+	// back and keep this fd, so later lines still append to dns.jsonl.
 	name := g.log.Name()
 	if err := os.Rename(name, name+".1"); err != nil {
 		return
 	}
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		_ = os.Rename(name+".1", name)
 		return
 	}
 	_ = g.log.Close()
