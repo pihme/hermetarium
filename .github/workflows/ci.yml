@@ -78,7 +78,7 @@ jobs:
       - name: Release binaries are static (glibc baseline)
         if: matrix.name == 'unit'
         run: |
-          rm -f supervisor/fcattach.bin supervisor/gatedns.bin
+          rm -f supervisor/gatedns.bin
           python3 .github/scripts/release.py --check-build
 
 

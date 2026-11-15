@@ -282,9 +282,9 @@ def fmt_ver(v: Tuple[int, int, int]) -> str:
 
 def build_checked(c: dict, ver: str) -> None:
     """Build a static (CGO_ENABLED=0) binary and fail if it could not load on older distros."""
-    # fcattach.bin and gatedns.bin are gitignored; go:embed needs them before the host build.
+    # gatedns.bin is gitignored. go:embed needs it on disk before the host build.
     if c["name"] == "hermetarium":
-        run(["make", "fcattach", "gatedns"])
+        run(["make", "gatedns"])
     build = [a.format(ver=ver) if "{ver}" in a else a for a in c["build"]]
     os.environ["CGO_ENABLED"] = "0"
     run(build)
