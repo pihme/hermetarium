@@ -28,13 +28,13 @@ operator machine or cluster
                 └── inhabitant (HTTP server: echo, or a coding-agent harness)
 ```
 
-Operator and outside network both reach that inhabitant only through Squid. There is no product side channel (`docker exec`, SSH, a console) into the box.
+The outside network reaches the inhabitant only through Squid. The operator also has `hermetarium attach`: a terminal into a running habitat on both walls. What passes over that terminal is not in the I/O log. The weak wall terminal is Docker. The strong wall terminal is a Firecracker vsock to a pty inside the guest. The inhabitant's only network route remains the gate. Escape sequences from the habitat reach the operator's terminal as they are.
 
 ## 4. What it is not
 
 - Not a per-command sandbox the inhabitant invokes.
 - Not a host Unix shell, chroot, or jail as the product. A Unix shell still exists **inside** the image.
-- Not a host-side exec API as the way the operator talks to the inhabitant. That talk is HTTP through the logged path.
+- Not a host-side exec API as the way the operator talks to the inhabitant. Chat is HTTP through the logged path. `hermetarium attach` is the operator terminal, and those bytes stay out of the I/O log.
 - Not Kubernetes-as-security. Kubernetes may run the strong wall; ordinary `runc` pods on Kubernetes are still the weak wall.
 
 ## 5. Vocabulary
@@ -111,7 +111,7 @@ Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` fi
 
 Hermetarium does not care which program it holds. One or more inhabitants start already inside and may change the image. They talk to the outside only through the logged path. The outside talks in the same way: the inhabitant **is** an HTTP server on that path.
 
-The operator does not name a host argv to run inside.
+`hermetarium attach <id> [-- CMD]` opens a terminal in a running habitat. With no command, the shell is `sh`. The image entrypoint stays the habitat's own process. Bytes on the terminal are not in the I/O log, and the command gains no network path.
 
 ### 9a. Operator HTTP
 
@@ -139,20 +139,20 @@ Shared with those inhabitants:
 - Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. For Claude Code and Grok Build, a later POST is the next turn in the **same** session (not a new process per message).
 - Model “home” uses §8. Direct vendor API from the box is denied.
 - No SSE/WebSocket. A turn is still call-and-wait.
-- The operator path is this HTTP server, not a harness TUI or local web UI.
+- Operator chat for this harness is this HTTP server. A terminal program inside the image is reached with `hermetarium attach`. What passes over the terminal is not in the I/O log.
 
 ## 10. Lifecycle
 
 1. Supervisor creates a Hermetarium: image, wall, network path (in and out), I/O log.
 2. Inhabitant HTTP server starts inside and may mutate filesystem and packages.
-3. Operator talks to it only through the logged path (call-and-wait, or further requests to the running server).
+3. The operator talks to an HTTP inhabitant through the logged path (call-and-wait, or further requests to the running server). `hermetarium attach` is the terminal; those bytes are not in the I/O log.
 4. Destroy drops the wall (container or microVM). Keeping a mutated world would need a snapshot; that is not implemented.
 
 Whether instances are ephemeral or long-lived is not decided.
 
 ## 11. Tests
 
-What the suite checks today is [TESTING.md](TESTING.md). Operator talk in tests is HTTP (`hermetarium url`), never `docker exec`. Live tests are `//go:build live` so `make test` cannot see them.
+What the suite checks today is [TESTING.md](TESTING.md). Operator talk in tests is HTTP (`hermetarium url`), and `hermetarium attach` when a test checks the terminal. Live tests are `//go:build live` so `make test` cannot see them.
 
 ### Hello-world (implemented)
 

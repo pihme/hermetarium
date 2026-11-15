@@ -125,6 +125,7 @@ hermetarium logs YOUR_ID
 hermetarium destroy YOUR_ID
 hermetarium version
 hermetarium exec YOUR_ID -- <cmd>
+hermetarium attach YOUR_ID [-- <cmd>]
 ```
 
 `create` starts a habitat and prints an id. `--image` is the container. Something inside must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for one. Nothing on the host can reach port 18081, even when the gate file still listens there. `url` then prints `this habitat has no inbound address`. `--acl FILE` is the gate file. Hermetarium copies it as you wrote it.
@@ -135,7 +136,7 @@ hermetarium exec YOUR_ID -- <cmd>
 
 `url` prints the address, or `this habitat has no inbound address` when the habitat was created with `--no-inbound`. `logs` prints what passed the gate. `destroy` stops the habitat.
 
-Ask the assistant over HTTP. `exec` runs a command on the Docker wall.
+Ask the assistant over HTTP. `exec` runs a command on the Docker wall. `attach` opens a terminal on either wall. With no command it runs `sh`. Bytes on that terminal stay out of the I/O log. Escape sequences from the habitat reach the operator's terminal as they are.
 
 Walls, the lines a gate file must contain, and an image of your own are in the [usage guide](USAGE.md).
 
