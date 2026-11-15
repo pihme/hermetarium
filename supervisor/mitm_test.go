@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestACLWantsHTTPS(t *testing.T) {
@@ -37,6 +38,39 @@ func TestPrepareMITM(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "mitm-pub", "ca.key")); err == nil {
 		t.Fatal("public directory contains the private key")
+	}
+}
+
+func TestPrepareMITMAfterGateChown(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareMITM(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := InitMITMDB(root, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareMITM(dir); err != nil {
+		t.Fatal(err)
+	}
+	cert := parseCert(t, filepath.Join(dir, "mitm", "ca.pem"))
+	if !cert.IsCA {
+		t.Fatal("certificate is not a CA")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mitm-pub", "ca.key")); err == nil {
+		t.Fatal("public directory contains the private key")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mitm.replaced")); err == nil {
+		t.Fatal("replaced mitm directory was left behind")
 	}
 	keyPEM, err := os.ReadFile(filepath.Join(dir, "mitm", "ca.key"))
 	if err != nil {
