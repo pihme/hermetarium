@@ -163,6 +163,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 			"guest_mac":     "AA:FC:00:00:00:01",
 			"host_dev_name": "tap0",
 		}},
+		// CID 2 is the host. The guest CID is the attach terminal, not an IP path.
+		"vsock": map[string]any{
+			"guest_cid": 3,
+			"uds_path":  "/log/vsock.sock",
+		},
 	}
 	raw, err := json.MarshalIndent(vm, "", "  ")
 	if err != nil {

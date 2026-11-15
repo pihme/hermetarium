@@ -33,6 +33,9 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "--no-seccomp") {
 		t.Fatal("entrypoint.sh disables Firecracker seccomp")
 	}
+	if !strings.Contains(string(b), "vsock.sock") {
+		t.Fatal("entrypoint.sh does not publish the vsock socket")
+	}
 	b, err = os.ReadFile(pack)
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +45,9 @@ func TestExtract(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
 		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
+	}
+	if !strings.Contains(string(b), "/dev/pts") || !strings.Contains(string(b), "/fc-attach") {
+		t.Fatal("pack-oci.sh does not start the attach terminal")
 	}
 
 	st1, err := os.Stat(ep)

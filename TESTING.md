@@ -37,6 +37,8 @@ In-process. No Docker habitat.
 | `TestSparseRootDisk` | Needs Docker. A 50 GB root disk is sparse (little allocated space) and is not noticeably slower to create than a 1 GB disk. |
 | `TestNoInboundURLMessage` | An empty inbound URL is the sentence `this habitat has no inbound address`. |
 | `TestNoInbound` | Needs Docker and KVM. An image that only sleeps starts on both walls with `--no-inbound` and a gate file that has no inhabitant peer and no inbound port. No host port is published. `url` prints that sentence. |
+| `TestAttachProgramEmbedded` | The release binary embeds an ELF `fc-attach` for the strong-wall guest. |
+| `TestAttachTTY` | Needs Docker and KVM. `attach` on both walls gives a command a pty and the window size set on the operator terminal, follows a resize, and a later attach still sees a detached tmux session. The I/O log stays empty. |
 | `TestChooseID` | With no `--id`, `create` still makes a 12-character id. `--id claude` is kept. A blank, a space, a slash, a leading `-` or `.`, and a name longer than 63 characters are rejected. `claude` and `grok` do not share a subnet. |
 | `TestCreateRejectsSizeFlagsOnWeakWall` | `create --wall weak` with `--mem` exits 2. |
 | `TestVersionCommand` | `version` exits 0 and prints `supervisor.Version`. |
@@ -78,6 +80,14 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 **Image.** The same echo image passed as `CreateOpts.Image` with `examples/echo/squid.conf` and no probe sidecar. Echo exercise only.
 
 **Echo exercise** (`tests/echo`). Two POSTs to the same inbound URL: body `ping` returns `ping`, body `pong` returns `pong`. After a log sync, the I/O log has direction `in`.
+
+### Terminal
+
+`TestAttachTTY`. Image `hermetarium-attach:local` (Alpine with tmux, command `sleep`). `--no-inbound` on both walls.
+
+A command run through `attach` prints a pty name under `/dev/pts` and `stty size` of 40 rows by 100 columns, the size set on the operator's pty before the call. The operator pty is then resized to 24 by 80 and the process receives `SIGWINCH`. A later `stty size` in that same command prints 24 by 80.
+
+That command exits. A second attach runs `tmux new-session -d` with a command that writes `alive` and keeps sleeping. A third attach runs `tmux has-session` and prints that file. `var/<id>/io.jsonl` is still empty.
 
 ### Agentd mock
 

@@ -44,8 +44,22 @@ test -f /log/squid.pid || { echo "fc-helper: squid.pid missing" >&2; exit 1; }
 
 cp /opt/firecracker /tmp/firecracker
 chmod +x /tmp/firecracker
-exec /tmp/firecracker \
+# The socket is created as root. The operator connects to it from the host.
+/tmp/firecracker \
   --no-api \
   --log-path /log/fc.log \
   --level Info \
-  --config-file /log/vm.json
+  --config-file /log/vm.json &
+fc=$!
+i=0
+while [ "$i" -lt 50 ]; do
+  if [ -S /log/vsock.sock ]; then
+    break
+  fi
+  sleep 0.1
+  i=$((i + 1))
+done
+if [ -S /log/vsock.sock ]; then
+  chmod 666 /log/vsock.sock
+fi
+wait "$fc"

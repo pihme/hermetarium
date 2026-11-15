@@ -16,12 +16,23 @@ chmod +x /rootfs/fc-cmd 2>/dev/null || true
 if [ -f /in/fc-env ]; then
   cp /in/fc-env /rootfs/fc-env
 fi
+if [ -f /in/fc-attach ]; then
+  cp /in/fc-attach /rootfs/fc-attach
+  chmod +x /rootfs/fc-attach
+fi
 cat > /rootfs/fc-init << 'EOF'
 #!/bin/sh
 exec >/dev/ttyS0 2>&1 || exec >/dev/console 2>&1 || true
 mount -t proc none /proc 2>/dev/null || true
 mount -t sysfs none /sys 2>/dev/null || true
 mount -t devtmpfs none /dev 2>/dev/null || true
+# attach needs a pty. devtmpfs does not provide /dev/pts.
+mkdir -p /dev/pts
+mount -t devpts -o ptmxmode=0666,mode=0620 devpts /dev/pts 2>/dev/null || mount -t devpts devpts /dev/pts 2>/dev/null || true
+# Before the network wait, so attach is up when the habitat is created.
+if [ -x /fc-attach ]; then
+  /fc-attach >/dev/null 2>/dev/ttyS0 &
+fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"
 $IP link set lo up 2>/dev/null || true
