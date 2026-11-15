@@ -185,7 +185,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootfs, err := EnsureImageRootfs(root, opts.Image, diskMB(opts))
+	cached, err := EnsureImageRootfs(root, opts.Image, diskMB(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +197,10 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
+		return nil, err
+	}
+	rootfs, err := habitatRootfs(dir, cached)
+	if err != nil {
 		return nil, err
 	}
 	logPath := filepath.Join(dir, "io.jsonl")

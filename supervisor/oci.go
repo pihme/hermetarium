@@ -1,10 +1,13 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -92,4 +95,90 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 		return "", err
 	}
 	return dest, nil
+}
+
+const (
+	// Linux lseek(2) whence values. The syscall package does not name them.
+	seekData = 3
+	seekHole = 4
+)
+
+// habitatRootfs is one habitat's disk. The cache from EnsureImageRootfs is
+// keyed only by image and size, so mounting it would publish guest writes
+// to every later habitat that shares that image.
+func habitatRootfs(dir, cached string) (string, error) {
+	dest := filepath.Join(dir, "rootfs.ext4")
+	if err := copySparse(cached, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+// copySparse keeps holes. A large --disk is mostly empty; copying the holes
+// would write the whole disk out.
+func copySparse(src, dst string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	st, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("copy rootfs: %s is not a regular file", src)
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cErr := out.Close()
+		if err == nil {
+			err = cErr
+		}
+		if err != nil {
+			_ = os.Remove(dst)
+		}
+	}()
+	if err = out.Truncate(st.Size()); err != nil {
+		return err
+	}
+	return copyDataExtents(in, out, st.Size())
+}
+
+func copyDataExtents(in, out *os.File, size int64) error {
+	var off int64
+	for off < size {
+		data, err := in.Seek(off, seekData)
+		if err != nil {
+			if errors.Is(err, syscall.ENXIO) {
+				return nil
+			}
+			return err
+		}
+		if data >= size {
+			return nil
+		}
+		hole, err := in.Seek(data, seekHole)
+		if err != nil {
+			return err
+		}
+		if hole > size {
+			hole = size
+		}
+		if hole <= data {
+			return fmt.Errorf("copy rootfs: sparse seek did not advance")
+		}
+		n, err := io.Copy(io.NewOffsetWriter(out, data), io.NewSectionReader(in, data, hole-data))
+		if err != nil {
+			return err
+		}
+		if n != hole-data {
+			return io.ErrUnexpectedEOF
+		}
+		off = hole
+	}
+	return nil
 }
