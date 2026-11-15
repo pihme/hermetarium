@@ -164,6 +164,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 - `inhabitants/` — Claude Code and Grok Build, plus the shared gate README
 - `examples/` — echo, and the agentd stand-in
 - `tests/` — the suite, the pretend model, and the probe
+- `omakase/` — host backup of one habitat's logs and data disk
 - `docs/images/` — pictures for this page and the website
 - `var/<id>/` — one habitat's files, under `HERMETARIUM_ROOT`, this checkout, or `~/.local/share/hermetarium`
 
