@@ -239,6 +239,10 @@ The image contains `iproute2`, and usually `iptables`, so the wall can set the d
 
 Model calls go to the stand-in host on the gate: `http://claude.hermetarium.test` or `http://grok.hermetarium.test`. Squid is the one that connects to the real API.
 
+An OpenAI-compatible endpoint uses `http://model.hermetarium.test`. `examples/model/squid.conf` sets the upstream peer, the `Host` value, a path prefix, and the bearer key. The box may send a placeholder `Authorization`. Squid drops it and sets the key from that file. The key is not in the image.
+
+`__MODEL_PEER__` is the peer line. The `cache_peer_access` lines refer to `name=model`. One HTTPS upstream is `api.openai.com parent 443 0 no-query no-digest originserver tls tls-cafile=/etc/ssl/certs/ca-certificates.crt name=model`.
+
 The image may set a stand-in key, `not-the-supervisor-key`, so the program will start. Squid replaces the header from the gate file.
 
 Pass `--image` your tag, and `--acl` a gate file that names that model, when you want the key added on the way out.

@@ -28,8 +28,35 @@ func InstallACL(dir, src string) error {
 	if err := os.Remove(filepath.Join(dir, "squid.pid")); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644); err != nil {
+		return err
+	}
+	// Squid has no directive that inserts a path prefix. The gate file passes
+	// the prefix as the argument of this helper.
+	return os.WriteFile(filepath.Join(dir, "model-rewrite"), []byte(modelRewrite), 0o755)
 }
+
+// modelRewrite speaks Squid's url_rewrite protocol for model.hermetarium.test.
+const modelRewrite = `#!/bin/sh
+prefix=$1
+while IFS= read -r line; do
+  url=${line%% *}
+  case $url in
+    http://model.hermetarium.test*|https://model.hermetarium.test*)
+      scheme=${url%%://*}
+      rest=${url#*://}
+      case $rest in
+        */*) rest=${rest#*/} ;;
+        *) rest= ;;
+      esac
+      printf 'OK rewrite-url="%s://model.hermetarium.test%s/%s"\n' "$scheme" "$prefix" "$rest"
+      ;;
+    *)
+      printf 'ERR\n'
+      ;;
+  esac
+done
+`
 
 // EnsureSquid builds the OpenSSL gate image once. A later create reuses it
 // while squid/Dockerfile is unchanged.
@@ -121,9 +148,12 @@ func applyIntercept(netns, cidr string, https bool) error {
 // lockGate stops other containers on Docker's default bridge from using the
 // gate. Squid listens on 0.0.0.0, and the gate has an address on that bridge,
 // so without this a neighbor could send requests straight to Squid and get the
-// vendor key injected. Only the habitat-side interface, loopback, and replies
-// may reach the gate. The inbound port is also accepted from the bridge
-// gateway, where the published port arrives, unless --no-inbound was set:
+// vendor key injected. Loopback, replies, and the habitat-side interface may
+// reach the gate. From that interface only Squid (3128 and 3130), the gate
+// CA (3131), and the gate resolver (UDP and TCP 53) are accepted, so the box
+// cannot open another listener in this netns and bypass Squid. The inbound
+// port is also accepted from the bridge gateway, where the published port
+// arrives, unless --no-inbound was set:
 // the gate file is copied unchanged and may still listen there. The habitat
 // side is matched by interface, not source address, because a neighbor can
 // spoof an address.
@@ -145,7 +175,11 @@ hab=$(ip -o -4 addr show | awk -v ip="$GATE_IP" 'index($4, ip "/") == 1 {print $
 test -n "$hab"
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -i "$hab" -j ACCEPT
+iptables -A INPUT -i "$hab" -p tcp --dport 3128 -j ACCEPT
+iptables -A INPUT -i "$hab" -p tcp --dport 3130 -j ACCEPT
+iptables -A INPUT -i "$hab" -p tcp --dport 3131 -j ACCEPT
+iptables -A INPUT -i "$hab" -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -i "$hab" -p tcp --dport 53 -j ACCEPT
 ` + acceptInbound + `iptables -P INPUT DROP`
 	_, err = Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+gate,
