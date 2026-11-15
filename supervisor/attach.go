@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -112,10 +113,20 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 		return 1, err
 	}
 	var execID string
+	skip := false
 	return waitSignal(cmd, sig, stop, func() error {
+		if skip {
+			return nil
+		}
 		if execID == "" {
 			var err error
 			execID, err = oneNewExecID(box, before)
+			if errors.Is(err, errSkipResize) {
+				// Two TTY attaches in one window are not distinguishable
+				// from ExecIDs. Keep both sessions and skip the API resize.
+				skip = true
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -270,6 +281,11 @@ func dockerExecIDs(box string) (map[string]struct{}, error) {
 	return ids, nil
 }
 
+// errSkipResize means another exec started in the same window, so ExecIDs
+// cannot name this session. The attach still runs. The API resize is skipped.
+// A single new id is still resized.
+var errSkipResize = errors.New("attach: skip resize")
+
 func oneNewExecID(box string, before map[string]struct{}) (string, error) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -286,18 +302,16 @@ func oneNewExecID(box string, before map[string]struct{}) (string, error) {
 			fresh = id
 			n++
 		}
-		switch n {
-		case 1:
-			return fresh, nil
-		default:
-			if n > 1 {
-				return "", fmt.Errorf("attach: %d new execs", n)
-			}
-			if time.Now().After(deadline) {
-				return "", fmt.Errorf("attach: exec id not found")
-			}
-			time.Sleep(20 * time.Millisecond)
+		if n > 1 {
+			return "", errSkipResize
 		}
+		if n == 1 {
+			return fresh, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("attach: exec id not found")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

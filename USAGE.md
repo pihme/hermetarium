@@ -241,6 +241,8 @@ The image runs as root.
 
 The image contains `iproute2`, and usually `iptables`, so the wall can set the default route.
 
+A strong-wall terminal needs an SSH server at `/usr/sbin/sshd`, plus `ssh-keygen` or host keys that already exist. Alpine is `apk add openssh`. Debian is `apt-get install openssh-server`.
+
 Model calls go to the stand-in host on the gate: `http://claude.hermetarium.test` or `http://grok.hermetarium.test`. Squid is the one that connects to the real API.
 
 An OpenAI-compatible endpoint uses `http://model.hermetarium.test`. `examples/model/squid.conf` sets the upstream peer, the `Host` value, a path prefix, and the bearer key. The box may send a placeholder `Authorization`. Squid drops it and sets the key from that file. The key is not in the image.

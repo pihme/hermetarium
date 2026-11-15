@@ -179,11 +179,19 @@ hold_fifo=$hold_dir/stdin
 mkfifo "$hold_fifo"
 exec 3<>"$hold_fifo"
 
-# The guest can freeze /data and still have attach return an error.
-frozen=1
-if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c 'sync; command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }; fsfreeze -f /data' <&3 >&2; then
+# A guest can freeze /data and still have attach return an error.
+# Connection refused means sshd never accepted the session, so the disk
+# was not frozen. Any other failure may have frozen it.
+freeze_log=$hold_dir/freeze.err
+if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c 'sync; command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }; fsfreeze -f /data' <&3 >"$freeze_log" 2>&1; then
+  cat "$freeze_log" >&2
+  if grep -q "Connection refused" "$freeze_log"; then
+    die "could not freeze /data (the habitat image needs an SSH server at /usr/sbin/sshd)"
+  fi
+  frozen=1
   die "could not freeze /data (the habitat image needs fsfreeze from util-linux)"
 fi
+frozen=1
 
 restic backup --json --tag hermetarium \
   "$inst/io.jsonl" \

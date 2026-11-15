@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -430,32 +431,106 @@ func assertStrongAttachSealed(t *testing.T, root, id, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := openSSHSeed(priv)
-	if len(seed) != 32 {
-		t.Fatalf("seed %d", len(seed))
+	if len(openSSHSeed(priv)) != 32 {
+		t.Fatal("private key has no seed")
 	}
-	enc := []byte(base64.StdEncoding.EncodeToString(seed))
-	acl, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
-	if err != nil {
+	if err := privateKeyLeak(dir, priv); err != nil {
 		t.Fatal(err)
-	}
-	disk, err := os.ReadFile(filepath.Join(dir, "rootfs.ext4"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []struct {
-		label string
-		b     []byte
-	}{
-		{"vm.json", vm},
-		{"squid.conf", acl},
-		{"rootfs", disk},
-	} {
-		if bytes.Contains(name.b, seed) || bytes.Contains(name.b, enc) || bytes.Contains(name.b, priv) {
-			t.Fatalf("private key is in %s", name.label)
-		}
 	}
 	assertNoPublishedPorts(t, "htm-fc-"+id, "htm-gate-"+id)
+}
+
+// privateKeyLeak walks every file under the instance directory. The guest
+// sshd binary, packed into rootfs.ext4, contains the PEM armor as a format
+// string, so that text is a leak only in a small file. A stripped PEM, a
+// hex encoding of the PEM, and a copied id_ed25519 still match.
+func privateKeyLeak(dir string, priv []byte) error {
+	needles := privateKeyNeedles(priv)
+	header := []byte("OPENSSH PRIVATE KEY")
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, n := range needles {
+			if bytes.Contains(b, n) {
+				return fmt.Errorf("private key material in %s", path)
+			}
+		}
+		if info.Size() < 1<<20 && bytes.Contains(b, header) {
+			return fmt.Errorf("private key header in %s", path)
+		}
+		return nil
+	})
+}
+
+func privateKeyNeedles(priv []byte) [][]byte {
+	var needles [][]byte
+	add := func(b []byte) {
+		if len(b) == 0 {
+			return
+		}
+		needles = append(needles, append([]byte(nil), b...))
+	}
+	add(priv)
+	add([]byte(hex.EncodeToString(priv)))
+	seed := openSSHSeed(priv)
+	add(seed)
+	if len(seed) > 0 {
+		add([]byte(base64.StdEncoding.EncodeToString(seed)))
+		add([]byte(hex.EncodeToString(seed)))
+	}
+	block, _ := pem.Decode(priv)
+	if block != nil {
+		add(block.Bytes)
+		add([]byte(hex.EncodeToString(block.Bytes)))
+	}
+	// The first body lines are the same on every unencrypted OpenSSH key.
+	// ssh-keygen -A writes host keys into the guest disk, so only lines
+	// that cover this seed are this habitat's secret. A stripped PEM and
+	// a hex encoding of it still contain those lines.
+	seedAt := -1
+	if block != nil && len(seed) > 0 {
+		seedAt = bytes.Index(block.Bytes, seed)
+	}
+	decOff := 0
+	for _, line := range bytes.Split(priv, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		if len(line) == 0 || bytes.HasPrefix(line, []byte("-----")) {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(string(line))
+		if err != nil {
+			continue
+		}
+		overlap := 0
+		if seedAt >= 0 {
+			lo, hi := decOff, decOff+len(raw)
+			if seedAt > lo {
+				lo = seedAt
+			}
+			if seedAt+len(seed) < hi {
+				hi = seedAt + len(seed)
+			}
+			if hi > lo {
+				overlap = hi - lo
+			}
+		}
+		decOff += len(raw)
+		if overlap < 8 || len(line) < 16 {
+			continue
+		}
+		add(line)
+		add([]byte(hex.EncodeToString(line)))
+	}
+	add([]byte(hex.EncodeToString([]byte("OPENSSH PRIVATE KEY"))))
+	return needles
 }
 
 func openSSHSeed(pemBytes []byte) []byte {
@@ -683,4 +758,305 @@ func habitatLogs(wall, id, dir string) string {
 	}
 	out, _ := Docker(10*time.Second, "logs", "htm-box-"+id)
 	return out
+}
+
+func TestAttachPrivateKeyLeak(t *testing.T) {
+	keyDir := t.TempDir()
+	if _, err := generateAttachKey(keyDir); err != nil {
+		t.Fatal(err)
+	}
+	priv, err := os.ReadFile(filepath.Join(keyDir, "id_ed25519"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(openSSHSeed(priv)) != 32 {
+		t.Fatal("private key has no seed")
+	}
+	inst := t.TempDir()
+	if err := privateKeyLeak(inst, priv); err != nil {
+		t.Fatal(err)
+	}
+	plant := func(rel string, body []byte) {
+		t.Helper()
+		path := filepath.Join(inst, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := privateKeyLeak(inst, priv); err == nil {
+			t.Fatalf("%s was not detected", rel)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stripped := bytes.ReplaceAll(priv, []byte("\n"), nil)
+	plant("stripped.pem", stripped)
+	plant("key.hex", []byte(hex.EncodeToString(priv)))
+	plant("stripped.hex", []byte(hex.EncodeToString(stripped)))
+	plant("nested/id_ed25519", priv)
+	plant("note.txt", []byte("-----BEGIN OPENSSH PRIVATE KEY-----\n"))
+	// ssh-keygen -A writes other OpenSSH keys into the guest disk, and
+	// sshd contains the PEM armor as a format string. Neither is this key.
+	otherDir := t.TempDir()
+	if _, err := generateAttachKey(otherDir); err != nil {
+		t.Fatal(err)
+	}
+	other, err := os.ReadFile(filepath.Join(otherDir, "id_ed25519"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte{0}, 1<<20)
+	copy(big, []byte("-----BEGIN OPENSSH PRIVATE KEY-----"))
+	copy(big[200:], other)
+	if err := os.WriteFile(filepath.Join(inst, "rootfs.ext4"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := privateKeyLeak(inst, priv); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAttachDestroyRemovesKey(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := newTestID(t)
+	dir := attachKeyDir(root, id)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if _, err := writeAttachKey(root, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "id_ed25519")); err != nil {
+		t.Fatal(err)
+	}
+	_ = Run([]string{"destroy", id})
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("attach key dir remains: %v", err)
+	}
+}
+
+func TestAttachExitCode(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := buildAttachImage(t)
+	acl := writeClosedACL(t)
+	opts := CreateOpts{Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 256}
+	for _, wall := range []string{"weak", "strong"} {
+		t.Run(wall, func(t *testing.T) {
+			id := newTestID(t)
+			t.Cleanup(func() {
+				_ = DestroyWeak(id)
+				endStrong(id, filepath.Join(VarDir(root), id))
+			})
+			switch wall {
+			case "weak":
+				if _, err := CreateWeak(root, id, opts); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if _, err := os.Stat("/dev/kvm"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := CreateStrong(root, id, opts); err != nil {
+					t.Fatal(err)
+				}
+			}
+			deadline := time.Now().Add(90 * time.Second)
+			for {
+				code, stdout, stderr, err := runAttach(id, []string{"sh", "-c", "exit 7"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if code == 7 {
+					return
+				}
+				if code == 0 || wall == "weak" || time.Now().After(deadline) {
+					t.Fatalf("code=%d\n%s\n%s\n%s", code, stdout, stderr, habitatLogs(wall, id, filepath.Join(VarDir(root), id)))
+				}
+				time.Sleep(300 * time.Millisecond)
+			}
+		})
+	}
+}
+
+func TestAttachConcurrentWeakTTY(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := buildSleepImage(t)
+	acl := writeClosedACL(t)
+	id := newTestID(t)
+	t.Cleanup(func() { _ = DestroyWeak(id) })
+	if _, err := CreateWeak(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := driveAttach(root, id, []string{"sh", "-c", "sleep 2; echo CONCURRENT_OK"}, 24, 80, "", "CONCURRENT_OK", nil)
+			if err != nil || !strings.Contains(out, "CONCURRENT_OK") {
+				errCh <- fmt.Errorf("%v\n%s", err, out)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
+	}
+}
+
+func buildSleepImage(t *testing.T) string {
+	t.Helper()
+	image := "hermetarium-sleep:local"
+	ctx := t.TempDir()
+	df := "FROM " + AlpineImage + "\nCMD [\"sleep\", \"3600\"]\n"
+	if err := os.WriteFile(filepath.Join(ctx, "Dockerfile"), []byte(df), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Docker(5*time.Minute, "build", "-t", image, ctx); err != nil {
+		t.Fatal(err)
+	}
+	return image
+}
+
+func TestResizeGone(t *testing.T) {
+	gone := []error{
+		fmt.Errorf("attach: resize: HTTP/1.0 404 Not Found"),
+		fmt.Errorf("attach: resize: HTTP/1.0 500 Internal Server Error\ncannot resize a stopped container"),
+	}
+	for _, err := range gone {
+		if !resizeGone(err) {
+			t.Fatalf("want gone: %v", err)
+		}
+	}
+	t.Setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+	_, sockErr := dockerSocket()
+	stay := []error{
+		nil,
+		fmt.Errorf("attach: resize: HTTP/1.0 500 Internal Server Error"),
+		sockErr,
+		fmt.Errorf("attach: docker socket: dial unix /var/run/docker.sock: connect: no such file"),
+		errSkipResize,
+	}
+	for _, err := range stay {
+		if resizeGone(err) {
+			t.Fatalf("want not gone: %v", err)
+		}
+	}
+	if sockErr == nil {
+		t.Fatal("tcp DOCKER_HOST was accepted")
+	}
+}
+
+func TestResizeDockerExec(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	name := "htm-resize-" + newTestID(t)
+	if _, err := Docker(30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
+	master, slave, err := openTestPTY(40, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	if row, col := termSize(slave); row != 40 || col != 100 {
+		t.Fatalf("pty %d %d", row, col)
+	}
+	cmd := exec.Command("docker", "exec", "-it", name, "sh", "-c", "sleep 3; stty size; echo RESIZE_DONE")
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = slave
+	before, err := dockerExecIDs(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		<-done
+	}()
+	execID, err := oneNewExecID(name, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The CLI copies the window once, after the exec id exists. Wait for
+	// that copy, then change the local pty. No SIGWINCH is sent to docker.
+	time.Sleep(800 * time.Millisecond)
+	setWinsize(master, 17, 91)
+	setWinsize(slave, 17, 91)
+	if row, col := termSize(slave); row != 17 || col != 91 {
+		t.Fatalf("local size %d %d", row, col)
+	}
+	if err := resizeDockerExec(execID, slave); err != nil {
+		t.Fatal(err)
+	}
+	_ = syscall.SetNonblock(int(master.Fd()), true)
+	var buf bytes.Buffer
+	tmp := make([]byte, 256)
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && !bytes.Contains(buf.Bytes(), []byte("RESIZE_DONE")) {
+		_ = master.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		n, rerr := master.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if rerr == nil || errors.Is(rerr, os.ErrDeadlineExceeded) || errors.Is(rerr, syscall.EAGAIN) || errors.Is(rerr, syscall.EWOULDBLOCK) {
+			continue
+		}
+		break
+	}
+	out := buf.String()
+	if !strings.Contains(out, "17 91") {
+		t.Fatalf("resize output:\n%s", out)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("exec did not exit")
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	var stopped error
+	for {
+		stopped = resizeDockerExec(execID, slave)
+		if resizeGone(stopped) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !resizeGone(stopped) {
+		t.Fatalf("stopped exec: %v", stopped)
+	}
 }

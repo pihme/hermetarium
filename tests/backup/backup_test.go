@@ -54,8 +54,8 @@ func TestBackupWhileWriting(t *testing.T) {
 	}
 	resticBin := ensureRestic(t, checkout)
 	cli := buildCLI(t, checkout)
-	// The attach socket is a unix path, capped at 107 bytes. A long checkout
-	// cannot hold it, so the habitat files move to a short directory.
+	// The SSH private key is var/.attach/<id>/id_ed25519. A checkout path
+	// longer than 107 bytes cannot hold it, so the habitat files move.
 	root := habitatRoot(t, checkout)
 
 	disk := filepath.Join(t.TempDir(), "disk.ext4")
@@ -363,9 +363,11 @@ func fileSize(t *testing.T, path string) int64 {
 	return st.Size()
 }
 
+// habitatRoot is short enough for var/.attach/<id>/id_ed25519. A long
+// checkout moves the habitat files under /tmp and keeps .cache warm.
 func habitatRoot(t *testing.T, checkout string) string {
 	t.Helper()
-	sample := filepath.Join(checkout, "var", ".vsock", "0123456789ab", "vsock.sock")
+	sample := filepath.Join(checkout, "var", ".attach", "0123456789ab", "id_ed25519")
 	if len(sample) <= 107 {
 		return checkout
 	}
