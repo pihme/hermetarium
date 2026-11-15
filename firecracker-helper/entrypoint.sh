@@ -1,6 +1,10 @@
 #!/bin/sh
 # Strong-wall helper: TAP + Firecracker. Squid is a sibling in this netns.
 set -eu
+# A reused id keeps this file. Clear it before Squid's pid can appear, or
+# Firecracker would start on the previous boot's listener.
+mkdir -p /log
+rm -f /log/dns.ready
 test -c /dev/kvm || { echo "fc-helper: no /dev/kvm" >&2; exit 1; }
 test -c /dev/net/tun || { echo "fc-helper: no /dev/net/tun" >&2; exit 1; }
 # create returns, so this process holds the lock until the habitat stops.
@@ -52,11 +56,36 @@ while [ "$i" -lt 200 ]; do
   i=$((i + 1))
 done
 test -f /log/squid.pid || { echo "fc-helper: squid.pid missing" >&2; exit 1; }
+# squid.pid is written before gatedns listens. Do not boot on that alone.
+i=0
+while [ "$i" -lt 200 ]; do
+  if test -f /log/dns.ready; then
+    break
+  fi
+  sleep 0.1
+  i=$((i + 1))
+done
+test -f /log/dns.ready || { echo "fc-helper: /log/dns.ready missing" >&2; exit 1; }
 
 cp /opt/firecracker /tmp/firecracker
 chmod +x /tmp/firecracker
-exec /tmp/firecracker \
+# The socket is created as root. 0666 lets the operator connect; the host
+# directory is 0700 and is not mounted into the gate.
+/tmp/firecracker \
   --no-api \
   --log-path /log/fc.log \
   --level Info \
-  --config-file /log/vm.json
+  --config-file /log/vm.json &
+fc=$!
+i=0
+while [ "$i" -lt 50 ]; do
+  if [ -S /vsock/vsock.sock ]; then
+    break
+  fi
+  sleep 0.1
+  i=$((i + 1))
+done
+if [ -S /vsock/vsock.sock ]; then
+  chmod 666 /vsock/vsock.sock
+fi
+wait "$fc"

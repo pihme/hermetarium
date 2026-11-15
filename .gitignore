@@ -1,4 +1,6 @@
 bin/
+supervisor/fcattach.bin
+supervisor/gatedns.bin
 .cache/
 var/
 dist/

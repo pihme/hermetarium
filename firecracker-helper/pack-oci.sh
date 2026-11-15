@@ -14,6 +14,10 @@ chmod +x /rootfs/fc-cmd 2>/dev/null || true
 if [ -f /in/fc-env ]; then
   cp /in/fc-env /rootfs/fc-env
 fi
+if [ -f /in/fc-attach ]; then
+  cp /in/fc-attach /rootfs/fc-attach
+  chmod +x /rootfs/fc-attach
+fi
 # Static amd64 ELF: ET_EXEC, one PT_LOAD (R+X) at vaddr 0x400000, filesz 0xa9,
 # entry 0x400078. Code is file offset 0x78. buf is in the red zone.
 #   78: 48 c7 c0 3e 01 00 00   mov rax, 0x13e   # getrandom
@@ -38,9 +42,10 @@ exec >/dev/ttyS0 2>&1 || exec >/dev/console 2>&1 || true
 mount -t proc none /proc 2>/dev/null || true
 mount -t sysfs none /sys 2>/dev/null || true
 mount -t devtmpfs none /dev 2>/dev/null || true
+# attach needs a pty. devtmpfs does not provide /dev/pts.
 # A container runtime in the guest needs these.
 mkdir -p /dev/pts /dev/shm /run /sys/fs/cgroup
-mount -t devpts devpts /dev/pts 2>/dev/null || true
+mount -t devpts -o ptmxmode=0666,mode=0620 devpts /dev/pts 2>/dev/null || mount -t devpts devpts /dev/pts 2>/dev/null || true
 mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
 mount -t tmpfs tmpfs /run 2>/dev/null || true
 mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
@@ -85,6 +90,17 @@ if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   fi
   echo DATA_MOUNT_OK
 fi
+# Same shell, after a successful data mount, so the daemon inherits the image
+# environment. Before the network wait and before the inhabitant.
+if [ -f /fc-env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /fc-env
+  set +a
+fi
+if [ -x /fc-attach ]; then
+  /fc-attach >/dev/null 2>/dev/ttyS0 &
+fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"
 $IP link set lo up 2>/dev/null || true
@@ -99,6 +115,9 @@ done
 $IP link set eth0 up 2>/dev/null || true
 $IP addr add 172.16.0.2/24 dev eth0 2>/dev/null || true
 $IP route add default via 172.16.0.1 2>/dev/null || true
+# The image ships an empty resolv.conf, and this guest's hosts file has no localhost.
+printf 'nameserver 172.16.0.1\n' > /etc/resolv.conf
+printf '127.0.0.1 localhost\n' >> /etc/hosts
 printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test\n' >> /etc/hosts
 echo "GUEST_UNAME=$(uname -r)"
 if [ -x /bin/busybox ] && /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
@@ -107,12 +126,6 @@ elif command -v ping >/dev/null 2>&1 && ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; 
   echo LEAK_OK
 else
   echo LEAK_FAIL
-fi
-if [ -f /fc-env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . /fc-env
-  set +a
 fi
 # Port 3131 serves the gate CA only when HTTPS is open. busybox wget
 # speaks plain HTTP. Linux 6.1 has entropy at boot, so curl is safe, and

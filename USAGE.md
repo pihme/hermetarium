@@ -116,6 +116,15 @@ The address from `url` is how you talk to the habitat. `exec` runs a command on 
 ./bin/hermetarium exec YOUR_ID -- hostname
 ```
 
+`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`.
+
+```bash
+./bin/hermetarium attach YOUR_ID
+./bin/hermetarium attach YOUR_ID -- sh -c 'tty; stty size'
+```
+
+The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. Escape sequences from the habitat reach the operator's terminal as they are. This path is not in the I/O log. It opens no network route out of the habitat.
+
 The folders `examples/` and `inhabitants/` are images you build. They are not command names.
 
 ## The gate file
@@ -188,13 +197,15 @@ The gate is an OpenSSL Squid. A program that carries its own certificate list an
 
 `examples/openweb/squid.conf` is an open-web gate file. It decrypts HTTPS, except hosts on its pass-through list, which keep their own certificate. `api.github.com` gets the bearer token from that file, and the box's `Authorization` on that host is dropped. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Deletes, contents writes, Git data writes, and repository settings are denied. The token is not in the image. Two fine-grained tokens are described in [examples/openweb/README.md](examples/openweb/README.md).
 
+The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate, including for a process that does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web (an `http_access allow` other than the inbound, vendor, and probe rules, which is what the `OPEN-IN` and `OPEN-HTTPS` blocks add). The habitat cannot resolve outside names through any resolver except the gate. On the strong wall the guest's `/etc/hosts` includes `127.0.0.1 localhost`.
+
 ## Logs
 
 ```bash
 ./bin/hermetarium logs YOUR_ID
 ```
 
-That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI. Message bodies stay out of the log.
+That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI. A DNS query is the same file with `protocol` `dns`, the name in `destination`, the type in `method`, and the answer in `result`. Message bodies stay out of the log.
 
 The same directory holds:
 
@@ -290,7 +301,7 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 **Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official assistants. KinD wants more still.
 
-**The kernel.** The strong wall boots Linux 6.1.188, the file `vmlinux-6.1.188` from the Firecracker CI build `firecracker-ci/20261111-778a26c0594c-0`. Firecracker is v1.16.1. The supervisor checks the SHA-256 of that kernel and of the Firecracker release tarball after download and refuses a mismatch. The guest has entropy at boot. A base that needs a system call this kernel does not have can run on the Docker wall.
+**The kernel.** The strong wall boots Linux 6.1.188, the file `vmlinux-6.1.188` from the GitHub release `kernel/6.1.188`. Firecracker is v1.16.1. The supervisor checks the SHA-256 of that kernel and of the Firecracker release tarball after download and refuses a mismatch. The guest has entropy at boot. A base that needs a system call this kernel does not have can run on the Docker wall.
 
 ## Porter in your image
 

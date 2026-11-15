@@ -19,6 +19,7 @@ type Record struct {
 	Port        int    `json:"port,omitempty"`
 	Method      string `json:"method,omitempty"`
 	Path        string `json:"path,omitempty"`
+	Result      string `json:"result,omitempty"`
 	Allowed     bool   `json:"allowed"`
 	Bytes       int    `json:"bytes,omitempty"`
 	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
@@ -126,10 +127,11 @@ func readFile(path string) ([]byte, error) {
 func SyncAccessLog(accessPath, jsonlPath string) error {
 	b, err := readFile(accessPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return os.WriteFile(jsonlPath, nil, 0o644)
+		if !os.IsNotExist(err) {
+			return err
 		}
-		return err
+		// Squid may not have created access.log yet. DNS lines still belong here.
+		b = nil
 	}
 	out, err := os.Create(jsonlPath)
 	if err != nil {
@@ -141,6 +143,34 @@ func SyncAccessLog(accessPath, jsonlPath string) error {
 	for sc.Scan() {
 		rec, ok := ParseSquidLine(sc.Text())
 		if !ok {
+			continue
+		}
+		if err := enc.Encode(rec); err != nil {
+			return err
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return appendDNSLog(enc, filepath.Join(filepath.Dir(accessPath), "dns.jsonl"))
+}
+
+func appendDNSLog(enc *json.Encoder, path string) error {
+	b, err := readFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	sc := bufio.NewScanner(strings.NewReader(string(b)))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var rec Record
+		if err := json.Unmarshal([]byte(line), &rec); err != nil || rec.Protocol != "dns" {
 			continue
 		}
 		if err := enc.Encode(rec); err != nil {

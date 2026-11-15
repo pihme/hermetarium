@@ -1,8 +1,10 @@
 package supervisor
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -234,6 +236,49 @@ func TestHabitatRootfsFailureKeepsDest(t *testing.T) {
 	}
 }
 
+func TestHabitatRootfsStalePartial(t *testing.T) {
+	root := t.TempDir()
+	cache, err := cacheFile(root, "rootfs-busybox-1024.ext4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSparseExt4(cache); err != nil {
+		t.Fatal(err)
+	}
+	cacheSum, err := sha256File(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := InstanceDir(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := habitatRootfsPath(dir) + ".partial"
+	if err := os.WriteFile(partial, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = habitatRootfs(dir, cache)
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "run hermetarium destroy") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Count(err.Error(), partial) != 1 {
+		t.Fatalf("path twice: %v", err)
+	}
+	if sum, err := sha256File(cache); err != nil || sum != cacheSum {
+		t.Fatalf("cache changed: %v %s", err, sum)
+	}
+	if b, err := os.ReadFile(partial); err != nil || string(b) != "stale" {
+		t.Fatalf("partial changed: %v %q", err, b)
+	}
+}
+
 func TestRemovePrivateRootfs(t *testing.T) {
 	root := t.TempDir()
 	id := "abc"
@@ -272,6 +317,10 @@ func TestRemovePrivateRootfs(t *testing.T) {
 	if err := os.Symlink(sized, habitatRootfsPath(linkDir)); err != nil {
 		t.Fatal(err)
 	}
+	partialLink := habitatRootfsPath(linkDir) + ".partial"
+	if err := os.Symlink(sized, partialLink); err != nil {
+		t.Fatal(err)
+	}
 
 	removePrivateRootfs(dir)
 	removePrivateRootfs(linkDir)
@@ -279,12 +328,17 @@ func TestRemovePrivateRootfs(t *testing.T) {
 	if _, err := os.Lstat(priv); !os.IsNotExist(err) {
 		t.Fatalf("private rootfs: %v", err)
 	}
+	if _, err := os.Lstat(partial); !os.IsNotExist(err) {
+		t.Fatalf("partial rootfs: %v", err)
+	}
 	if _, err := os.Lstat(habitatRootfsPath(linkDir)); !os.IsNotExist(err) {
 		t.Fatalf("symlink rootfs: %v", err)
 	}
+	if _, err := os.Lstat(partialLink); !os.IsNotExist(err) {
+		t.Fatalf("symlink partial: %v", err)
+	}
 	for _, pair := range []struct{ path, body string }{
 		{data, "data"},
-		{partial, "part"},
 		{sized, "sized"},
 		{orphan, "orphan"},
 	} {
@@ -309,6 +363,9 @@ func TestDropUnmountedRootfs(t *testing.T) {
 	if _, err := os.Lstat(kept.priv); !os.IsNotExist(err) {
 		t.Fatalf("private rootfs after failed create: %v", err)
 	}
+	if _, err := os.Lstat(kept.partial); !os.IsNotExist(err) {
+		t.Fatalf("partial rootfs after failed create: %v", err)
+	}
 	kept.unchanged(t)
 
 	present, err := NewID()
@@ -324,6 +381,9 @@ func TestDropUnmountedRootfs(t *testing.T) {
 	dropUnmountedRootfs(present, filepath.Dir(live.priv))
 	if b, err := os.ReadFile(live.priv); err != nil || string(b) != "priv" {
 		t.Fatalf("private rootfs while helper exists: %v %q", err, b)
+	}
+	if b, err := os.ReadFile(live.partial); err != nil || string(b) != "part" {
+		t.Fatalf("partial rootfs while helper exists: %v %q", err, b)
 	}
 	live.unchanged(t)
 }
@@ -370,7 +430,6 @@ func plantRootfsFixture(t *testing.T, root, id string) rootfsFixture {
 func (fx rootfsFixture) unchanged(t *testing.T) {
 	t.Helper()
 	for _, pair := range []struct{ path, body string }{
-		{fx.partial, "part"},
 		{fx.data, "data"},
 		{fx.sized, "sized"},
 		{fx.orphan, "orphan"},
