@@ -57,22 +57,46 @@ func EnsureSquid(root string) error {
 	return nil
 }
 
+// EnsureNetTools builds the iptables image once. A later create reuses it
+// while the Dockerfile stamp is unchanged.
 func EnsureNetTools(root string) error {
-	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err == nil {
-		return nil
-	}
 	dir := filepath.Join(CacheDir(root), "nettools-build")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
+	stamp := filepath.Join(dir, "Dockerfile")
 	// busybox-extras supplies /usr/sbin/httpd. The base busybox has no httpd applet,
 	// and the strong helper serves the gate CA with it when HTTPS is open.
 	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iproute2 busybox-extras\n"
-	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
+	have := false
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err == nil {
+		have = true
+	}
+	old, readErr := os.ReadFile(stamp)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
+	}
+	if have && readErr == nil && string(old) == df {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	_, err := Docker(3*time.Minute, "build", "-t", NetToolsImage, dir)
-	return err
+	// Docker reads the Dockerfile from the context before the build. Leave the
+	// new bytes as the stamp only when that build succeeds; a failure restores
+	// the previous stamp, or removes it when there was none, so the next
+	// create tries again instead of trusting the old image.
+	if err := os.WriteFile(stamp, []byte(df), 0o644); err != nil {
+		return err
+	}
+	if _, err := Docker(3*time.Minute, "build", "-t", NetToolsImage, dir); err != nil {
+		if os.IsNotExist(readErr) {
+			if rmErr := os.Remove(stamp); rmErr != nil && !os.IsNotExist(rmErr) {
+				return fmt.Errorf("%w\nremove Dockerfile: %v", err, rmErr)
+			}
+		} else if werr := os.WriteFile(stamp, old, 0o644); werr != nil {
+			return fmt.Errorf("%w\nrestore Dockerfile: %v", err, werr)
+		}
+		return err
+	}
+	return nil
 }
 
 // The gate image declares volumes. -v removes those anonymous ones; bind mounts stay.

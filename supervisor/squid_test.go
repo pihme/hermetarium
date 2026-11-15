@@ -171,3 +171,104 @@ func TestWaitSquidChmodSucceedsOnlyWhenBothLogsExist(t *testing.T) {
 		t.Fatalf("chmod calls = %d, want one call after both logs exist", chmods)
 	}
 }
+
+func TestEnsureNetToolsStamp(t *testing.T) {
+	t.Run("rebuilds when the stamp differs", func(t *testing.T) {
+		root := t.TempDir()
+		stamp := filepath.Join(CacheDir(root), "nettools-build", "Dockerfile")
+		if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		old := "FROM alpine:old\nRUN apk add --no-cache iptables iproute2\n"
+		if err := os.WriteFile(stamp, []byte(old), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var builds int
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "inspect" {
+				return "sha", nil
+			}
+			if len(args) > 0 && args[0] == "build" {
+				builds++
+				b, err := os.ReadFile(stamp)
+				if err != nil {
+					t.Errorf("read stamp during build: %v", err)
+				} else if !strings.Contains(string(b), "busybox-extras") {
+					t.Errorf("build context:\n%s", b)
+				}
+				return "ok", nil
+			}
+			return "", fmt.Errorf("unexpected docker %v", args)
+		})
+		if err := EnsureNetTools(root); err != nil {
+			t.Fatal(err)
+		}
+		if builds != 1 {
+			t.Fatalf("builds = %d, want 1", builds)
+		}
+		b, err := os.ReadFile(stamp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(b) == old || !strings.Contains(string(b), "busybox-extras") {
+			t.Fatalf("stamp after success:\n%s", b)
+		}
+		if err := EnsureNetTools(root); err != nil {
+			t.Fatal(err)
+		}
+		if builds != 1 {
+			t.Fatalf("builds = %d, want no second build once the stamp matches", builds)
+		}
+	})
+
+	t.Run("restores the stamp when the build fails", func(t *testing.T) {
+		root := t.TempDir()
+		stamp := filepath.Join(CacheDir(root), "nettools-build", "Dockerfile")
+		if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		old := "FROM alpine:old\n"
+		if err := os.WriteFile(stamp, []byte(old), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "inspect" {
+				return "sha", nil
+			}
+			if len(args) > 0 && args[0] == "build" {
+				return "", fmt.Errorf("build failed")
+			}
+			return "", fmt.Errorf("unexpected docker %v", args)
+		})
+		if err := EnsureNetTools(root); err == nil || !strings.Contains(err.Error(), "build failed") {
+			t.Fatalf("got %v", err)
+		}
+		b, err := os.ReadFile(stamp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != old {
+			t.Fatalf("stamp = %q, want previous %q", b, old)
+		}
+	})
+
+	t.Run("removes a new stamp when the first build fails", func(t *testing.T) {
+		root := t.TempDir()
+		stamp := filepath.Join(CacheDir(root), "nettools-build", "Dockerfile")
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "inspect" {
+				return "", fmt.Errorf("no such image")
+			}
+			if len(args) > 0 && args[0] == "build" {
+				return "", fmt.Errorf("build failed")
+			}
+			return "", fmt.Errorf("unexpected docker %v", args)
+		})
+		if err := EnsureNetTools(root); err == nil || !strings.Contains(err.Error(), "build failed") {
+			t.Fatalf("got %v", err)
+		}
+		if _, err := os.Stat(stamp); !os.IsNotExist(err) {
+			t.Fatalf("stamp should be removed, stat err: %v", err)
+		}
+	})
+}
