@@ -108,13 +108,17 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		return nil, err
 	}
 
+	// Docker keeps 127.0.0.11 on an --internal network and answers outside
+	// names with SERVFAIL. Mount the gate resolver before the image command.
+	resolv := filepath.Join(dir, "resolv.conf")
+	if err := os.WriteFile(resolv, []byte("nameserver "+sub.Gate+"\n"), 0o644); err != nil {
+		return nil, err
+	}
 	boxArgs := []string{
 		"run", "-d", "--name", box,
 		"--network", network, "--ip", sub.Box,
 		"--cap-add", "NET_ADMIN",
-		// The process starts before the resolv.conf rewrite below. Docker's
-		// resolver on this internal network does not answer outside names.
-		"--dns", sub.Gate,
+		"-v", resolv + ":/etc/resolv.conf:ro",
 		"--add-host", ProbeHost + ":" + sub.Gate,
 	}
 	for _, h := range VendorHosts() {
@@ -130,11 +134,10 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if _, err := Docker(30*time.Second, boxArgs...); err != nil {
 		return nil, err
 	}
-	// Docker's resolver on this internal network does not answer outside names.
+	// resolv.conf is mounted read-only. This only installs the default route.
 	if _, err := Docker(15*time.Second,
 		"exec", box, "sh", "-c",
-		"ip route replace default via "+sub.Gate+" || ip route add default via "+sub.Gate+
-			"; printf 'nameserver "+sub.Gate+"\\n' > /etc/resolv.conf",
+		"ip route replace default via "+sub.Gate+" || ip route add default via "+sub.Gate,
 	); err != nil {
 		return nil, err
 	}

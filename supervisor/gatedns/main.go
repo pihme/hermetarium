@@ -55,6 +55,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer tcp.Close()
+	// The strong wall waits for this before it starts the guest.
+	if err := os.WriteFile("/log/dns.ready", nil, 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "gatedns:", err)
+		os.Exit(1)
+	}
 	go g.serveTCP(tcp)
 	buf := make([]byte, 4096)
 	for {

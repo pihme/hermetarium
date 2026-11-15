@@ -21,13 +21,8 @@ func TestGateDNS(t *testing.T) {
 	// One executable. The strong wall runs the image command with a shell
 	// split, so a sh -c script would lose every word after the first.
 	script := "#!/bin/sh\n" +
-		"i=0\n" +
-		"while [ \"$i\" -lt 50 ]; do\n" +
 		"ns=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf)\n" +
-		"if [ -n \"$ns\" ] && [ \"$ns\" != 127.0.0.11 ]; then break; fi\n" +
-		"sleep 0.1\n" +
-		"i=$((i+1))\n" +
-		"done\n" +
+		"echo DNS_NS=$ns\n" +
 		"echo DNS_EXAMPLE=$(getent hosts example.com | awk '{print $1; exit}')\n" +
 		"echo DNS_PROBE=$(nslookup probe.hermetarium.test 2>/dev/null | awk 'BEGIN{p=0} /^$/{p=1; next} p && /Address/ {print $NF; exit}')\n" +
 		"echo DNS_LOCAL=$(awk '/^127\\.0\\.0\\.1[[:space:]]/ {print $1; exit}' /etc/hosts)\n" +
@@ -92,6 +87,10 @@ func TestGateDNS(t *testing.T) {
 					dir, gate = inst.Dir, strongGateIP
 				}
 				logs := waitMarker(t, wall, id, "DNS_DONE")
+				ns := markerValue(logs, "DNS_NS")
+				if ns == "" || ns == "127.0.0.11" {
+					t.Fatalf("nameserver %q\n%s", ns, logs)
+				}
 				if markerValue(logs, "DNS_DIRECT") != "FAIL" {
 					t.Fatalf("query to 1.1.1.1 was answered\n%s", logs)
 				}
