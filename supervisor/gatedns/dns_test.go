@@ -631,8 +631,47 @@ func TestDNSLogCap(t *testing.T) {
 	if len(prev) == 0 || int64(len(prev)) > g.logCap {
 		t.Fatalf("rotated size %d", len(prev))
 	}
+	// A size counter that is not cleared rotates on every later line, so
+	// .1 is one line instead of a generation near the cap.
+	if int64(len(prev))*2 <= g.logCap {
+		t.Fatalf("rotated file %d, want it near the cap %d", len(prev), g.logCap)
+	}
+	if strings.Count(string(prev), "\n") < 2 {
+		t.Fatalf("rotated file kept one line: %s", prev)
+	}
 	if _, err := os.Stat(path + ".2"); !os.IsNotExist(err) {
 		t.Fatal("kept more than one previous log")
+	}
+	rotated := false
+	for i := 0; i < 30; i++ {
+		before, err := os.ReadFile(path + ".1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.answer(dnsQuery(fmt.Sprintf("p%02d.example", i), 1), false)
+		after, err := os.ReadFile(path + ".1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			rotated = true
+			break
+		}
+	}
+	if !rotated {
+		t.Fatal("log did not rotate")
+	}
+	for i := 0; i < 3; i++ {
+		g.answer(dnsQuery(fmt.Sprintf("stay%d.example", i), 1), false)
+	}
+	cur, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"stay0.example", "stay1.example", "stay2.example"} {
+		if !bytes.Contains(cur, []byte(name)) {
+			t.Fatalf("current file dropped %s after rotation: %s", name, cur)
+		}
 	}
 }
 
