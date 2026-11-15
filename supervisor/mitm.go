@@ -62,10 +62,8 @@ func PrepareMITM(dir string) error {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	mitm := filepath.Join(dir, "mitm")
 	pub := filepath.Join(dir, "mitm-pub")
-	for _, path := range []string{mitm, mitm + ".replaced"} {
-		if err := removeTree(path); err != nil {
-			return err
-		}
+	if err := removeTree(mitm); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(mitm, 0o755); err != nil {
 		return err

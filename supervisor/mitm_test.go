@@ -78,21 +78,6 @@ func TestPrepareMITMAfterGateChown(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := parseCert(t, filepath.Join(dir, "mitm", "ca.pem"))
-	replaced := filepath.Join(dir, "mitm.replaced")
-	if err := os.MkdirAll(replaced, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	stranded := filepath.Join(replaced, "ca.key")
-	if err := os.WriteFile(stranded, []byte("stranded-private-key\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Docker(60*time.Second, "run", "--rm",
-		"-v", replaced+":/log",
-		"--entrypoint", "chown",
-		AlpineImage, "-R", "nobody:nobody", "/log",
-	); err != nil {
-		t.Fatal(err)
-	}
 	if err := PrepareMITM(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -116,9 +101,6 @@ func TestPrepareMITMAfterGateChown(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("ca.key mode %#o, want 0600", info.Mode().Perm())
-	}
-	if _, err := os.Stat(stranded); !os.IsNotExist(err) {
-		t.Fatalf("stranded ca.key still present: %v", err)
 	}
 	keyPEM, err := os.ReadFile(filepath.Join(dir, "mitm", "ca.key"))
 	if err != nil {
