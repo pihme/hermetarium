@@ -125,7 +125,9 @@ if [ -x /bin/busybox ]; then
   if /bin/busybox timeout 3 /bin/busybox wget -q -T 2 -O "$ca" "$ca_url"; then
     fetched=1
   fi
-elif command -v timeout >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+fi
+# A busybox with no wget or timeout applet must not hide curl.
+if [ "$fetched" -eq 0 ] && command -v timeout >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
   if timeout 3 curl -fsS --connect-timeout 1 --max-time 2 -o "$ca" "$ca_url"; then
     fetched=1
   fi
@@ -143,6 +145,8 @@ if [ "$fetched" -eq 1 ]; then
   export CURL_CA_BUNDLE="$ca"
   export GIT_SSL_CAINFO="$ca"
   export PIP_CERT="$ca"
+else
+  echo "fc-init: could not fetch the gate CA"
 fi
 cmd=$(cat /fc-cmd)
 echo "FC_CMD=$cmd"

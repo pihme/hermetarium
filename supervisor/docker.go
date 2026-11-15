@@ -8,7 +8,14 @@ import (
 	"time"
 )
 
+// dockerFn exists so tests can stub Docker.
+var dockerFn = runDockerCLI
+
 func Docker(timeout time.Duration, args ...string) (string, error) {
+	return dockerFn(timeout, args...)
+}
+
+func runDockerCLI(timeout time.Duration, args ...string) (string, error) {
 	if timeout <= 0 {
 		timeout = 3 * time.Minute
 	}

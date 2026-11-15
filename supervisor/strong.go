@@ -186,7 +186,13 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	return firecracker, kernel, nil
 }
 
-func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
+func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err error) {
+	// Return before the rootfs copy. A live htm-fc-<id> still has that
+	// file open, and a second copy would replace it.
+	helper := "htm-fc-" + id
+	if err := helperFree(helper); err != nil {
+		return nil, err
+	}
 	if err := EnsureImageExists(opts.Image); err != nil {
 		return nil, err
 	}
@@ -197,7 +203,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootfs, err := EnsureImageRootfs(root, opts.Image, diskMB(opts))
+	cached, err := EnsureImageRootfs(root, opts.Image, diskMB(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +217,16 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	if err := os.Chmod(dir, 0o777); err != nil {
 		return nil, err
 	}
+	if _, err := habitatRootfs(dir, cached); err != nil {
+		return nil, err
+	}
+	// The copy is in place before docker run. On a later error, remove it
+	// only when htm-fc-<id> does not exist. An existing helper keeps its disk.
+	defer func() {
+		if err != nil {
+			dropUnmountedRootfs(id, dir)
+		}
+	}()
 	logPath := filepath.Join(dir, "io.jsonl")
 	serialPath := filepath.Join(dir, "serial.log")
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
@@ -228,7 +244,6 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 			return nil, err
 		}
 	}
-	helper := "htm-fc-" + id
 	helpers, err := fcHelperDir(root)
 	if err != nil {
 		return nil, err
@@ -317,7 +332,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	helperArgs = append(helperArgs,
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
-		"-v", rootfs+":/opt/rootfs.ext4",
+		"-v", strongRootfsVolume(dir),
 	)
 	if opts.DataPath != "" {
 		helperArgs = append(helperArgs,
@@ -341,34 +356,34 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	}
 	if opts.DataPath != "" {
 		if err := waitDataClaim(dir, helper); err != nil {
-			_ = DestroyStrong(id)
+			endStrong(id, dir)
 			return nil, err
 		}
 	}
 
 	gate := "htm-gate-" + id
 	if err := runAfterGate(opts, id, helper); err != nil {
-		_ = DestroyStrong(id)
+		endStrong(id, dir)
 		return nil, err
 	}
 	if err := runSquid(root, gate, dir, []string{"--network", "container:" + helper}); err != nil {
-		_ = DestroyStrong(id)
+		endStrong(id, dir)
 		return nil, err
 	}
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
-		_ = DestroyStrong(id)
+		endStrong(id, dir)
 		return nil, err
 	}
 	if opts.DataPath != "" {
 		if err := waitDataMounted(helper); err != nil {
-			_ = DestroyStrong(id)
+			endStrong(id, dir)
 			return nil, err
 		}
 	}
 
 	url, err := finishInbound(helper, opts.NoInbound, 40*time.Second)
 	if err != nil {
-		_ = DestroyStrong(id)
+		endStrong(id, dir)
 		return nil, err
 	}
 	inst := &StrongInstance{
@@ -377,11 +392,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
 	if err != nil {
-		_ = DestroyStrong(id)
+		endStrong(id, dir)
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
-		_ = DestroyStrong(id)
+		endStrong(id, dir)
 		return nil, err
 	}
 	return inst, nil
@@ -395,6 +410,47 @@ func helperLogs(name string) string {
 func helperRunning(name string) bool {
 	out, err := Docker(5*time.Second, "inspect", "-f", "{{.State.Running}}", name)
 	return err == nil && strings.TrimSpace(out) == "true"
+}
+
+// helperFree is nil when no container has this name. Any other docker
+// error is returned so a dead daemon is not treated as absence.
+func helperFree(name string) error {
+	_, err := Docker(5*time.Second, "inspect", "-f", "{{.Id}}", name)
+	if err == nil {
+		return fmt.Errorf("%s already exists", name)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no such object") {
+		return nil
+	}
+	return err
+}
+
+// strongRootfsVolume is the helper bind. The host path is this habitat's
+// copy, var/<id>/rootfs.ext4, not the shared cache.
+func strongRootfsVolume(dir string) string {
+	return habitatRootfsPath(dir) + ":/opt/rootfs.ext4"
+}
+
+// endStrong removes the private rootfs only after htm-fc-<id> is gone.
+// DestroyStrong takes only an id, and tests pass a different root, so the
+// caller supplies the instance directory. The cache and the operator
+// --data file are not in that directory.
+func endStrong(id, dir string) {
+	_ = DestroyStrong(id)
+	dropUnmountedRootfs(id, dir)
+}
+
+// dropUnmountedRootfs removes the private rootfs when no helper container
+// has this id. The cache and the operator --data file are not in dir.
+func dropUnmountedRootfs(id, dir string) {
+	if err := helperFree("htm-fc-" + id); err != nil {
+		return
+	}
+	removePrivateRootfs(dir)
+}
+
+func removePrivateRootfs(dir string) {
+	_ = os.Remove(habitatRootfsPath(dir))
 }
 
 func WaitStrongSerial(inst *StrongInstance, timeout time.Duration) (string, error) {
@@ -426,29 +482,13 @@ func extraFC(inst *StrongInstance) string {
 }
 
 func ensureDataDisk(path string, sizeMiB int) error {
-	if strings.Contains(path, ":") {
-		return fmt.Errorf("data disk path %s must not contain ':'", path)
+	if err := dataDiskUsable(path); err != nil {
+		return err
 	}
 	if sizeMiB <= 0 {
 		sizeMiB = 1024
 	}
-	if st, err := os.Stat(path); err == nil {
-		if !st.Mode().IsRegular() {
-			return fmt.Errorf("data disk %s is not a file", path)
-		}
-		// 0xEF53 at byte 1080 is the ext4 superblock magic. Anything else
-		// stays unattached: a failed guest mount would otherwise write
-		// /data onto the shared rootfs cache.
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		var magic [2]byte
-		_, rerr := f.ReadAt(magic[:], 0x438)
-		f.Close()
-		if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
-			return fmt.Errorf("data disk %s is not ext4", path)
-		}
+	if _, err := os.Stat(path); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
@@ -478,6 +518,39 @@ func ensureDataDisk(path string, sizeMiB int) error {
 	return os.Chmod(path, 0o600)
 }
 
+// dataDiskUsable accepts a missing path or a regular ext4 file.
+// It creates nothing. Call it before the lock file is created: a refused
+// disk must not leave path.lock beside the operator's file.
+func dataDiskUsable(path string) error {
+	if strings.Contains(path, ":") {
+		return fmt.Errorf("data disk path %s must not contain ':'", path)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("data disk %s is not a file", path)
+	}
+	// 0xEF53 at byte 1080 is the ext4 superblock magic. Anything else
+	// stays unattached: a failed guest mount would otherwise write
+	// /data onto the shared rootfs cache.
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	var magic [2]byte
+	_, rerr := f.ReadAt(magic[:], 0x438)
+	f.Close()
+	if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
+		return fmt.Errorf("data disk %s is not ext4", path)
+	}
+	return nil
+}
+
 // lockDataDisk holds an exclusive POSIX lock on path.lock until the caller
 // closes it. flock does not conflict with that lock, so the helper can
 // still flock the file for the life of the VM. A second open of this file
@@ -485,6 +558,9 @@ func ensureDataDisk(path string, sizeMiB int) error {
 // the POSIX lock. The in-use probe is therefore a flock on this same
 // descriptor, released before the helper's own nonblocking flock.
 func lockDataDisk(path string) (*os.File, error) {
+	if err := dataDiskUsable(path); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -538,7 +614,8 @@ func waitDataMounted(helper string) error {
 	for time.Now().Before(deadline) {
 		logs = helperLogs(helper)
 		if strings.Contains(logs, "DATA_MOUNT_FAIL") {
-			return fmt.Errorf("data disk did not mount")
+			// Destroy removes the helper, and docker logs with it.
+			return dataMountFailure(logs)
 		}
 		if strings.Contains(logs, "DATA_MOUNT_OK") {
 			return nil
@@ -549,6 +626,16 @@ func waitDataMounted(helper string) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("data disk was not mounted: %s", logs)
+}
+
+// dataMountFailure keeps the guest's reason. The tail is enough: the mount
+// error and DATA_MOUNT_FAIL are written at the end of the serial log.
+func dataMountFailure(logs string) error {
+	const max = 4000
+	if len(logs) > max {
+		logs = logs[len(logs)-max:]
+	}
+	return fmt.Errorf("data disk did not mount: %s", strings.TrimSpace(logs))
 }
 
 func DestroyStrong(id string) error {
