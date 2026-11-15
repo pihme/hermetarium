@@ -77,7 +77,9 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		return "", err
 	}
-	_, err = Docker(3*time.Minute, "run", "--rm", "--privileged",
+	// mke2fs -d copies a directory into the ext4 file. Mounting that file
+	// would need a privileged container, which is host root outside the wall.
+	_, err = Docker(3*time.Minute, "run", "--rm",
 		"-e", fmt.Sprintf("SIZE_MB=%d", sizeMB),
 		"-v", script+":/pack-oci.sh:ro",
 		"-v", work+":/in",
