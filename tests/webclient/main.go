@@ -24,8 +24,8 @@ func main() {
 		}
 	}
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
-	showCert("api.github.com")
-	showCert("pinned.example")
+	showUnverifiedCert("api.github.com")
+	showUnverifiedCert("pinned.example")
 	call(client, http.MethodPost, "https://api.github.com/user/repos")
 	call(client, http.MethodDelete, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
@@ -33,14 +33,14 @@ func main() {
 	fmt.Println("WEB_DONE")
 }
 
-func showCert(host string) {
+func showUnverifiedCert(host string) {
 	// Skip verify so a passed-through certificate is still reported.
 	var last error
 	for attempt := 0; attempt < 8; attempt++ {
 		if attempt > 0 {
 			time.Sleep(300 * time.Millisecond)
 		}
-		conn, err := tls.Dial("tcp", host+":443", &tls.Config{ServerName: host, InsecureSkipVerify: true}) // codeql[go/disabled-certificate-check]
+		conn, err := tls.Dial("tcp", host+":443", &tls.Config{ServerName: host, InsecureSkipVerify: true})
 		if err != nil {
 			last = err
 			continue
