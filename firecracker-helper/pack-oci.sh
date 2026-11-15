@@ -4,8 +4,8 @@
 set -eu
 SIZE_MB="${SIZE_MB:-256}"
 apk add --no-cache e2fsprogs tar >/dev/null
-# A full write of a large disk is what made create slow.
 truncate -s "${SIZE_MB}M" /out/rootfs.ext4
+# mkfs must not allocate the journal and inode tables.
 mkfs.ext4 -F -E lazy_itable_init=1,lazy_journal_init=1 /out/rootfs.ext4 >/dev/null
 mkdir -p /rootfs
 mount /out/rootfs.ext4 /rootfs

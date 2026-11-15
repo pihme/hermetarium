@@ -205,5 +205,7 @@ func usage() {
        hermetarium logs <id>
        hermetarium destroy <id>
        hermetarium version
+
+--cpus N works on both walls: that many processors in the virtual machine, or that CPU quota on Docker. The default is one processor, and no Docker quota.
 `)
 }

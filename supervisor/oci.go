@@ -33,7 +33,7 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 		return "", err
 	}
 	script := filepath.Join(helpers, "pack-oci.sh")
-	if st, err := os.Stat(dest); err == nil && st.Size() > 10_000 {
+	if st, err := os.Stat(dest); err == nil && st.Size() == int64(sizeMB)<<20 {
 		if sc, err := os.Stat(script); err == nil && !st.ModTime().Before(sc.ModTime()) {
 			return dest, nil
 		}
@@ -72,26 +72,24 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	if err := os.WriteFile(filepath.Join(work, "fc-env"), []byte(env), 0o644); err != nil {
 		return "", err
 	}
+	// Size in the directory so two --disk packs do not share one temp file.
+	stage := filepath.Join(work, fmt.Sprintf("rootfs-%d.ext4.d", sizeMB))
+	if err := os.MkdirAll(stage, 0o755); err != nil {
+		return "", err
+	}
 	_, err = Docker(3*time.Minute, "run", "--rm", "--privileged",
 		"-e", fmt.Sprintf("SIZE_MB=%d", sizeMB),
 		"-v", script+":/pack-oci.sh:ro",
 		"-v", work+":/in",
-		"-v", work+":/out",
+		"-v", stage+":/out",
 		AlpineImage, "sh", "/pack-oci.sh",
 	)
 	if err != nil {
 		return "", err
 	}
-	packed := filepath.Join(work, "rootfs.ext4")
-	_ = os.Remove(dest)
+	packed := filepath.Join(stage, "rootfs.ext4")
 	if err := os.Rename(packed, dest); err != nil {
-		b, rerr := os.ReadFile(packed)
-		if rerr != nil {
-			return "", err
-		}
-		if err := os.WriteFile(dest, b, 0o644); err != nil {
-			return "", err
-		}
+		return "", err
 	}
 	return dest, nil
 }
