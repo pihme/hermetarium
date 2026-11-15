@@ -109,7 +109,7 @@ func TestWaitSquidRetriesMissingLogUntilDeadline(t *testing.T) {
 	}
 }
 
-func TestWaitSquidReturnsChmodImageError(t *testing.T) {
+func TestWaitSquidReturnsChmodError(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"squid.pid", "access.log", "cache.log"} {
 		writeGateFile(t, dir, name)
@@ -121,12 +121,12 @@ func TestWaitSquidReturnsChmodImageError(t *testing.T) {
 		}
 		if strings.Contains(strings.Join(args, " "), "chmod") {
 			chmods++
-			return "", fmt.Errorf("Unable to find image 'hermetarium-nettools:local'")
+			return "", fmt.Errorf("docker [exec -u root gate chmod a+r /log/access.log /log/cache.log]\nError response from daemon: No such container: gate\nexit status 1")
 		}
 		return "", nil
 	})
 	err := WaitSquid(dir, "gate", 600*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "Unable to find image") {
+	if err == nil || !strings.Contains(err.Error(), "No such container") {
 		t.Fatalf("got %v", err)
 	}
 	if chmods < 2 {

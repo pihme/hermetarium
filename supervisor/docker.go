@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// dockerFn is the Docker CLI. Tests replace it so a missing image can fail
-// create without pulling hermetarium-nettools.
+// dockerFn exists so tests can stub Docker.
 var dockerFn = runDockerCLI
 
 func Docker(timeout time.Duration, args ...string) (string, error) {
