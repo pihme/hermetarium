@@ -40,6 +40,9 @@ In-process. No Docker habitat.
 | `TestVersionCommand` | `version` exits 0 and prints `supervisor.Version`. |
 | `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the embedded helper Dockerfile. |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
+| `TestGateFilesHardened` | Shipped gate files do not set `DONT_VERIFY_PEER` or `dns_v4_first`, and no active line uses `myport`. |
+| `TestSquidStartupQuiet` | Needs Docker. Squid started with the echo gate file does not log the `myport` or `dns_v4_first` warnings. |
+| `TestUntrustedVendorGetsNoKey` | Needs Docker. A vendor certificate the gate does not trust gets no request and no key. The same certificate trusted via `tls-cafile` does. |
 | `TestInstallACL` | An empty ACL path fails. A file is copied to `<instance>/squid.conf`. |
 | `TestInstallACLMissingFile` | A missing ACL path fails with `read ACL`. |
 | `TestRootEnvWins` | `HERMETARIUM_ROOT` is the data root. Cache is `<root>/.cache`. |
@@ -68,7 +71,7 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 
 **Weak.** `ping -c 1 -W 2 1.1.1.1` exits non-zero in the box, while a TCP connect to `1.1.1.1:443` from the gate succeeds (the gate is the only way out). `harness.AssertNeighborBlocked`: a `busybox` container on Docker's default bridge cannot connect to the gate on ports 3128, 3129, 18081 or 80. `curl` of `http://probe.hermetarium.test/hello` returns `hermetarium-ok`. The I/O log contains destination `probe.hermetarium.test` or the gate IP. Then the echo exercise below.
 
-**Strong.** Guest serial shows `GUEST_UNAME` different from the host kernel in `/proc/sys/kernel/osrelease`, and contains `LEAK_FAIL`. `harness.AssertNeighborBlocked` on the helper container, as on the weak wall. Then the echo exercise. The strong guest does not fetch the probe.
+**Strong.** Guest serial shows `GUEST_UNAME` different from the host kernel in `/proc/sys/kernel/osrelease`, and contains `LEAK_FAIL`. The helper container's `HostConfig.Privileged` is false. `harness.AssertNeighborBlocked` on the helper container, as on the weak wall. Then the echo exercise. The strong guest does not fetch the probe.
 
 **Image.** The same echo image passed as `CreateOpts.Image` with `examples/echo/squid.conf` and no probe sidecar. Echo exercise only.
 

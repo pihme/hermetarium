@@ -167,7 +167,8 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 			return errWait("squid container exited: " + out + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 		}
 		if _, err := os.Stat(pid); err == nil {
-			chmodLogs(logDir)
+			// cache.log may not exist yet. Readiness is the pid, not the chmod.
+			_ = chmodLogs(logDir)
 			return nil
 		}
 		last = "waiting for " + pid
@@ -177,9 +178,10 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 	return errWait("squid not ready: " + last + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 }
 
-func chmodLogs(logDir string) {
-	DockerIgnore("run", "--rm", "-v", logDir+":/log", NetToolsImage,
+func chmodLogs(logDir string) error {
+	_, err := Docker(30*time.Second, "run", "--rm", "-v", logDir+":/log", NetToolsImage,
 		"chmod", "a+r", "/log/access.log", "/log/cache.log")
+	return err
 }
 
 func tailHostFile(path string) string {

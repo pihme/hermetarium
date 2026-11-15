@@ -174,8 +174,14 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 
 	helperArgs := []string{
 		"run", "-d", "--name", helper,
-		"--privileged",
 		"--device", "/dev/kvm",
+		"--device", "/dev/net/tun",
+		"--cap-add", "NET_ADMIN",
+		// /proc/sys is read-only in this container. default/ is copied onto
+		// tap0 when it appears, and the kernel uses max(all, interface).
+		"--sysctl", "net.ipv4.ip_forward=1",
+		"--sysctl", "net.ipv4.conf.all.rp_filter=0",
+		"--sysctl", "net.ipv4.conf.default.rp_filter=0",
 		"--entrypoint", "sh",
 	}
 	helperArgs = append(helperArgs, inboundPublish(opts.NoInbound)...)
