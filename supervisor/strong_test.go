@@ -79,6 +79,84 @@ func TestEnsureDataDisk(t *testing.T) {
 	}
 }
 
+func TestRefusedDataDiskLeavesNoLock(t *testing.T) {
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "not-ext4")
+	body := []byte("not a filesystem")
+	if err := os.WriteFile(bad, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockDataDisk(bad); err == nil || !strings.Contains(err.Error(), "not ext4") {
+		t.Fatalf("non-ext4: %v", err)
+	}
+	left, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].Name() != "not-ext4" {
+		var names []string
+		for _, e := range left {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("directory after refuse: %v", names)
+	}
+	got, err := os.ReadFile(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("file changed: %q", got)
+	}
+
+	sub := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockDataDisk(sub); err == nil || !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("directory: %v", err)
+	}
+	if _, err := os.Stat(sub + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock left beside directory: %v", err)
+	}
+
+	good := filepath.Join(dir, "ok.ext4")
+	f, err := os.OpenFile(good, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{0x53, 0xEF}, 0x438); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	held, err := lockDataDisk(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held.Close()
+	if _, err := os.Stat(good + ".lock"); err != nil {
+		t.Fatalf("valid ext4 did not lock: %v", err)
+	}
+}
+
+func TestDataMountFailureIncludesGuestReason(t *testing.T) {
+	reason := "mount: mounting /dev/vdb on /data failed: Invalid argument\nDATA_MOUNT_FAIL\n"
+	logs := strings.Repeat("kernel line\n", 800) + reason
+	err := dataMountFailure(logs)
+	msg := err.Error()
+	if !strings.Contains(msg, "did not mount") || !strings.Contains(msg, "DATA_MOUNT_FAIL") || !strings.Contains(msg, "Invalid argument") {
+		t.Fatal(msg)
+	}
+	if strings.Contains(msg, strings.Repeat("kernel line\n", 800)) {
+		t.Fatal("error included the whole serial log")
+	}
+	short := dataMountFailure("mount: failed\nDATA_MOUNT_FAIL\n")
+	if !strings.Contains(short.Error(), "mount: failed") || !strings.Contains(short.Error(), "DATA_MOUNT_FAIL") {
+		t.Fatal(short)
+	}
+}
+
 func TestDataDiskLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "disk.ext4")
 	heldFlock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)

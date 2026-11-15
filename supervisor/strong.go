@@ -408,29 +408,13 @@ func extraFC(inst *StrongInstance) string {
 }
 
 func ensureDataDisk(path string, sizeMiB int) error {
-	if strings.Contains(path, ":") {
-		return fmt.Errorf("data disk path %s must not contain ':'", path)
+	if err := dataDiskUsable(path); err != nil {
+		return err
 	}
 	if sizeMiB <= 0 {
 		sizeMiB = 1024
 	}
-	if st, err := os.Stat(path); err == nil {
-		if !st.Mode().IsRegular() {
-			return fmt.Errorf("data disk %s is not a file", path)
-		}
-		// 0xEF53 at byte 1080 is the ext4 superblock magic. Anything else
-		// stays unattached: a failed guest mount would otherwise write
-		// /data onto the shared rootfs cache.
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		var magic [2]byte
-		_, rerr := f.ReadAt(magic[:], 0x438)
-		f.Close()
-		if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
-			return fmt.Errorf("data disk %s is not ext4", path)
-		}
+	if _, err := os.Stat(path); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
@@ -460,6 +444,39 @@ func ensureDataDisk(path string, sizeMiB int) error {
 	return os.Chmod(path, 0o600)
 }
 
+// dataDiskUsable accepts a missing path or a regular ext4 file.
+// It creates nothing. Call it before the lock file is created: a refused
+// disk must not leave path.lock beside the operator's file.
+func dataDiskUsable(path string) error {
+	if strings.Contains(path, ":") {
+		return fmt.Errorf("data disk path %s must not contain ':'", path)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("data disk %s is not a file", path)
+	}
+	// 0xEF53 at byte 1080 is the ext4 superblock magic. Anything else
+	// stays unattached: a failed guest mount would otherwise write
+	// /data onto the shared rootfs cache.
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	var magic [2]byte
+	_, rerr := f.ReadAt(magic[:], 0x438)
+	f.Close()
+	if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
+		return fmt.Errorf("data disk %s is not ext4", path)
+	}
+	return nil
+}
+
 // lockDataDisk holds an exclusive POSIX lock on path.lock until the caller
 // closes it. flock does not conflict with that lock, so the helper can
 // still flock the file for the life of the VM. A second open of this file
@@ -467,6 +484,9 @@ func ensureDataDisk(path string, sizeMiB int) error {
 // the POSIX lock. The in-use probe is therefore a flock on this same
 // descriptor, released before the helper's own nonblocking flock.
 func lockDataDisk(path string) (*os.File, error) {
+	if err := dataDiskUsable(path); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -520,7 +540,8 @@ func waitDataMounted(helper string) error {
 	for time.Now().Before(deadline) {
 		logs = helperLogs(helper)
 		if strings.Contains(logs, "DATA_MOUNT_FAIL") {
-			return fmt.Errorf("data disk did not mount")
+			// Destroy removes the helper, and docker logs with it.
+			return dataMountFailure(logs)
 		}
 		if strings.Contains(logs, "DATA_MOUNT_OK") {
 			return nil
@@ -531,6 +552,16 @@ func waitDataMounted(helper string) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("data disk was not mounted: %s", logs)
+}
+
+// dataMountFailure keeps the guest's reason. The tail is enough: the mount
+// error and DATA_MOUNT_FAIL are written at the end of the serial log.
+func dataMountFailure(logs string) error {
+	const max = 4000
+	if len(logs) > max {
+		logs = logs[len(logs)-max:]
+	}
+	return fmt.Errorf("data disk did not mount: %s", strings.TrimSpace(logs))
 }
 
 func DestroyStrong(id string) error {
