@@ -79,6 +79,9 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "echo DATA_MOUNT_OK") {
 		t.Fatal("pack-oci.sh missing DATA_MOUNT_OK")
 	}
+	if !strings.Contains(string(b), "nameserver 172.16.0.1") || !strings.Contains(string(b), "127.0.0.1 localhost") {
+		t.Fatal("pack-oci.sh missing gate resolver or localhost")
+	}
 	if !strings.Contains(string(b), "GUEST_RNG=") || !strings.Contains(string(b), "/fc-getrandom") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_OK") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_SKIPPED") {
 		t.Fatal("pack-oci.sh must record virtio-rng and a bounded getrandom")
 	}

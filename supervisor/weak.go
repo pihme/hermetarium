@@ -101,14 +101,24 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
 		return nil, err
 	}
+	if err := startGateDNS(root, id, gate, gate, sub.Gate, conf); err != nil {
+		return nil, err
+	}
 	if err := runAfterGate(opts, id, gate); err != nil {
 		return nil, err
 	}
 
+	// Docker keeps 127.0.0.11 on an --internal network and answers outside
+	// names with SERVFAIL. Mount the gate resolver before the image command.
+	resolv := filepath.Join(dir, "resolv.conf")
+	if err := os.WriteFile(resolv, []byte("nameserver "+sub.Gate+"\n"), 0o644); err != nil {
+		return nil, err
+	}
 	boxArgs := []string{
 		"run", "-d", "--name", box,
 		"--network", network, "--ip", sub.Box,
 		"--cap-add", "NET_ADMIN",
+		"-v", resolv + ":/etc/resolv.conf:ro",
 		"--add-host", ProbeHost + ":" + sub.Gate,
 	}
 	for _, h := range VendorHosts() {
@@ -124,6 +134,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if _, err := Docker(30*time.Second, boxArgs...); err != nil {
 		return nil, err
 	}
+	// resolv.conf is mounted read-only. This only installs the default route.
 	if _, err := Docker(15*time.Second,
 		"exec", box, "sh", "-c",
 		"ip route replace default via "+sub.Gate+" || ip route add default via "+sub.Gate,
@@ -167,6 +178,7 @@ func DestroyWeak(id string) error {
 	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
+	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("network", "rm", "htm-"+id)
 	return nil

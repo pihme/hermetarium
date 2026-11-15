@@ -4,20 +4,23 @@ PVER ?= $(shell git describe --tags --match 'porter/v*' --always --dirty 2>/dev/
 HVER := $(patsubst hermetarium/v%,%,$(HVER))
 PVER := $(patsubst porter/v%,%,$(PVER))
 
-.PHONY: test test-live build tidy echo-image fcattach
+.PHONY: test test-live build tidy echo-image fcattach gatedns
 
 ECHO_IMAGE ?= hermetarium/echo:dev
 
 fcattach:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags='-s -w -buildid=' -o supervisor/fcattach.bin ./supervisor/fcattach
 
-build: fcattach
+gatedns:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags='-s -w -buildid=' -o supervisor/gatedns.bin ./supervisor/gatedns
+
+build: fcattach gatedns
 	$(GO) build -ldflags='-s -w -X github.com/pihme/hermetarium/supervisor.Version=$(HVER)' -o bin/hermetarium ./supervisor/cmd/hermetarium
 	$(GO) build -ldflags='-s -w -X main.Version=$(PVER)' -o bin/porter ./porter
 
-TEST_PKGS ?= ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/...
+TEST_PKGS ?= ./supervisor ./supervisor/gatedns ./firecracker-helper ./examples/... ./porter ./tests/...
 
-test: fcattach
+test: fcattach gatedns
 	$(GO) test $(TEST_PKGS) -count=1 -p 1 -timeout 15m -v
 
 test-live:

@@ -39,6 +39,7 @@ const (
 var fcPin = fcSHA256
 
 const strongGuestIP = "172.16.0.2"
+const strongGateIP = "172.16.0.1"
 
 type StrongInstance struct {
 	ID         string `json:"id"`
@@ -388,6 +389,25 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		endStrong(id, dir)
 		return nil, err
 	}
+	// squid.pid starts Firecracker before WaitSquid returns. Joining a
+	// helper that has already exited hides the boot error.
+	inboundTimeout := 40 * time.Second
+	if !helperRunning(helper) {
+		err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
+			return helperLogs(helper), helperRunning(helper)
+		})
+		_ = DestroyStrong(id)
+		return nil, err
+	}
+	if err := startGateDNS(root, id, helper, gate, strongGateIP, conf); err != nil {
+		if !helperRunning(helper) {
+			err = waitGuestUname(dir, inboundTimeout, func() (string, bool) {
+				return helperLogs(helper), helperRunning(helper)
+			})
+		}
+		_ = DestroyStrong(id)
+		return nil, err
+	}
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		endStrong(id, dir)
 		return nil, err
@@ -401,7 +421,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 
 	// No inbound port, so the serial line is the signal the guest reached
 	// user space. It is printed only after a data disk has mounted.
-	inboundTimeout := 40 * time.Second
 	if opts.NoInbound {
 		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 			return helperLogs(helper), helperRunning(helper)
@@ -751,6 +770,7 @@ func dataMountFailure(logs string) error {
 func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
+	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)
 	return nil
