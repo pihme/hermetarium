@@ -68,6 +68,12 @@ case "$ATTACH_MODE" in
   noroute)
     echo "ssh: connect to host 172.16.0.2 port 22: No route to host" >&2
     ;;
+  unreachable)
+    echo "ssh: connect to host 172.16.0.2 port 22: Network is unreachable" >&2
+    ;;
+  reset)
+    echo "ssh: connect to host 172.16.0.2 port 22: Connection reset by peer" >&2
+    ;;
   denied)
     echo "root@172.16.0.2: Permission denied (publickey)." >&2
     ;;
@@ -106,7 +112,7 @@ exit 1
 		return string(out)
 	}
 
-	for _, mode := range []string{"refused", "timeout", "noroute", "denied", "nofsfreeze"} {
+	for _, mode := range []string{"refused", "timeout", "noroute", "unreachable", "reset", "denied", "nofsfreeze"} {
 		t.Run(mode, func(t *testing.T) {
 			out := run(t, mode)
 			if strings.Contains(out, "stayed frozen") {

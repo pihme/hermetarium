@@ -182,8 +182,11 @@ exec 3<>"$hold_fifo"
 # ssh client errors and a missing fsfreeze happen before fsfreeze -f.
 # A later failure may mean the guest froze /data and attach still failed.
 ssh_never_ran() {
+  # OpenSSH reports every failed TCP connect as
+  # "ssh: connect to host <host> port <port>: <strerror>". That is before
+  # fsfreeze -f, whatever the strerror is.
   grep -E -q \
-    'Connection refused|Connection timed out|Operation timed out|No route to host|Permission denied|Could not resolve hostname|Host key verification failed|kex_exchange_identification|banner exchange|exec: "ssh"' \
+    'ssh: connect to host |Permission denied|Could not resolve hostname|Host key verification failed|kex_exchange_identification|banner exchange|exec: "ssh"' \
     "$1"
 }
 
