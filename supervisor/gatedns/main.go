@@ -280,15 +280,25 @@ func parseQuestion(q []byte) (name, typ string, qend int, ok bool) {
 }
 
 func parseName(pkt []byte, off int) (string, int, bool) {
+	// Pointer jumps are the loop guard. A name is limited to 255 octets
+	// (RFC 1035), not to a fixed number of labels.
+	const maxJumps = 10
+	const maxName = 255
 	var labels []string
 	jumped := false
 	end := off
-	for hops := 0; hops < 10; hops++ {
+	nameLen := 0
+	jumps := 0
+	for {
 		if off >= len(pkt) {
 			return "", 0, false
 		}
 		n := int(pkt[off])
 		if n == 0 {
+			nameLen++
+			if nameLen > maxName {
+				return "", 0, false
+			}
 			if !jumped {
 				end = off + 1
 			}
@@ -296,6 +306,10 @@ func parseName(pkt []byte, off int) (string, int, bool) {
 		}
 		if n&0xC0 == 0xC0 {
 			if off+1 >= len(pkt) {
+				return "", 0, false
+			}
+			jumps++
+			if jumps > maxJumps {
 				return "", 0, false
 			}
 			if !jumped {
@@ -308,10 +322,13 @@ func parseName(pkt []byte, off int) (string, int, bool) {
 		if n&0xC0 != 0 || off+1+n > len(pkt) {
 			return "", 0, false
 		}
+		nameLen += 1 + n
+		if nameLen > maxName {
+			return "", 0, false
+		}
 		labels = append(labels, string(pkt[off+1:off+1+n]))
 		off += 1 + n
 	}
-	return "", 0, false
 }
 
 func typeName(t uint16) string {

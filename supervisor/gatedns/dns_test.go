@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"net"
 	"os"
 	"strings"
@@ -50,6 +51,9 @@ func TestForwardedResult(t *testing.T) {
 }
 
 func TestMalformedPacket(t *testing.T) {
+	if dnsWireLen(overlongName()) != 256 {
+		t.Fatalf("overlong wire length %d", dnsWireLen(overlongName()))
+	}
 	valid := dnsQuery("example.com", 1)
 	response := append([]byte(nil), valid...)
 	response[2] |= 0x80
@@ -63,9 +67,14 @@ func TestMalformedPacket(t *testing.T) {
 	}{
 		{"truncated-header", []byte{0x12, 0x34, 0x01, 0x00, 0, 1}},
 		{"truncated-body", short},
+		{"truncated-label", []byte{0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 5, 'a', 'b'}},
+		{"truncated-pointer", []byte{0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0}},
+		{"pointer-past-end", []byte{0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0, 0x40, 0, 1, 0, 1}},
+		{"reserved-prefix", []byte{0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0x80, 0, 1, 0, 1}},
 		{"response", response},
 		{"opcode", opcode},
 		{"pointer-loop", loop},
+		{"name-over-255", dnsQuery(overlongName(), 1)},
 	}
 	for _, open := range []bool{false, true} {
 		state := "closed"
@@ -84,6 +93,54 @@ func TestLongLabel(t *testing.T) {
 	q := dnsQuery(strings.Repeat("a", 64), 1)
 	for _, open := range []bool{false, true} {
 		assertNoOutsideAnswer(t, open, q)
+	}
+}
+
+func TestLongNamesAnswerAndLog(t *testing.T) {
+	cases := []struct {
+		name string
+		q    string
+	}{
+		{"9-labels", nameWithLabels(9)},
+		{"10-labels", nameWithLabels(10)},
+		{"11-labels", nameWithLabels(11)},
+		{"255-octets", maxWireName()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "255-octets" && dnsWireLen(tc.q) != 255 {
+				t.Fatalf("fixture wire length %d, want 255", dnsWireLen(tc.q))
+			}
+			q := dnsQuery(tc.q, 1)
+			parsed, _, qend, ok := parseQuestion(q)
+			if !ok || parsed != tc.q || qend != len(q) {
+				t.Fatalf("parse %q ok=%v end %d len %d", parsed, ok, qend, len(q))
+			}
+			assertLogged(t, false, tc.q, "NXDOMAIN", false)
+			assertLogged(t, true, tc.q, "SERVFAIL", true)
+		})
+	}
+}
+
+func TestLongStandInStillLocal(t *testing.T) {
+	name := nameWithLabels(10)
+	f := newLog(t)
+	g := &gateDNS{
+		open:  false,
+		gate:  net.ParseIP("172.16.0.1").To4(),
+		names: map[string]struct{}{name: {}},
+		log:   f,
+	}
+	resp := g.answer(dnsQuery(name, 1))
+	if len(resp) < 16 || resp[3]&0x0F != 0 {
+		t.Fatalf("stand-in len %d", len(resp))
+	}
+	if got := net.IP(resp[len(resp)-4:]).String(); got != "172.16.0.1" {
+		t.Fatalf("stand-in A %s", got)
+	}
+	rec := oneRecord(t, f)
+	if rec.Destination != name || rec.Result != "172.16.0.1" || !rec.Allowed {
+		t.Fatalf("rec %+v", rec)
 	}
 }
 
@@ -112,6 +169,94 @@ func assertNoOutsideAnswer(t *testing.T, open bool, q []byte) {
 		b, _ := os.ReadFile(f.Name())
 		t.Fatalf("logged an answer: %s", b)
 	}
+}
+
+func assertLogged(t *testing.T, open bool, name, result string, allowed bool) {
+	t.Helper()
+	f := newLog(t)
+	g := &gateDNS{
+		open:  open,
+		gate:  net.ParseIP("172.16.0.1").To4(),
+		names: map[string]struct{}{"probe.hermetarium.test": {}},
+		log:   f,
+	}
+	resp := g.answer(dnsQuery(name, 1))
+	if len(resp) < 12 {
+		t.Fatalf("open %v no response", open)
+	}
+	want := byte(3)
+	if result == "SERVFAIL" {
+		want = 2
+	}
+	if resp[3]&0x0F != want {
+		t.Fatalf("open %v rcode %d, want %d", open, resp[3]&0x0F, want)
+	}
+	rec := oneRecord(t, f)
+	if rec.Destination != name || rec.Result != result || rec.Allowed != allowed || rec.Method != "A" {
+		t.Fatalf("rec %+v", rec)
+	}
+}
+
+func newLog(t *testing.T) *os.File {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "dns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func oneRecord(t *testing.T, f *os.File) dnsRec {
+	t.Helper()
+	b, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.TrimSuffix(string(b), "\n")
+	lines := strings.Split(text, "\n")
+	if text == "" || len(lines) != 1 {
+		t.Fatalf("log lines: %q", b)
+	}
+	var rec dnsRec
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func nameWithLabels(n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = string(rune('a' + i))
+	}
+	return strings.Join(parts, ".")
+}
+
+func maxWireName() string {
+	// Three 63-octet labels and one 61-octet label, plus length octets and the root, is 255.
+	return strings.Join([]string{
+		strings.Repeat("a", 63),
+		strings.Repeat("b", 63),
+		strings.Repeat("c", 63),
+		strings.Repeat("d", 61),
+	}, ".")
+}
+
+func overlongName() string {
+	return strings.Join([]string{
+		strings.Repeat("a", 63),
+		strings.Repeat("b", 63),
+		strings.Repeat("c", 63),
+		strings.Repeat("d", 62),
+	}, ".")
+}
+
+func dnsWireLen(name string) int {
+	n := 1
+	for _, label := range strings.Split(name, ".") {
+		n += 1 + len(label)
+	}
+	return n
 }
 
 func dnsQuery(name string, typ uint16) []byte {
