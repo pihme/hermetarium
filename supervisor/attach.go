@@ -213,7 +213,8 @@ func waitSignal(cmd *exec.Cmd, sig <-chan os.Signal, stop <-chan struct{}, resiz
 			return 1, err
 		}
 	}
-	// A 404 means this session has already exited. Keep Wait's code.
+	// 404, or "cannot resize a stopped container", means this session
+	// has already exited. Keep Wait's code. Other resize errors do not.
 	resizeErr := make(chan error, 1)
 	go func() {
 		for {
@@ -313,7 +314,13 @@ func dockerSocket() (string, error) {
 }
 
 func resizeGone(err error) bool {
-	return err != nil && strings.Contains(err.Error(), " 404 ")
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	// Docker 29 answers the first resize after the exec stops with 500
+	// and this text. A later call is 404. Any other 500 is still a failure.
+	return strings.Contains(s, " 404 ") || strings.Contains(s, "cannot resize a stopped container")
 }
 
 func resizeDockerExec(id string, in *os.File) error {
@@ -332,14 +339,16 @@ func resizeDockerExec(id string, in *os.File) error {
 	if _, err := io.WriteString(conn, req); err != nil {
 		return fmt.Errorf("attach: resize: %w", err)
 	}
-	line, err := bufio.NewReader(conn).ReadString('\n')
+	br := bufio.NewReader(conn)
+	line, err := br.ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("attach: resize: %w", err)
 	}
-	if !strings.Contains(line, " 200 ") {
-		return fmt.Errorf("attach: resize: %s", strings.TrimSpace(line))
+	if strings.Contains(line, " 200 ") {
+		return nil
 	}
-	return nil
+	rest, _ := io.ReadAll(io.LimitReader(br, 1024))
+	return fmt.Errorf("attach: resize: %s", strings.TrimSpace(line+string(rest)))
 }
 
 // ssh joins its arguments and the guest shell parses that string. Quoting
