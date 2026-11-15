@@ -66,6 +66,9 @@ func buildGuestDocker(root string) error {
 	}
 	tar := filepath.Join(supervisor.CacheDir(root), "busybox-1.37.tar")
 	if st, err := os.Stat(tar); err != nil || st.Size() < 1000 {
+		if err := os.MkdirAll(filepath.Dir(tar), 0o755); err != nil {
+			return err
+		}
 		if _, err := supervisor.Docker(2*time.Minute, "save", "-o", tar, "busybox:1.37"); err != nil {
 			return err
 		}
