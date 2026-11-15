@@ -128,6 +128,10 @@ func mustDrive(t *testing.T, logs func() string, root, id string, argv []string,
 		if strings.Contains(out, "ATTACH_ERR") {
 			t.Fatalf("attach error\n%s\n%s", out, logs())
 		}
+		var statusErr attachStatusError
+		if errors.As(err, &statusErr) {
+			t.Fatalf("attach: %v\n%s\n%s", err, out, logs())
+		}
 		if err == nil && strings.Contains(out, until) {
 			return out
 		}
@@ -175,7 +179,10 @@ func driveAttach(root, id string, argv []string, row, col uint16, saw, until str
 	}()
 	errCh := make(chan error, 1)
 	go func() {
-		_, aerr := attachTerm(root, id, argv, slave, slave, slave)
+		code, aerr := attachTerm(root, id, argv, slave, slave, slave)
+		if aerr == nil && code != 0 {
+			aerr = attachStatusError{code}
+		}
 		errCh <- aerr
 	}()
 	took := false
@@ -222,6 +229,14 @@ func driveAttach(root, id string, argv []string, row, col uint16, saw, until str
 		case <-tick.C:
 		}
 	}
+}
+
+// attachStatusError is a command that ran and exited non-zero. mustDrive
+// does not run it again; a dial failure before the guest starts still retries.
+type attachStatusError struct{ code int }
+
+func (e attachStatusError) Error() string {
+	return fmt.Sprintf("attach status %d", e.code)
 }
 
 type ptyBuf struct {

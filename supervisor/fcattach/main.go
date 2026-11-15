@@ -26,6 +26,10 @@ const (
 	sessData byte = 0
 	sessExit byte = 1
 	sessErr  byte = 2
+
+	// Wake pipe. The child was reaped, or the operator closed stdin.
+	wakeExit   byte = 1
+	wakeHangup byte = 2
 )
 
 type winsize struct {
@@ -217,30 +221,34 @@ func handle(conn *os.File) {
 	cmd.Stdout = slave
 	cmd.Stderr = slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
-	publishActive(raw)
-	if err := cmd.Start(); err != nil {
-		writeErr(conn, err)
-		return
-	}
-	slave.Close()
-	waitCh := make(chan int, 1)
-	go func() {
-		waitCh <- exitStatus(cmd.Wait())
-	}()
-	// tmux keeps the slave after the client exits. Close does not wake a
-	// blocked pty read, so this session would never free the accept loop.
+	// The parent slave stays open until the child is reaped and the master
+	// is drained. Closing the last slave drops bytes still queued.
 	var wake [2]int
 	if err := syscall.Pipe2(wake[:], syscall.O_CLOEXEC|syscall.O_NONBLOCK); err != nil {
 		writeErr(conn, err)
 		return
 	}
 	defer syscall.Close(wake[0])
+	defer syscall.Close(wake[1])
+	publishActive(raw)
+	if err := cmd.Start(); err != nil {
+		writeErr(conn, err)
+		return
+	}
+	waitCh := make(chan int, 1)
+	go func() {
+		waitCh <- exitStatus(cmd.Wait())
+		_, _ = syscall.Write(wake[1], []byte{wakeExit})
+	}()
+	// A detached session can keep the slave after this command exits, so a
+	// blocked pty read would never notice. The operator closing stdin is
+	// the other reason to stop.
 	go func() {
 		io.Copy(master, conn)
-		syscall.Close(wake[1])
+		_, _ = syscall.Write(wake[1], []byte{wakeHangup})
 	}()
-	copyPTY(conn, raw, wake[0])
-	// Closing the master sends SIGHUP so a command blocked on input exits.
+	copyPTY(conn, raw, wake[0], cmd)
+	// Master close delivers SIGHUP if the command is still running.
 	closePTY()
 	_ = writeFrame(conn, sessExit, []byte{byte(<-waitCh)})
 }
@@ -279,7 +287,7 @@ func openPTY(row, col uint16) (master *os.File, raw int, slave *os.File, err err
 	return os.NewFile(uintptr(mfd), "ptmx"), raw, os.NewFile(uintptr(sfd), "pts"), nil
 }
 
-func copyPTY(conn *os.File, raw, wake int) {
+func copyPTY(conn *os.File, raw, wake int, cmd *exec.Cmd) {
 	ep, err := syscall.EpollCreate1(syscall.EPOLL_CLOEXEC)
 	if err != nil {
 		return
@@ -293,6 +301,8 @@ func copyPTY(conn *os.File, raw, wake int) {
 	}
 	buf := make([]byte, 4096)
 	ev := make([]syscall.EpollEvent, 2)
+	ptyOpen := true
+	signaled := false
 	for {
 		n, err := syscall.EpollWait(ep, ev, -1)
 		if err == syscall.EINTR {
@@ -301,24 +311,119 @@ func copyPTY(conn *os.File, raw, wake int) {
 		if err != nil {
 			return
 		}
+		sawWake := false
+		sawPTY := false
 		for i := 0; i < n; i++ {
-			if int(ev[i].Fd) == wake {
-				return
+			switch int(ev[i].Fd) {
+			case wake:
+				sawWake = true
+			case raw:
+				sawPTY = true
 			}
 		}
-		nr, err := syscall.Read(raw, buf)
-		if nr > 0 {
-			if werr := writeFrame(conn, sessData, buf[:nr]); werr != nil {
+		if sawPTY && ptyOpen {
+			ok, alive := readPTY(conn, raw, buf)
+			if !ok {
 				return
 			}
+			if !alive {
+				ptyOpen = false
+				_ = syscall.EpollCtl(ep, syscall.EPOLL_CTL_DEL, raw, nil)
+			}
 		}
-		if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
+		if !sawWake {
 			continue
 		}
-		if err != nil || nr == 0 {
+		// Queued output has to be forwarded before this wake ends the session.
+		if !drainPTY(conn, raw, buf) {
 			return
 		}
+		exited, hangup := consumeWake(wake)
+		if !drainPTY(conn, raw, buf) {
+			return
+		}
+		if exited {
+			return
+		}
+		if hangup && !signaled {
+			signaled = true
+			signalHangup(cmd)
+		}
 	}
+}
+
+func readPTY(conn *os.File, raw int, buf []byte) (ok, alive bool) {
+	nr, err := syscall.Read(raw, buf)
+	if nr > 0 {
+		if werr := writeFrame(conn, sessData, buf[:nr]); werr != nil {
+			return false, true
+		}
+	}
+	if err == syscall.EINTR || err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
+		return true, true
+	}
+	if err != nil || nr == 0 {
+		return true, false
+	}
+	return true, true
+}
+
+// drainPTY reads every byte already queued. The fd stays blocking; TIOCINQ
+// is how many bytes Read can take without waiting for a later write.
+func drainPTY(conn *os.File, raw int, buf []byte) bool {
+	for {
+		var queued int32
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(raw), syscall.TIOCINQ, uintptr(unsafe.Pointer(&queued)))
+		if errno != 0 || queued <= 0 {
+			return true
+		}
+		chunk := int(queued)
+		if chunk > len(buf) {
+			chunk = len(buf)
+		}
+		nr, err := syscall.Read(raw, buf[:chunk])
+		if nr > 0 {
+			if werr := writeFrame(conn, sessData, buf[:nr]); werr != nil {
+				return false
+			}
+		}
+		if err == syscall.EINTR {
+			continue
+		}
+		if nr == 0 || err != nil {
+			return true
+		}
+	}
+}
+
+func consumeWake(fd int) (exited, hangup bool) {
+	var buf [8]byte
+	for {
+		n, err := syscall.Read(fd, buf[:])
+		if n > 0 {
+			for i := 0; i < n; i++ {
+				switch buf[i] {
+				case wakeExit:
+					exited = true
+				case wakeHangup:
+					hangup = true
+				}
+			}
+			continue
+		}
+		if err == syscall.EINTR {
+			continue
+		}
+		return exited, hangup
+	}
+}
+
+func signalHangup(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return
+	}
+	// The master stays open so bytes written as the command dies can still be read.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
 }
 
 func epollAdd(ep, fd int) error {

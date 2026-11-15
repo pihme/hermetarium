@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,6 +38,56 @@ func TestHandleArgNewline(t *testing.T) {
 	// The pty's ONLCR turns the script's newlines into CR LF. Both lines ran.
 	if status != 4 || strings.ReplaceAll(out, "\r", "") != "A\nB\n" {
 		t.Fatalf("status %d output %q", status, out)
+	}
+}
+
+func TestHandleDrainsFastExit(t *testing.T) {
+	resetActive(t)
+	client, server := socketpair(t)
+	defer client.Close()
+	go handle(server)
+	if err := writeTestArgs(client, []string{"sh", "-c", "echo MARK"}); err != nil {
+		t.Fatal(err)
+	}
+	out, status := readUntilExit(t, client)
+	if status != 0 || !strings.Contains(strings.ReplaceAll(out, "\r", ""), "MARK\n") {
+		t.Fatalf("status %d output %q", status, out)
+	}
+}
+
+func TestHandleDrainsWhileSlaveHeld(t *testing.T) {
+	resetActive(t)
+	client, server := socketpair(t)
+	defer client.Close()
+	go handle(server)
+	// A background process keeps the slave after the shell exits, as a
+	// detached tmux client does. It ignores SIGHUP so the session leader's
+	// exit does not drop that fd. The shell's last write still has to arrive.
+	script := "trap '' HUP\necho MARK\nsleep 30 &\necho PID:$!\nexit 0\n"
+	if err := writeTestArgs(client, []string{"sh", "-c", script}); err != nil {
+		t.Fatal(err)
+	}
+	out, status := readUntilExit(t, client)
+	killHeld(out)
+	if status != 0 || !strings.Contains(strings.ReplaceAll(out, "\r", ""), "MARK\n") {
+		t.Fatalf("status %d output %q", status, out)
+	}
+}
+
+func TestHandleHangupReturnsStatus(t *testing.T) {
+	resetActive(t)
+	client, server := socketpair(t)
+	defer client.Close()
+	go handle(server)
+	if err := writeTestArgs(client, []string{"sh", "-c", "sleep 60"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Shutdown(int(client.Fd()), syscall.SHUT_WR); err != nil {
+		t.Fatal(err)
+	}
+	_, status := readUntilExit(t, client)
+	if status != 128+int(syscall.SIGHUP) {
+		t.Fatalf("status %d", status)
 	}
 }
 
@@ -112,6 +163,24 @@ func TestResizeStoredUntilPTY(t *testing.T) {
 	if r, c := mustPTYSize(t, raw2); r != 5 || c != 6 {
 		t.Fatalf("ioctl after clear: %d %d", r, c)
 	}
+}
+
+func killHeld(out string) {
+	const tag = "PID:"
+	flat := strings.ReplaceAll(out, "\r", "")
+	i := strings.LastIndex(flat, tag)
+	if i < 0 {
+		return
+	}
+	field := flat[i+len(tag):]
+	if nl := strings.IndexByte(field, '\n'); nl >= 0 {
+		field = field[:nl]
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(field))
+	if err != nil || pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func resetActive(t *testing.T) {
