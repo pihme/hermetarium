@@ -459,6 +459,12 @@ func privateKeyLeak(dir string, priv []byte) error {
 			return err
 		}
 		for _, n := range needles {
+			// The last body line can be a few bytes, and that trailer
+			// occurs inside host keys on the guest disk. A small file
+			// that holds the line is still this key.
+			if info.Size() >= 1<<20 && len(n) < 8 {
+				continue
+			}
 			if bytes.Contains(b, n) {
 				return fmt.Errorf("private key material in %s", path)
 			}
@@ -491,39 +497,17 @@ func privateKeyNeedles(priv []byte) [][]byte {
 		add(block.Bytes)
 		add([]byte(hex.EncodeToString(block.Bytes)))
 	}
-	// The first body lines are the same on every unencrypted OpenSSH key.
-	// ssh-keygen -A writes host keys into the guest disk, so only lines
-	// that cover this seed are this habitat's secret. A stripped PEM and
-	// a hex encoding of it still contain those lines.
-	seedAt := -1
-	if block != nil && len(seed) > 0 {
-		seedAt = bytes.Index(block.Bytes, seed)
-	}
-	decOff := 0
+	// The first body line is the same on every unencrypted OpenSSH key.
+	// ssh-keygen -A writes that line into the guest disk. Every later
+	// line belongs to this key, including one that holds a single seed byte.
+	first := true
 	for _, line := range bytes.Split(priv, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")
 		if len(line) == 0 || bytes.HasPrefix(line, []byte("-----")) {
 			continue
 		}
-		raw, err := base64.StdEncoding.DecodeString(string(line))
-		if err != nil {
-			continue
-		}
-		overlap := 0
-		if seedAt >= 0 {
-			lo, hi := decOff, decOff+len(raw)
-			if seedAt > lo {
-				lo = seedAt
-			}
-			if seedAt+len(seed) < hi {
-				hi = seedAt + len(seed)
-			}
-			if hi > lo {
-				overlap = hi - lo
-			}
-		}
-		decOff += len(raw)
-		if overlap < 8 || len(line) < 16 {
+		if first {
+			first = false
 			continue
 		}
 		add(line)
@@ -792,14 +776,48 @@ func TestAttachPrivateKeyLeak(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	seed := openSSHSeed(priv)
+	plant("seed", seed)
+	plant("seed.b64", []byte(base64.StdEncoding.EncodeToString(seed)))
+	block, _ := pem.Decode(priv)
+	if block == nil {
+		t.Fatal("no pem block")
+	}
+	plant("blob", block.Bytes)
+	var shared []byte
+	nLines := 0
+	for _, line := range bytes.Split(priv, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		if len(line) == 0 || bytes.HasPrefix(line, []byte("-----")) {
+			continue
+		}
+		if shared == nil {
+			shared = append([]byte(nil), line...)
+			continue
+		}
+		plant(fmt.Sprintf("line-%d", nLines), line)
+		nLines++
+	}
+	if shared == nil || nLines == 0 {
+		t.Fatal("pem body lines")
+	}
+	if err := os.WriteFile(filepath.Join(inst, "shared-line"), shared, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := privateKeyLeak(inst, priv); err != nil {
+		t.Fatalf("shared first line: %v", err)
+	}
+	if err := os.Remove(filepath.Join(inst, "shared-line")); err != nil {
+		t.Fatal(err)
+	}
 	stripped := bytes.ReplaceAll(priv, []byte("\n"), nil)
 	plant("stripped.pem", stripped)
 	plant("key.hex", []byte(hex.EncodeToString(priv)))
 	plant("stripped.hex", []byte(hex.EncodeToString(stripped)))
 	plant("nested/id_ed25519", priv)
 	plant("note.txt", []byte("-----BEGIN OPENSSH PRIVATE KEY-----\n"))
-	// ssh-keygen -A writes other OpenSSH keys into the guest disk, and
-	// sshd contains the PEM armor as a format string. Neither is this key.
+	// sshd contains the PEM armor as a format string. The first body line is
+	// the same on every unencrypted OpenSSH key, including host keys.
 	otherDir := t.TempDir()
 	if _, err := generateAttachKey(otherDir); err != nil {
 		t.Fatal(err)
@@ -808,9 +826,12 @@ func TestAttachPrivateKeyLeak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !bytes.Contains(other, shared) {
+		t.Fatal("first body line is not shared")
+	}
 	big := bytes.Repeat([]byte{0}, 1<<20)
 	copy(big, []byte("-----BEGIN OPENSSH PRIVATE KEY-----"))
-	copy(big[200:], other)
+	copy(big[80:], shared)
 	if err := os.WriteFile(filepath.Join(inst, "rootfs.ext4"), big, 0o644); err != nil {
 		t.Fatal(err)
 	}

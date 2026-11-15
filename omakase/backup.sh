@@ -179,14 +179,25 @@ hold_fifo=$hold_dir/stdin
 mkfifo "$hold_fifo"
 exec 3<>"$hold_fifo"
 
-# A guest can freeze /data and still have attach return an error.
-# Connection refused means sshd never accepted the session, so the disk
-# was not frozen. Any other failure may have frozen it.
+# ssh client errors and a missing fsfreeze happen before fsfreeze -f.
+# A later failure may mean the guest froze /data and attach still failed.
+ssh_never_ran() {
+  grep -E -q \
+    'Connection refused|Connection timed out|Operation timed out|No route to host|Permission denied|Could not resolve hostname|Host key verification failed|kex_exchange_identification|banner exchange|exec: "ssh"' \
+    "$1"
+}
+
 freeze_log=$hold_dir/freeze.err
 if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c 'sync; command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }; fsfreeze -f /data' <&3 >"$freeze_log" 2>&1; then
   cat "$freeze_log" >&2
-  if grep -q "Connection refused" "$freeze_log"; then
-    die "could not freeze /data (the habitat image needs an SSH server at /usr/sbin/sshd)"
+  if ssh_never_ran "$freeze_log"; then
+    if grep -q "Connection refused" "$freeze_log"; then
+      die "could not freeze /data (the habitat image needs an SSH server at /usr/sbin/sshd)"
+    fi
+    die "could not freeze /data (attach did not run fsfreeze)"
+  fi
+  if grep -q "fsfreeze is not installed" "$freeze_log"; then
+    die "could not freeze /data (fsfreeze is not installed in this habitat)"
   fi
   frozen=1
   die "could not freeze /data (the habitat image needs fsfreeze from util-linux)"

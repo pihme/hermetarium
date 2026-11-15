@@ -36,7 +36,7 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 		}
 	}
 	cli := buildCLI(t, checkout)
-	root := habitatRoot(t, checkout)
+	root := checkout
 
 	disk := filepath.Join(t.TempDir(), "disk.ext4")
 	acl := filepath.Join(t.TempDir(), "squid.conf")
