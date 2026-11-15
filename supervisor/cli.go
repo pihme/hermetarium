@@ -11,8 +11,7 @@ import (
 	"strings"
 )
 
-// Firecracker rejects vcpu_count above 32. Past that, create used to report a
-// missing public port, or exit 0 with a dead VM when no port was published.
+// Firecracker rejects vcpu_count above 32.
 const maxStrongCPUs = 32
 
 func Run(args []string) int {
@@ -234,9 +233,7 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	}, nil
 }
 
-// limitCPUs rejects a count the wall cannot apply. Zero is an omitted --cpus
-// and stays the wall default (one guest CPU, no Docker quota). Docker's own
-// error is not used: a quota above the host CPU count is refused here.
+// Zero is an omitted --cpus and must stay the wall default.
 func limitCPUs(wall string, cpus int) error {
 	if cpus < 1 {
 		return nil
