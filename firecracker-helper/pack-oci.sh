@@ -1,14 +1,12 @@
 #!/bin/sh
 # Pack a docker-export tarball into an ext4 rootfs with /fc-init.
 # Expects /in/rootfs.tar, /in/fc-cmd, writes /out/rootfs.ext4.
+# mke2fs -d writes the image from a directory. Loop-mounting it would need
+# a privileged container, which is host root outside the wall.
 set -eu
 SIZE_MB="${SIZE_MB:-256}"
 apk add --no-cache e2fsprogs tar >/dev/null
-truncate -s "${SIZE_MB}M" /out/rootfs.ext4
-# mkfs must not allocate the journal and inode tables.
-mkfs.ext4 -F -E lazy_itable_init=1,lazy_journal_init=1 /out/rootfs.ext4 >/dev/null
 mkdir -p /rootfs
-mount /out/rootfs.ext4 /rootfs
 tar -xf /in/rootfs.tar -C /rootfs
 mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/etc
 cp /in/fc-cmd /rootfs/fc-cmd
@@ -137,5 +135,7 @@ echo "FC_CMD=$cmd"
 exec $cmd
 EOF
 chmod +x /rootfs/fc-init
-umount /rootfs
+truncate -s "${SIZE_MB}M" /out/rootfs.ext4
+# Do not allocate the journal or inode tables; a large --disk must stay sparse.
+mke2fs -t ext4 -F -d /rootfs -E lazy_itable_init=1,lazy_journal_init=1 /out/rootfs.ext4 >/dev/null
 echo "rootfs ready"

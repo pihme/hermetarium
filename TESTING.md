@@ -35,10 +35,12 @@ In-process. No Docker habitat.
 | `TestResolveCreate` | `create` requires `--image` and `--acl`. Both flags parse into the exec struct. Defaults are 512 MiB and 1024 MB. `--mem 2048 --disk 4096` parses. `--mem 0` and a non-integer `--disk` fail. `--cpus` is unset unless the flag is set. `--cpus 4` parses. `--cpus 0` fails. `--no-inbound` is off unless the flag is set. |
 | `TestCPUs` | Needs Docker and KVM. `--cpus 4` is a CPU quota of 4 in the Docker box (`cpu.max`) and four processors in the strong-wall guest. |
 | `TestSparseRootDisk` | Needs Docker. A 50 GB root disk is sparse (little allocated space) and is not noticeably slower to create than a 1 GB disk. |
-| `TestNoInboundURLMessage` | An empty inbound URL is the sentence `this habitat has no inbound address`. |
+| `TestNoInboundURLMessage` | `noInbound: true` is the sentence `this habitat has no inbound address`. A stored URL is returned. An empty URL without `noInbound` is an error. |
 | `TestNoInbound` | Needs Docker and KVM. An image that only sleeps starts on both walls with `--no-inbound` and a gate file that has no inhabitant peer and no inbound port. No host port is published. `url` prints that sentence. |
+| `TestNoInboundGatePort` | Needs Docker and KVM. A gate file that still listens on 18081, with `--no-inbound`, does not accept that port from the bridge gateway on either wall. Squid is listening on 127.0.0.1:18081. Without the flag, 18081 is published and the bridge gateway can connect. |
 | `TestChooseID` | With no `--id`, `create` still makes a 12-character id. `--id claude` is kept. A blank, a space, a slash, a leading `-` or `.`, and a name longer than 63 characters are rejected. `claude` and `grok` do not share a subnet. |
 | `TestCreateRejectsSizeFlagsOnWeakWall` | `create --wall weak` with `--mem` exits 2. |
+| `TestCreateRejectsCPUsAboveWallLimit` | `--cpus` above 32 on the strong wall, or above `runtime.NumCPU` on the weak wall, exits 2 and names the limit. No habitat is started. The check still allows 32, the host CPU count, and an omitted `--cpus`. |
 | `TestCreateRejectsDataOnWeakWall` | `create --wall weak` with `--data` exits 2. |
 | `TestCreateRejectsBadDataFlag` | On the strong wall, `--data` with no file, or a value that starts with `-`, exits 2 and creates no file. A `--data` path containing `:` exits 2 and creates no file. |
 | `TestEnsureDataDisk` | An existing `--data` file is accepted only when it is a regular file with ext4 magic `0xEF53` at offset `0x438`. A directory, a non-ext4 file, and a path containing `:` are rejected. The colon path is not created. An accepted file is not resized. |
@@ -47,9 +49,12 @@ In-process. No Docker habitat.
 | `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the embedded helper Dockerfile. |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
 | `TestDestroyRemovesGateVolumes` | Needs Docker. Starting the gate creates the image's anonymous volumes. `DestroyWeak` and `DestroyStrong` remove those volumes. |
+| `TestDestroyRemovesBoxVolumes` | Needs Docker. A weak-wall image with `VOLUME /data` leaves the dangling-volume set unchanged after `DestroyWeak`. |
 | `TestChecksumMismatchIsRefused` | A file whose SHA-256 is not the pinned kernel checksum is deleted and the check returns an error. Matching bytes are kept. |
 | `TestFirecrackerStamp` | The extract stamp is the pinned tarball checksum plus the binary's SHA-256. A missing stamp, a stamp without that hash, or a swapped binary is not a cache hit. A rejected tarball deletes the stamp. A matching tarball keeps it. |
+| `TestEnsureStrongAssetsRejectsTarballWithoutBinary` | Needs Docker. A tarball with no `firecracker-*x86_64` binary, and an existing cached binary, makes `EnsureStrongAssets` return an error and does not write the extract stamp. |
 | `TestGateFilesHardened` | Shipped gate files do not set `DONT_VERIFY_PEER` or `dns_v4_first`, and no active line uses `myport`. |
+| `TestDockerRunNotPrivileged` | No non-test `.go` file under `supervisor/` contains `--privileged`. |
 | `TestSquidStartupQuiet` | Needs Docker. Squid started with the echo gate file does not log the `myport` or `dns_v4_first` warnings. |
 | `TestUntrustedVendorGetsNoKey` | Needs Docker. A vendor certificate the gate does not trust gets no request and no key. The same certificate trusted via `tls-cafile` does. |
 | `TestInstallACL` | An empty ACL path fails. A file is copied to `<instance>/squid.conf`. |
@@ -64,13 +69,14 @@ In-process. No Docker habitat.
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
 | `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcHelperDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-helper/` directory there. |
-| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4`. A second extract leaves the entrypoint mtime unchanged. |
+| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). A second extract leaves the entrypoint mtime unchanged. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
 | `TestToolCommand` | A tool-use payload `{"command":"id -u"}` yields the command `id -u`. |
 | `TestCmdFirstTurn` | Porter argv for a first turn: `claude -p --output-format text --dangerously-skip-permissions` and `grok --always-approve -p`. Claude's environment includes `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. |
 | `TestCmdContinuesSession` | After a turn has run, `claude` and `grok` gain `--continue`. Claude's flag stays in front of `-p`. Grok's follows the prompt, because `-p` is `--single`. |
 | `TestCmdUnknownHarness` | An unknown `HARNESS` value returns an error. |
+| `TestReleaseScript` | `tests/harness` runs `python3 -m unittest` on `.github/scripts/test_release.py`. In a temp git repo, `diff_note_lines()` keeps an added `// Release-Notes:` or `# Release-Notes:` line under an artifact path, indented or not, and drops a note that the commit moves or only renames, a note in `*_test.go`, `*.md`, `testdata/`, `fixtures/` or `vendor/`, a note outside the artifact's paths, a `Release-Notes:` that is not a whole line, and a repeated note text. |
 
 Porter tests compare argv. They do not exec `claude` or `grok`.
 

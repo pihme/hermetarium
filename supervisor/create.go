@@ -23,7 +23,8 @@ type CreateOpts struct {
 	DataPath string
 	DataMiB  int
 
-	// NoInbound publishes no host port and does not wait for port 8080.
+	// NoInbound publishes no host port, does not wait for port 8080, and
+	// does not accept the inbound port from the bridge gateway.
 	NoInbound bool
 }
 
