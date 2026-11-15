@@ -96,8 +96,12 @@ func writeReport(r *http.Request) {
 	if path == "" {
 		return
 	}
-	line := fmt.Sprintf("auth=%s host=%s path=%s\n", r.Header.Get("Authorization"), r.Host, r.URL.Path)
-	_ = os.WriteFile(path, []byte(line), 0o644)
+	var b strings.Builder
+	for _, v := range r.Header.Values("Authorization") {
+		fmt.Fprintf(&b, "auth=%s\n", v)
+	}
+	fmt.Fprintf(&b, "host=%s\npath=%s\n", r.Host, r.URL.Path)
+	_ = os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func streamOpenAI(w http.ResponseWriter) {

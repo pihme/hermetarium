@@ -29,7 +29,6 @@ func TestModelGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	image := buildModelImage(t, root)
 	acl := filepath.Join(t.TempDir(), "squid.conf")
 	src, err := os.ReadFile(filepath.Join(root, "examples", "model", "squid.conf"))
 	if err != nil {
@@ -39,9 +38,20 @@ func TestModelGate(t *testing.T) {
 	conf = strings.ReplaceAll(conf, "__MODEL_PREFIX__", modelPrefix)
 	conf = strings.ReplaceAll(conf, "__MODEL_HOST__", modelHost)
 	conf = strings.ReplaceAll(conf, "__MODEL_KEY__", modelKey)
-	if strings.Contains(conf, "__MODEL_") {
-		t.Fatalf("unfilled gate file:\n%s", conf)
+	for _, line := range strings.Split(conf, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "__MODEL_") {
+			t.Fatalf("unfilled gate file:\n%s", conf)
+		}
 	}
+	peerHost, peerPort, err := cachePeerHostPort(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := buildModelImage(t, root, peerHost, peerPort)
 	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +66,7 @@ func TestModelGate(t *testing.T) {
 			opts := supervisor.CreateOpts{
 				Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
 				AfterGate: func(hid, netns string) error {
-					return startModelMock(root, hid, netns, report)
+					return startModelMock(root, hid, netns, report, peerPort)
 				},
 			}
 			if wall == "weak" {
@@ -81,7 +91,7 @@ func TestModelGate(t *testing.T) {
 			if strings.Contains(env, modelKey) {
 				t.Fatalf("key in environment\n%s", env)
 			}
-			if !strings.Contains(logs, "UPSTREAM_FAIL") {
+			if strings.Contains(logs, "UPSTREAM_OK") || !strings.Contains(logs, "UPSTREAM_FAIL") {
 				t.Fatalf("upstream was reachable\n%s", logs)
 			}
 			got, err := os.ReadFile(filepath.Join(report, "got"))
@@ -89,10 +99,13 @@ func TestModelGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(got)
-			if !strings.Contains(text, "auth=Bearer "+modelKey) || strings.Contains(text, "placeholder-key") {
-				t.Fatalf("auth %s", text)
+			auths := reportFields(text, "auth")
+			if len(auths) != 1 || auths[0] != "Bearer "+modelKey {
+				t.Fatalf("auth %q", text)
 			}
-			if !strings.Contains(text, "host="+modelHost) || !strings.Contains(text, "path="+modelPrefix+"/v1/chat/completions") {
+			hosts := reportFields(text, "host")
+			paths := reportFields(text, "path")
+			if len(hosts) != 1 || hosts[0] != modelHost || len(paths) != 1 || paths[0] != modelPrefix+"/v1/chat/completions" {
 				t.Fatalf("upstream %s", text)
 			}
 			if wall == "weak" {
@@ -104,7 +117,7 @@ func TestModelGate(t *testing.T) {
 	}
 }
 
-func buildModelImage(t *testing.T, root string) string {
+func buildModelImage(t *testing.T, root, peerHost, peerPort string) string {
 	t.Helper()
 	ctx := t.TempDir()
 	client := filepath.Join(ctx, "modelclient")
@@ -121,11 +134,27 @@ func buildModelImage(t *testing.T, root string) string {
 	if bytes.Contains(b, []byte(modelKey)) {
 		t.Fatal("client binary contains the gate key")
 	}
-	script := "#!/bin/sh\n" +
-		"echo ENV_BEGIN\nprintenv\necho ENV_END\n" +
-		"/modelclient\n" +
-		"if wget -q -T 3 -O /dev/null http://upstream.example/; then echo UPSTREAM_OK; else echo UPSTREAM_FAIL; fi\n" +
-		"echo MODEL_DONE\nexec sleep 3600\n"
+	// Any HTTP status counts as reached. wget exits non-zero on a 404, which
+	// would hide a direct connection to the mock.
+	script := fmt.Sprintf(`#!/bin/sh
+echo ENV_BEGIN
+printenv
+echo ENV_END
+/modelclient
+gw=$(awk '/model.hermetarium.test/ {print $1; exit}' /etc/hosts)
+echo GATE "$gw"
+reached() {
+  out=$(wget -T 3 -S -O /dev/null "$1" 2>&1) || true
+  printf '%%s\n' "$out" | grep -q 'HTTP/'
+}
+if [ -z "$gw" ] || reached "http://$gw:%s/" || reached "http://%s:%s/"; then
+  echo UPSTREAM_OK
+else
+  echo UPSTREAM_FAIL
+fi
+echo MODEL_DONE
+exec sleep 3600
+`, peerPort, peerHost, peerPort)
 	if err := os.WriteFile(filepath.Join(ctx, "probe.sh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +169,7 @@ func buildModelImage(t *testing.T, root string) string {
 	return image
 }
 
-func startModelMock(root, id, netns, report string) error {
+func startModelMock(root, id, netns, report, port string) error {
 	bin := filepath.Join(report, "vendor-mock")
 	cmd := exec.Command("go", "build", "-o", bin, "./tests/vendormock")
 	cmd.Dir = root
@@ -156,6 +185,7 @@ func startModelMock(root, id, netns, report string) error {
 		"--network", "container:"+netns,
 		"-e", "MOCK_EXPECT_KEY="+modelKey,
 		"-e", "MOCK_REPORT=/report/got",
+		"-e", "LISTEN=:"+port,
 		"-v", bin+":/usr/local/bin/vendor-mock:ro",
 		"-v", report+":/report",
 		supervisor.AlpineImage,
@@ -212,6 +242,32 @@ func waitModel(t *testing.T, wall, id string) string {
 	}
 	t.Fatalf("missing MODEL_DONE\n%s", logs)
 	return ""
+}
+
+func cachePeerHostPort(conf string) (string, string, error) {
+	for _, line := range strings.Split(conf, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || !strings.HasPrefix(line, "cache_peer ") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 4 {
+			return "", "", fmt.Errorf("cache_peer %q", line)
+		}
+		return f[1], f[3], nil
+	}
+	return "", "", fmt.Errorf("gate file has no cache_peer")
+}
+
+func reportFields(text, key string) []string {
+	var out []string
+	prefix := key + "="
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			out = append(out, strings.TrimPrefix(line, prefix))
+		}
+	}
+	return out
 }
 
 func streamedGaps(logs string) int {
