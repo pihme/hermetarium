@@ -191,18 +191,16 @@ func ExecWeak(inst *WeakInstance, argv []string) (stdout, stderr string, code in
 
 func DestroyWeak(id string) error {
 	// Inhabitant images may declare VOLUME. -v removes those anonymous volumes.
-	// The bridge rule outlives the network. Leave the network when the rule
-	// is still there so a later destroy can retry.
-	if err := forgetSavedBridge(id); err != nil {
-		return err
-	}
+	// bridge.name still names the FORWARD rule after the network is gone, so
+	// a failed forget must not skip the box and the network.
+	err := forgetSavedBridge(id)
 	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("network", "rm", "htm-"+id)
-	return nil
+	return err
 }
 
 func networkIPv4Gateway(network string) (string, error) {
@@ -348,6 +346,13 @@ func forgetSavedBridge(id string) error {
 	br := strings.TrimSpace(string(b))
 	if br == "" {
 		return fmt.Errorf("habitat %s: empty bridge name", id)
+	}
+	// Create built this image. Destroy still deletes the saved rule when the
+	// image has since been removed.
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err != nil {
+		if buildErr := EnsureNetTools(root); buildErr != nil {
+			return fmt.Errorf("rebuild %s: %w", NetToolsImage, buildErr)
+		}
 	}
 	return forgetSameBridge(br)
 }
