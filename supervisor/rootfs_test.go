@@ -1,8 +1,10 @@
 package supervisor
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -231,6 +233,49 @@ func TestHabitatRootfsFailureKeepsDest(t *testing.T) {
 	}
 	if sum, err := sha256File(cache); err != nil || sum != cacheSum {
 		t.Fatalf("cache changed: %v %s", err, sum)
+	}
+}
+
+func TestHabitatRootfsStalePartial(t *testing.T) {
+	root := t.TempDir()
+	cache, err := cacheFile(root, "rootfs-busybox-1024.ext4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSparseExt4(cache); err != nil {
+		t.Fatal(err)
+	}
+	cacheSum, err := sha256File(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := InstanceDir(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := habitatRootfsPath(dir) + ".partial"
+	if err := os.WriteFile(partial, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = habitatRootfs(dir, cache)
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "run hermetarium destroy") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Count(err.Error(), partial) != 1 {
+		t.Fatalf("path twice: %v", err)
+	}
+	if sum, err := sha256File(cache); err != nil || sum != cacheSum {
+		t.Fatalf("cache changed: %v %s", err, sum)
+	}
+	if b, err := os.ReadFile(partial); err != nil || string(b) != "stale" {
+		t.Fatalf("partial changed: %v %q", err, b)
 	}
 }
 
