@@ -633,6 +633,16 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 		if strings.Contains(text, "GUEST_UNAME=") {
 			return nil
 		}
+		if !running {
+			// The marker can be written as the helper exits, after the read above.
+			text, _ = console()
+			if strings.Contains(text, "DATA_MOUNT_FAIL") {
+				return fmt.Errorf("data disk did not mount")
+			}
+			if strings.Contains(text, "GUEST_UNAME=") {
+				return nil
+			}
+		}
 		if !running || !time.Now().Before(deadline) {
 			parts := make([]string, 0, 2)
 			if fc := strings.TrimSpace(tailHostFile(filepath.Join(dir, "fc.log"))); fc != "" {
@@ -669,6 +679,14 @@ func waitDataMounted(helper string) error {
 			return nil
 		}
 		if !helperRunning(helper) {
+			// The guest can print the marker and exit between the read and this check.
+			logs = helperLogs(helper)
+			if strings.Contains(logs, "DATA_MOUNT_FAIL") {
+				return dataMountFailure(logs)
+			}
+			if strings.Contains(logs, "DATA_MOUNT_OK") {
+				return nil
+			}
 			return fmt.Errorf("helper exited before the data disk mounted: %s", logs)
 		}
 		time.Sleep(200 * time.Millisecond)
