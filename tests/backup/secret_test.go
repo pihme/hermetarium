@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,31 @@ func TestSecretRefusal(t *testing.T) {
 			disk    string
 			journal string
 		}{name: "hardlink-dir", disk: safeDisk, journal: hardDir})
+	}
+	// Not an ancestor of var/. The key inode is reachable only through this
+	// bind mount. find must see it; restic would archive it.
+	bindJournal := filepath.Join(root, "bind-journal")
+	mountPoint := filepath.Join(bindJournal, "mitm")
+	if err := os.MkdirAll(mountPoint, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mount(filepath.Join(inst, "mitm"), mountPoint, "", syscall.MS_BIND, ""); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Logf("bind mount not permitted: %v", err)
+		} else {
+			t.Fatalf("bind mount: %v", err)
+		}
+	} else {
+		t.Cleanup(func() {
+			if err := syscall.Unmount(mountPoint, 0); err != nil {
+				t.Errorf("unmount bind mount: %v", err)
+			}
+		})
+		cases = append(cases, struct {
+			name    string
+			disk    string
+			journal string
+		}{name: "bind-mount", disk: safeDisk, journal: bindJournal})
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

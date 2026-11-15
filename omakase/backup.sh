@@ -47,11 +47,12 @@ path_under() {
 
 # 0 when directory $1 holds a regular file with one of the device:inode
 # values in the remaining arguments. Do not follow symlinks or read bytes.
+# No -xdev: restic backup crosses filesystems, so a nested mount is archived.
 # A walk that fails is treated as a match so the backup stops.
 dir_holds_inode() {
   dir=$1
   shift
-  list=$(find -P "$dir" -xdev -type f -printf '%D:%i\n') || return 0
+  list=$(find -P "$dir" -type f -printf '%D:%i\n') || return 0
   for ino in "$@"; do
     case "
 $list

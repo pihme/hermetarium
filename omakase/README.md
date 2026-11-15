@@ -20,7 +20,7 @@ A strong-wall habitat also needs an SSH server at `/usr/sbin/sshd` so attach can
 - `var/<id>/squid.conf`, the gate file. It holds the model key.
 - `var/<id>/mitm/ca.key`, the gate's private key.
 
-The script refuses a data disk or a journal path that is one of those files, a hard link to one of them, or a directory that contains one of them, including by a hard link. That includes another habitat's `var/<id>/squid.conf` and `var/<id>/mitm/ca.key` under the same data directory. It also refuses `/` and any directory that contains `var/`.
+The script refuses a data disk or a journal path that is one of those files, a hard link to one of them, or a directory that contains one of them, including by a hard link or a nested mount. That includes another habitat's `var/<id>/squid.conf` and `var/<id>/mitm/ca.key` under the same data directory. It also refuses `/` and any directory that contains `var/`.
 
 The running helper must be this habitat. `htm-fc-<id>` is used only when its `/log` mount is `var/<id>` under `HERMETARIUM_ROOT`. A different root that also has `var/<id>/squid.conf` is not this habitat.
 
