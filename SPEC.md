@@ -70,7 +70,7 @@ Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI ima
 - No default route except Squid. Setting `HTTP_PROXY` inside the image is not the wall.
 - Fail closed: if the route, firewall, or Squid cannot be applied, do not start.
 - The supervisor **installs an operator-supplied Squid ACL** (`create --acl FILE`, copied to `var/<id>/squid.conf`) and starts Squid against it. Squid stays a **sibling process** (GPLv2). The supervisor does not link Squid. Each example and inhabitant ships its wall config next to its Dockerfile.
-- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, port, method, path, bytes, allowed or denied, and `tls` (`decrypted` or `passthrough`) when the gate file logs the bump mode. Packet bodies are not captured.
+- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, port, method, path, bytes, allowed or denied, `upstream` (the CONNECT server address, beside the SNI name), and `tls` (`decrypted` or `passthrough`) when the gate file logs the bump mode. Packet bodies are not captured.
 - Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path. Fail closed on inbound the same as outbound: if the path cannot be applied, do not start.
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
 - Secrets: see §8.

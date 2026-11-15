@@ -3,6 +3,7 @@ package supervisor
 import (
 	"bufio"
 	"encoding/json"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,14 +17,18 @@ type Record struct {
 	Direction   string `json:"direction"`
 	Protocol    string `json:"protocol"`
 	Destination string `json:"destination"`
-	Port        int    `json:"port,omitempty"`
-	Method      string `json:"method,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Result      string `json:"result,omitempty"`
-	Allowed     bool   `json:"allowed"`
-	Bytes       int    `json:"bytes,omitempty"`
+	// Upstream is the CONNECT server address: %<a, or the IP authority when
+	// that peer is "-". url.Parse treats host:port as a scheme, so SNI would
+	// otherwise replace this address. The name stays in Destination.
+	Upstream string `json:"upstream,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Method   string `json:"method,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Result   string `json:"result,omitempty"`
+	Allowed  bool   `json:"allowed"`
+	Bytes    int    `json:"bytes,omitempty"`
 	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
-	// A spliced line has no URL host; the name comes from SNI.
+	// When CONNECT names only an address, Destination is the SNI.
 	TLS string `json:"tls,omitempty"`
 }
 
@@ -50,10 +55,10 @@ func ParseSquidLine(line string) (Record, bool) {
 	protocol := "http"
 	path := ""
 	parsedHost := false
-	if u, err := url.Parse(rawURL); err == nil {
-		if u.Scheme == "https" || u.Scheme == "http" {
-			protocol = u.Scheme
-		}
+	portSet := false
+	authorityHost := ""
+	if u, err := url.Parse(rawURL); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		protocol = u.Scheme
 		if u.Hostname() != "" {
 			dest = u.Hostname()
 			parsedHost = true
@@ -70,9 +75,20 @@ func ParseSquidLine(line string) (Record, bool) {
 		if u.Port() != "" {
 			if p, err := strconv.Atoi(u.Port()); err == nil {
 				port = p
+				portSet = true
 			}
 		} else if u.Scheme == "https" {
 			port = 443
+			portSet = true
+		}
+	} else if host, p, ok := splitAuthority(rawURL); ok {
+		// An IP is not a name. SNI names that connection.
+		authorityHost = host
+		dest = host
+		port = p
+		portSet = true
+		if net.ParseIP(host) == nil {
+			parsedHost = true
 		}
 	}
 	status := f[3]
@@ -95,11 +111,25 @@ func ParseSquidLine(line string) (Record, bool) {
 	if len(f) >= 13 && f[12] != "-" && !parsedHost {
 		dest = f[12]
 	}
+	upstream := ""
+	if f[5] == "CONNECT" {
+		protocol = "https"
+		if !portSet {
+			port = 443
+		}
+		if len(f) >= 9 {
+			upstream = peerAddress(f[8])
+		}
+		if upstream == "" && net.ParseIP(authorityHost) != nil {
+			upstream = authorityHost
+		}
+	}
 	return Record{
 		Time:        time.Unix(unix, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano),
 		Direction:   dir,
 		Protocol:    protocol,
 		Destination: dest,
+		Upstream:    upstream,
 		Port:        port,
 		Method:      f[5],
 		Path:        path,
@@ -107,6 +137,32 @@ func ParseSquidLine(line string) (Record, bool) {
 		Bytes:       bytes,
 		TLS:         tlsMode,
 	}, true
+}
+
+// splitAuthority parses a CONNECT authority. url.Parse treats host:port as a scheme.
+func splitAuthority(raw string) (string, int, bool) {
+	host, text, err := net.SplitHostPort(raw)
+	if err != nil || host == "" {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(text)
+	if err != nil {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+// peerAddress is the server IP in %Sh/%<a. "-" means Squid did not dial.
+func peerAddress(hier string) string {
+	_, addr, ok := strings.Cut(hier, "/")
+	if !ok {
+		return ""
+	}
+	addr = strings.Trim(addr, "[]")
+	if net.ParseIP(addr) == nil {
+		return ""
+	}
+	return addr
 }
 
 func readFile(path string) ([]byte, error) {
