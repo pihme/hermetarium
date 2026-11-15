@@ -63,11 +63,28 @@ To choose the size, pass MiB. The disk size is in MiB too.
 ./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --cpus 4 --image hermetarium/echo:dev --acl examples/echo/squid.conf
 ```
 
-`--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for port 8080. The gate file can then omit the `inhabitant` peer and port 18081. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
+`--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for port 8080. The gate file can then omit the `inhabitant` peer and port 18081. The bridge gateway is not allowed to reach port 18081, even when the gate file still listens there. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
 
 `--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out.
 
-`--cpus N` works on both walls. The strong wall gives the guest that many processors. The Docker wall sets that CPU quota (`--cpus`). Leave it off and the guest has one processor, and the Docker wall has no quota.
+`--cpus N` works on both walls. The strong wall gives the guest that many processors, from 1 to 32. The Docker wall sets that CPU quota (`--cpus`), from 1 up to the host's CPU count. A value outside that range is rejected before a virtual machine or container starts. Leave it off and the guest has one processor, and the Docker wall has no quota.
+
+`--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. An existing file that is not ext4 is refused. If the guest cannot mount the data disk, create fails and the habitat is removed. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
+
+Hermetarium keeps a lock beside that file, named `FILE.lock`. A refused file gets no lock. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.
+
+```bash
+rm FILE FILE.lock
+```
+
+To read the file on the host, stop the habitat first. `destroy` powers the machine off. Check the filesystem, then mount it read-only:
+
+```bash
+sudo e2fsck -p FILE || test $? -le 1
+sudo mount -o loop,ro,noexec,nosuid,nodev FILE /mnt
+```
+
+`e2fsck -p` replays the journal and applies other safe fixes. Exit status 1 means it changed the filesystem, and the read-only mount should still run. `noexec,nosuid,nodev` keeps a program stored on the disk from running while you read it. Unmount the file before the next `create --data`.
 
 Ask where it is listening:
 
@@ -276,11 +293,11 @@ Take the Claude install from one folder and Grok's model address from another, o
 
 The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another base is fine when it keeps the contract above: root, port 8080, `ip`, the stand-in model address, and a stand-in key.
 
-**Docker in Docker.** Start from an image that can run Docker, such as `docker:24-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. Nested Docker on the strong wall is a poor fit. Firecracker's guest kernel is old and small, and Docker in Docker wants a modern kernel and a lot of memory.
+**Docker in Docker.** Start from an image that can run Docker, such as `docker:29-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. On the strong wall the guest init mounts cgroup2 at `/sys/fs/cgroup`, plus `/dev/pts`, `/dev/shm`, and `/run`. This kernel rejects at least one cgroup controller, so the stock `docker:29-dind` entrypoint loops. Enable controllers one at a time, as `tests/guest-docker/start.sh` does, or start `dockerd` directly. This kernel has no `CONFIG_IP_NF_RAW`, so set `DOCKER_INSECURE_NO_IPTABLES_RAW=1` in the image. Give the machine room with `--mem` and `--disk`.
 
 **Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official assistants. KinD wants more still.
 
-**The kernel.** The strong wall boots the image on Firecracker's kernel, today 4.14. Grok Build and Claude Code have been run there by hand. The kernel has no random-number device, so porter credits a seed from the kernel command line to the entropy pool; a program that calls `getrandom()` before porter starts can still block. A base that needs systemd, cgroup v2, or a very new system call can run on Docker and fail in the virtual machine. Try the Docker wall first.
+**The kernel.** The strong wall boots Linux 6.1.188, the file `vmlinux-6.1.188` from the Firecracker CI build `firecracker-ci/20261111-778a26c0594c-0`. Firecracker is v1.16.1. The supervisor checks the SHA-256 of that kernel and of the Firecracker release tarball after download and refuses a mismatch. The guest has entropy at boot. A base that needs a system call this kernel does not have can run on the Docker wall.
 
 ## Porter in your image
 

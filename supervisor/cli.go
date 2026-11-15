@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
+
+// Firecracker rejects vcpu_count above 32.
+const maxStrongCPUs = 32
 
 func Run(args []string) int {
 	if len(args) == 0 {
@@ -36,6 +40,14 @@ func Run(args []string) int {
 		}
 		if wall != "strong" && (flagPresent(rest, "--mem") || flagPresent(rest, "--disk")) {
 			fmt.Fprintln(os.Stderr, "--mem and --disk apply only to --wall strong")
+			return 2
+		}
+		if wall != "strong" && flagPresent(rest, "--data") {
+			fmt.Fprintln(os.Stderr, "--data applies only to --wall strong")
+			return 2
+		}
+		if err := limitCPUs(wall, ex.CPUs); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
 		id, err := ChooseID(rest)
@@ -150,7 +162,7 @@ func Run(args []string) int {
 		}
 		id := rest[0]
 		_ = DestroyWeak(id)
-		_ = DestroyStrong(id)
+		endStrong(id, filepath.Join(VarDir(root), id))
 		return 0
 	default:
 		usage()
@@ -213,12 +225,55 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	if err != nil {
 		return CreateOpts{}, err
 	}
-	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus, NoInbound: flagPresent(args, "--no-inbound")}, nil
+	data := ""
+	if flagPresent(args, "--data") {
+		data = strings.TrimSpace(flag(args, "--data", ""))
+		if data == "" || strings.HasPrefix(data, "-") {
+			return CreateOpts{}, fmt.Errorf("--data requires a file")
+		}
+		if strings.Contains(data, ":") {
+			return CreateOpts{}, fmt.Errorf("data disk path %s must not contain ':'", data)
+		}
+	}
+	if flagPresent(args, "--data-size") && data == "" {
+		return CreateOpts{}, fmt.Errorf("--data-size requires --data")
+	}
+	dataMiB := 0
+	if data != "" {
+		dataMiB, err = sizeFlag(args, "--data-size", 1024)
+		if err != nil {
+			return CreateOpts{}, err
+		}
+	}
+	return CreateOpts{
+		Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus,
+		DataPath: data, DataMiB: dataMiB,
+		NoInbound: flagPresent(args, "--no-inbound"),
+	}, nil
+}
+
+// Zero is an omitted --cpus and must stay the wall default.
+func limitCPUs(wall string, cpus int) error {
+	if cpus < 1 {
+		return nil
+	}
+	switch wall {
+	case "strong":
+		if cpus > maxStrongCPUs {
+			return fmt.Errorf("--cpus %d is above the strong-wall limit of %d", cpus, maxStrongCPUs)
+		}
+	case "weak":
+		n := runtime.NumCPU()
+		if cpus > n {
+			return fmt.Errorf("--cpus %d is above this host's CPU count of %d", cpus, n)
+		}
+	}
+	return nil
 }
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--cpus N] [--id NAME] [--no-inbound]
-       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--id NAME] [--no-inbound]
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--data FILE] [--data-size MiB] [--id NAME] [--no-inbound]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium attach <id> [-- <cmd>]
@@ -226,7 +281,7 @@ func usage() {
        hermetarium destroy <id>
        hermetarium version
 
---cpus N works on both walls: that many processors in the virtual machine, or that CPU quota on Docker. The default is one processor, and no Docker quota.
+--cpus N works on both walls: that many processors in the virtual machine (1 to 32), or that CPU quota on Docker (1 to the host CPU count). The default is one processor, and no Docker quota.
 attach opens a terminal on either wall. With no command it runs sh. Bytes on that terminal stay out of the I/O log.
 `)
 }

@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,11 +18,15 @@ type WeakInstance struct {
 	GateIP     string `json:"gateIp"`
 	BoxIP      string `json:"boxIp"`
 	InboundURL string `json:"inboundUrl"`
+	NoInbound  bool   `json:"noInbound"`
 	LogPath    string `json:"logPath"`
 	Dir        string `json:"dir"`
 }
 
 func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
+	if opts.DataPath != "" {
+		return nil, fmt.Errorf("--data applies only to --wall strong")
+	}
 	if err := EnsureImageExists(opts.Image); err != nil {
 		return nil, err
 	}
@@ -90,7 +95,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	if err := lockGate(gate, sub.Gate); err != nil {
+	if err := lockGate(gate, sub.Gate, opts.NoInbound); err != nil {
 		return nil, err
 	}
 	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
@@ -138,7 +143,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	inst := &WeakInstance{
 		ID: id, Wall: "weak", Network: network, Gate: gate, Box: box,
-		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url,
+		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
@@ -158,10 +163,11 @@ func ExecWeak(inst *WeakInstance, argv []string) (stdout, stderr string, code in
 }
 
 func DestroyWeak(id string) error {
-	DockerIgnore("rm", "-f", "htm-box-"+id)
+	// Inhabitant images may declare VOLUME. -v removes those anonymous volumes.
+	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
-	DockerIgnore("rm", "-f", "htm-gate-"+id)
+	removeGate(id)
 	DockerIgnore("network", "rm", "htm-"+id)
 	return nil
 }

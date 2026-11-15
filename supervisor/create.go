@@ -18,7 +18,14 @@ type CreateOpts struct {
 	DiskMB int
 	CPUs   int // 0 means the wall default: one guest CPU, no Docker quota
 
-	// NoInbound publishes no host port and does not wait for port 8080.
+	// DataPath is a host file attached as a second disk on the strong wall.
+	// DataMiB is used only when that file does not exist yet.
+	DataPath string
+	DataMiB  int
+
+	// NoInbound publishes no host port, does not wait for port 8080, and
+	// does not accept the inbound port from the bridge gateway. The strong
+	// wall still waits until the guest prints GUEST_UNAME=.
 	NoInbound bool
 }
 

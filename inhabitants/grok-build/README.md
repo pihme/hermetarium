@@ -129,4 +129,4 @@ Stop it:
 
 How each wall lets only the gate reach the Internet is in the [inhabitants README](../README.md#how-the-gate-reaches-the-internet).
 
-This image runs on both walls, including Firecracker (`--wall strong`). The guest kernel has no random-number device, so the supervisor passes a seed on the kernel command line and porter credits it to the entropy pool at start. Without that, Grok waits forever in `getrandom()`.
+This image runs on both walls, including Firecracker (`--wall strong`). The guest kernel is Linux 6.1 and has entropy at boot.

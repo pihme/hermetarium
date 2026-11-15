@@ -73,6 +73,13 @@ func EnsureNetTools(root string) error {
 	return err
 }
 
+// The gate image declares volumes. -v removes those anonymous ones; bind mounts stay.
+// Volumes left by earlier runs are not removed.
+// Release-Notes: `docker volume ls -qf dangling=true` lists every unused volume, named or anonymous, and a past habitat's volumes are the two long hex names for /var/log/squid and /var/spool/squid. Inspect before `docker volume rm`.
+func removeGate(id string) {
+	DockerIgnore("rm", "-fv", "htm-gate-"+id)
+}
+
 func runSquid(root, name, logDir string, extra []string) error {
 	if err := EnsureSquid(root); err != nil {
 		return err
@@ -91,8 +98,8 @@ func runSquid(root, name, logDir string, extra []string) error {
 
 // applyIntercept redirects the box's web traffic (source cidr) to Squid and
 // stops the gate from routing anything else. Other containers on the default
-// bridge cannot reach the gate: lockGate drops their traffic and only lets the
-// bridge gateway reach the inbound port.
+// bridge cannot reach the gate: lockGate drops their traffic. The bridge
+// gateway reaches the inbound port only when that port is published.
 func applyIntercept(netns, cidr string, https bool) error {
 	if _, err := Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+netns,
@@ -114,11 +121,13 @@ func applyIntercept(netns, cidr string, https bool) error {
 // lockGate stops other containers on Docker's default bridge from using the
 // gate. Squid listens on 0.0.0.0, and the gate has an address on that bridge,
 // so without this a neighbor could send requests straight to Squid and get the
-// vendor key injected. Only the habitat-side interface, loopback, replies, and
-// the operator's inbound port (from the bridge gateway, where the published
-// port arrives) may reach the gate. The habitat side is matched by interface,
-// not source address, because a neighbor can spoof an address.
-func lockGate(gate, gateIP string) error {
+// vendor key injected. Only the habitat-side interface, loopback, and replies
+// may reach the gate. The inbound port is also accepted from the bridge
+// gateway, where the published port arrives, unless --no-inbound was set:
+// the gate file is copied unchanged and may still listen there. The habitat
+// side is matched by interface, not source address, because a neighbor can
+// spoof an address.
+func lockGate(gate, gateIP string, noInbound bool) error {
 	gw, err := Docker(15*time.Second, "inspect", "-f", "{{.NetworkSettings.Networks.bridge.Gateway}}", gate)
 	if err != nil {
 		return err
@@ -127,14 +136,17 @@ func lockGate(gate, gateIP string) error {
 	if gw == "" {
 		return fmt.Errorf("gate %s: no bridge gateway", gate)
 	}
+	acceptInbound := ""
+	if !noInbound {
+		acceptInbound = "iptables -A INPUT -s \"$BRIDGE_GW\" -p tcp --dport " + fmt.Sprint(InboundPort) + " -j ACCEPT\n"
+	}
 	script := `set -e
 hab=$(ip -o -4 addr show | awk -v ip="$GATE_IP" 'index($4, ip "/") == 1 {print $2; exit}')
 test -n "$hab"
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -i "$hab" -j ACCEPT
-iptables -A INPUT -s "$BRIDGE_GW" -p tcp --dport ` + fmt.Sprint(InboundPort) + ` -j ACCEPT
-iptables -P INPUT DROP`
+` + acceptInbound + `iptables -P INPUT DROP`
 	_, err = Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+gate,
 		"--cap-add", "NET_ADMIN",
@@ -160,6 +172,7 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 	pid := filepath.Join(logDir, "squid.pid")
 	deadline := time.Now().Add(timeout)
 	var last string
+	var chmodErr error
 	for time.Now().Before(deadline) {
 		out, err := Docker(5*time.Second, "inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", container)
 		if err == nil && !strings.Contains(out, "true") {
@@ -167,19 +180,35 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 			return errWait("squid container exited: " + out + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 		}
 		if _, err := os.Stat(pid); err == nil {
-			// cache.log may not exist yet. Readiness is the pid, not the chmod.
-			_ = chmodLogs(logDir)
-			return nil
+			// The pid lands before access.log and cache.log. Keep trying for
+			// the same deadline; an error that outlives it fails create.
+			chmodErr = chmodLogs(container, logDir)
+			if chmodErr == nil {
+				return nil
+			}
+			last = chmodErr.Error()
+			time.Sleep(200 * time.Millisecond)
+			continue
 		}
 		last = "waiting for " + pid
 		time.Sleep(200 * time.Millisecond)
+	}
+	if chmodErr != nil {
+		return fmt.Errorf("chmod gate logs: %w", chmodErr)
 	}
 	logs, _ := Docker(5*time.Second, "logs", container)
 	return errWait("squid not ready: " + last + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 }
 
-func chmodLogs(logDir string) error {
-	_, err := Docker(30*time.Second, "run", "--rm", "-v", logDir+":/log", NetToolsImage,
+func chmodLogs(container, logDir string) error {
+	for _, name := range []string{"access.log", "cache.log"} {
+		if _, err := os.Stat(filepath.Join(logDir, name)); err != nil {
+			return err
+		}
+	}
+	// Root in the running gate can chmod the proxy-owned logs. The unit job
+	// has no nettools image; spawning one here used to fail and get discarded.
+	_, err := Docker(5*time.Second, "exec", "-u", "root", container,
 		"chmod", "a+r", "/log/access.log", "/log/cache.log")
 	return err
 }

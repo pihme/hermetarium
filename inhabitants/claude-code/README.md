@@ -135,4 +135,4 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-This image runs on both walls. On Firecracker the guest kernel has no random-number device, so the supervisor passes a seed on the kernel command line and porter credits it to the entropy pool at start. Without that, a program that asks for random bytes waits forever.
+This image runs on both walls. On Firecracker the guest kernel is Linux 6.1 and has entropy at boot.

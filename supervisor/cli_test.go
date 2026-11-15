@@ -2,8 +2,11 @@ package supervisor
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -34,6 +37,17 @@ func TestResolveCreate(t *testing.T) {
 	}
 	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--disk", "nope"}); err == nil {
 		t.Fatal("expected --disk to reject a non-integer")
+	}
+	withData, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"})
+	if err != nil || withData.DataPath != "/tmp/disk.ext4" || withData.DataMiB != 1024 {
+		t.Fatalf("data defaults %+v %v", withData, err)
+	}
+	sizedData, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4", "--data-size", "64"})
+	if err != nil || sizedData.DataMiB != 64 {
+		t.Fatalf("data size %+v %v", sizedData, err)
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data-size", "64"}); err == nil {
+		t.Fatal("expected --data-size to require --data")
 	}
 	if ex.CPUs != 0 {
 		t.Fatalf("default cpus %d", ex.CPUs)
@@ -74,6 +88,89 @@ func TestCreateRejectsSizeFlagsOnWeakWall(t *testing.T) {
 	code := Run([]string{"create", "--wall", "weak", "--image", "hermetarium/echo:dev", "--acl", "/tmp/acl.conf", "--mem", "2048"})
 	if code != 2 {
 		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestCreateRejectsCPUsAboveWallLimit(t *testing.T) {
+	host := runtime.NumCPU()
+	cases := []struct {
+		wall string
+		cpus string
+		want string
+	}{
+		{"strong", "33", "strong-wall limit of 32"},
+		{"weak", strconv.Itoa(host + 1), fmt.Sprintf("this host's CPU count of %d", host)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.wall, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := os.Stderr
+			os.Stderr = w
+			code := Run([]string{
+				"create", "--wall", tc.wall,
+				"--image", "hermetarium/echo:dev",
+				"--acl", "/tmp/acl.conf",
+				"--cpus", tc.cpus,
+			})
+			w.Close()
+			os.Stderr = old
+			b, _ := io.ReadAll(r)
+			if code != 2 {
+				t.Fatalf("code=%d stderr=%q", code, b)
+			}
+			if !bytes.Contains(b, []byte(tc.want)) {
+				t.Fatalf("stderr %q", b)
+			}
+		})
+	}
+	// Inclusive bounds. Checked on the function so a legal value does not start a wall.
+	for _, ok := range []struct {
+		wall string
+		n    int
+	}{
+		{"strong", 0},
+		{"strong", 1},
+		{"strong", maxStrongCPUs},
+		{"weak", 0},
+		{"weak", 1},
+		{"weak", host},
+	} {
+		if err := limitCPUs(ok.wall, ok.n); err != nil {
+			t.Fatalf("%s %d: %v", ok.wall, ok.n, err)
+		}
+	}
+}
+
+func TestCreateRejectsDataOnWeakWall(t *testing.T) {
+	code := Run([]string{"create", "--wall", "weak", "--image", "hermetarium/echo:dev", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"})
+	if code != 2 {
+		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestCreateRejectsBadDataFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	cases := [][]string{
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "--mem"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "-disk.ext4"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "disk:ext4"},
+	}
+	for _, args := range cases {
+		if code := Run(args); code != 2 {
+			t.Fatalf("%v code=%d", args, code)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("created %v", entries)
 	}
 }
 

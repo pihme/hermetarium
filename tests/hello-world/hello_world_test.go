@@ -137,7 +137,26 @@ func testStrong(t *testing.T, root string) {
 	if m[1] == hostRelease {
 		t.Fatalf("strong wall: guest kernel %s equals host %s", m[1], hostRelease)
 	}
+	if !strings.HasPrefix(m[1], "6.1.188") {
+		t.Fatalf("strong wall: guest kernel %s is not the pinned 6.1.188", m[1])
+	}
 	t.Logf("strong wall: guest kernel %s ≠ host %s", m[1], hostRelease)
+	// rng_current is the virtio-rng device. A getrandom return is not: this
+	// kernel can seed itself from the CPU with no entropy device.
+	rng := regexp.MustCompile(`GUEST_RNG=(\S+)`).FindStringSubmatch(serial)
+	if rng == nil || !strings.Contains(rng[1], "virtio_rng") {
+		got := "missing"
+		if rng != nil {
+			got = rng[1]
+		}
+		t.Fatalf("strong wall: rng_current %s is not virtio_rng\n%s", got, tail(serial, 2000))
+	}
+	t.Logf("strong wall: rng_current %s", rng[1])
+	// Echo has busybox, so the call is made. Skipped is not this image.
+	if !strings.Contains(serial, "GUEST_GETRANDOM_OK") {
+		t.Fatalf("strong wall: getrandom did not return within 2s\n%s", tail(serial, 2000))
+	}
+	t.Log("strong wall: getrandom returned")
 	if !strings.Contains(serial, "LEAK_FAIL") {
 		t.Fatalf("strong wall: leak did not fail\n%s", tail(serial, 2000))
 	}

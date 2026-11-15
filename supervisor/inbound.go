@@ -17,6 +17,9 @@ import (
 // errNoInbound is the url answer when create was passed --no-inbound.
 var errNoInbound = errors.New("this habitat has no inbound address")
 
+// An empty URL without noInbound is a broken instance, not --no-inbound.
+var errEmptyInboundURL = errors.New("instance metadata has an empty inbound URL")
+
 func InboundURLFromDir(dir string) (string, error) {
 	b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
 	if err != nil {
@@ -24,12 +27,16 @@ func InboundURLFromDir(dir string) (string, error) {
 	}
 	var meta struct {
 		InboundURL string `json:"inboundUrl"`
+		NoInbound  bool   `json:"noInbound"`
 	}
 	if err := json.Unmarshal(b, &meta); err != nil {
 		return "", err
 	}
-	if meta.InboundURL == "" {
+	if meta.NoInbound {
 		return "", errNoInbound
+	}
+	if meta.InboundURL == "" {
+		return "", errEmptyInboundURL
 	}
 	return meta.InboundURL, nil
 }
@@ -50,6 +57,8 @@ func inboundPublish(noInbound bool) []string {
 }
 
 func finishInbound(container string, noInbound bool, timeout time.Duration) (string, error) {
+	// The weak wall has no guest console to watch. The strong wall already
+	// waited for GUEST_UNAME= before calling this.
 	if noInbound {
 		return "", nil
 	}
