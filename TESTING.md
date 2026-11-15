@@ -46,6 +46,7 @@ In-process. No Docker habitat.
 | `TestChecksumMismatchIsRefused` | A file whose SHA-256 is not the pinned kernel checksum is deleted and the check returns an error. Matching bytes are kept. |
 | `TestFirecrackerStamp` | The extract stamp is the pinned tarball checksum plus the binary's SHA-256. A missing stamp, a stamp without that hash, or a swapped binary is not a cache hit. A rejected tarball deletes the stamp. A matching tarball keeps it. |
 | `TestGateFilesHardened` | Shipped gate files do not set `DONT_VERIFY_PEER` or `dns_v4_first`, and no active line uses `myport`. |
+| `TestDockerRunNotPrivileged` | No `Docker` `run` in `supervisor/` passes `--privileged`, including argv built in a slice. |
 | `TestSquidStartupQuiet` | Needs Docker. Squid started with the echo gate file does not log the `myport` or `dns_v4_first` warnings. |
 | `TestUntrustedVendorGetsNoKey` | Needs Docker. A vendor certificate the gate does not trust gets no request and no key. The same certificate trusted via `tls-cafile` does. |
 | `TestInstallACL` | An empty ACL path fails. A file is copied to `<instance>/squid.conf`. |
@@ -60,7 +61,7 @@ In-process. No Docker habitat.
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
 | `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcHelperDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-helper/` directory there. |
-| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4`. A second extract leaves the entrypoint mtime unchanged. |
+| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). A second extract leaves the entrypoint mtime unchanged. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
 | `TestToolCommand` | A tool-use payload `{"command":"id -u"}` yields the command `id -u`. |
