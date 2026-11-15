@@ -163,7 +163,8 @@ func ExecWeak(inst *WeakInstance, argv []string) (stdout, stderr string, code in
 }
 
 func DestroyWeak(id string) error {
-	DockerIgnore("rm", "-f", "htm-box-"+id)
+	// Inhabitant images may declare VOLUME. -v removes those anonymous volumes.
+	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	removeGate(id)
