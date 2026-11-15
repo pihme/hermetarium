@@ -22,6 +22,12 @@ exec >/dev/ttyS0 2>&1 || exec >/dev/console 2>&1 || true
 mount -t proc none /proc 2>/dev/null || true
 mount -t sysfs none /sys 2>/dev/null || true
 mount -t devtmpfs none /dev 2>/dev/null || true
+# A container runtime in the guest needs these.
+mkdir -p /dev/pts /dev/shm /run /sys/fs/cgroup
+mount -t devpts devpts /dev/pts 2>/dev/null || true
+mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
+mount -t tmpfs tmpfs /run 2>/dev/null || true
+mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
 # hermetarium.data=1 means create --data. The node can lag devtmpfs.
 if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   i=0
@@ -66,8 +72,8 @@ if [ -f /fc-env ]; then
   set +a
 fi
 # Port 3131 serves the gate CA only when HTTPS is open. busybox wget
-# speaks plain HTTP. curl initializes TLS and blocks in getrandom on the
-# 4.14 guest, before --max-time, so the server never starts.
+# speaks plain HTTP. Linux 6.1 has entropy at boot, so curl is safe, and
+# timeout 3 still bounds the call.
 mkdir -p /etc/ssl /usr/local/share/ca-certificates
 ca=/etc/ssl/hermetarium-mitm.crt
 ca_url=http://172.16.0.1:3131/ca.pem

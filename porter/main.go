@@ -22,7 +22,6 @@ func main() {
 		fmt.Println(Version)
 		return
 	}
-	seedEntropy()
 	log.Printf("porter %s", Version)
 	h := getenv("HARNESS", "claude")
 	s := &server{harness: h}

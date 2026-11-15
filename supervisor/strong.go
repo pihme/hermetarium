@@ -1,10 +1,11 @@
 package supervisor
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,15 @@ import (
 const (
 	fcVersion = "v1.16.1"
 	fcURL     = "https://github.com/firecracker-microvm/firecracker/releases/download/" + fcVersion + "/firecracker-" + fcVersion + "-x86_64.tgz"
-	kernelURL = "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin"
+	// Release asset firecracker-v1.16.1-x86_64.tgz.sha256.txt.
+	fcSHA256 = "382a02a869e4d6d5cb14c40577f9545e8458021ea8b0b2d3fc10ec14d9c242e6"
+	// Extract stamp: pinned tarball checksum, then the binary's SHA-256.
+	// A missing or different stamp is not a cache hit.
+	fcStampName = "firecracker.stamp"
+	// Firecracker publishes no checksum for CI kernels.
+	kernelURL    = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20261111-778a26c0594c-0/x86_64/vmlinux-6.1.188"
+	kernelFile   = "vmlinux-6.1.188"
+	kernelSHA256 = "f5735774e2570d9df451fc5665f3525d3baf723fa6a8a413a03591d5742b39a5"
 )
 
 const strongGuestIP = "172.16.0.2"
@@ -48,17 +57,78 @@ func fcHelperDir(root string) (string, error) {
 	return dir, nil
 }
 
-func download(url, dest string) error {
-	if st, err := os.Stat(dest); err == nil && st.Size() > 1000 {
+func download(url, dest, want string) error {
+	if err := requireSHA256(dest, want); err == nil {
 		return nil
 	}
 	tmp := dest + ".part"
-	_, err := Docker(3*time.Minute, "run", "--rm",
+	if _, err := Docker(3*time.Minute, "run", "--rm",
 		"-v", filepath.Dir(dest)+":/out",
 		AlpineImage, "sh", "-c",
 		"apk add --no-cache curl >/dev/null && curl -fL -o /out/"+filepath.Base(tmp)+" "+url+" && mv /out/"+filepath.Base(tmp)+" /out/"+filepath.Base(dest),
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return requireSHA256(dest, want)
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func requireSHA256(path, want string) error {
+	got, err := sha256File(path)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		_ = os.Remove(path)
+		return fmt.Errorf("checksum mismatch for %s", filepath.Base(path))
+	}
+	return nil
+}
+
+func fcBinaryCurrent(bin, stamp string) (bool, error) {
+	sum, err := sha256File(bin)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	b, err := os.ReadFile(stamp)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(string(b)) == fcSHA256+"\n"+sum, nil
+}
+
+func writeFCStamp(bin, stamp string) error {
+	sum, err := sha256File(bin)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(stamp, []byte(fcSHA256+"\n"+sum+"\n"), 0o644)
+}
+
+// discardFCStampIfTarballRejected drops the extract stamp when the cached
+// tarball is missing or is not the pinned release. download then replaces it.
+func discardFCStampIfTarballRejected(tgz, stamp, want string) {
+	if err := requireSHA256(tgz, want); err != nil {
+		_ = os.Remove(stamp)
+	}
 }
 
 func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
@@ -70,14 +140,23 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	kernel, err = cacheFile(root, "vmlinux.bin")
+	kernel, err = cacheFile(root, kernelFile)
 	if err != nil {
 		return "", "", err
 	}
-	if err := download(fcURL, tgz); err != nil {
+	stamp, err := cacheFile(root, fcStampName)
+	if err != nil {
 		return "", "", err
 	}
-	if _, err := os.Stat(firecracker); err != nil {
+	discardFCStampIfTarballRejected(tgz, stamp, fcSHA256)
+	if err := download(fcURL, tgz, fcSHA256); err != nil {
+		return "", "", err
+	}
+	current, err := fcBinaryCurrent(firecracker, stamp)
+	if err != nil {
+		return "", "", err
+	}
+	if !current {
 		_, err = Docker(2*time.Minute, "run", "--rm",
 			"-v", CacheDir(root)+":/out",
 			AlpineImage, "sh", "-c",
@@ -86,8 +165,11 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 		if err != nil {
 			return "", "", err
 		}
+		if err := writeFCStamp(firecracker, stamp); err != nil {
+			return "", "", err
+		}
 	}
-	if err := download(kernelURL, kernel); err != nil {
+	if err := download(kernelURL, kernel, kernelSHA256); err != nil {
 		return "", "", err
 	}
 	return firecracker, kernel, nil
@@ -154,13 +236,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 			return nil, err
 		}
 	}
-	// The 4.14 guest kernel has no virtio-rng; porter credits this seed
-	// to the entropy pool so getrandom() does not block (see porter/seed.go).
-	seed := make([]byte, 32)
-	if _, err := rand.Read(seed); err != nil {
-		return nil, err
-	}
-	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init hermetarium.seed=" + hex.EncodeToString(seed)
+	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init"
 	drives := []map[string]any{{
 		"drive_id":       "rootfs",
 		"path_on_host":   "/opt/rootfs.ext4",
