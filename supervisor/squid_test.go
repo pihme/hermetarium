@@ -198,7 +198,7 @@ func TestEnsureNetToolsStamp(t *testing.T) {
 				b, err := os.ReadFile(stamp)
 				if err != nil {
 					t.Errorf("read stamp during build: %v", err)
-				} else if !strings.Contains(string(b), "busybox-extras") {
+				} else if !strings.Contains(string(b), "busybox-extras") || !strings.Contains(string(b), "openssh-client") || !strings.Contains(string(b), "nftables") {
 					t.Errorf("build context:\n%s", b)
 				}
 				return "ok", nil
@@ -215,7 +215,7 @@ func TestEnsureNetToolsStamp(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(b) == old || !strings.Contains(string(b), "busybox-extras") {
+		if string(b) == old || !strings.Contains(string(b), "busybox-extras") || !strings.Contains(string(b), "openssh-client") || !strings.Contains(string(b), "nftables") {
 			t.Fatalf("stamp after success:\n%s", b)
 		}
 		if err := EnsureNetTools(root); err != nil {
