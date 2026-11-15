@@ -16,6 +16,12 @@ chmod +x /rootfs/fc-cmd 2>/dev/null || true
 if [ -f /in/fc-env ]; then
   cp /in/fc-env /rootfs/fc-env
 fi
+# amd64 ELF, no libc: getrandom(buf, 16, 0), then exit 0 only when 16 bytes
+# came back. fc-init bounds it so a missing CPU RNG cannot stall boot.
+base64 -d > /rootfs/fc-getrandom << 'END'
+f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOAABAAAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAqQAAAAAAAACpAAAAAAAAAAAQAAAAAAAASMfAPgEAAEiNfCTwSMfGEAAAAEgx0g8FSIP4EEjHxwEAAAB1BUgx/0jHwDwAAAAPBQ==
+END
+chmod +x /rootfs/fc-getrandom
 cat > /rootfs/fc-init << 'EOF'
 #!/bin/sh
 exec >/dev/ttyS0 2>&1 || exec >/dev/console 2>&1 || true
@@ -28,6 +34,26 @@ mount -t devpts devpts /dev/pts 2>/dev/null || true
 mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
 mount -t tmpfs tmpfs /run 2>/dev/null || true
 mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
+# virtio-rng (VM config "entropy") shows up as virtio_rng.N. Wait briefly:
+# the misc node can lag devtmpfs the same way /dev/vdb does.
+rng=missing
+i=0
+while [ "$i" -lt 50 ]; do
+  if [ -r /sys/class/misc/hw_random/rng_current ]; then
+    rng=$(cat /sys/class/misc/hw_random/rng_current)
+    case "$rng" in
+      *virtio_rng*) break ;;
+    esac
+  fi
+  sleep 0.1
+  i=$((i + 1))
+done
+echo "GUEST_RNG=$rng"
+if [ -x /bin/busybox ] && /bin/busybox timeout 2 /fc-getrandom; then
+  echo GUEST_GETRANDOM_OK
+else
+  echo GUEST_GETRANDOM_FAIL
+fi
 # hermetarium.data=1 means create --data. The node can lag devtmpfs.
 if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   i=0

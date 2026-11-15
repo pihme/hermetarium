@@ -267,7 +267,10 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 			"kernel_image_path": "/opt/vmlinux.bin",
 			"boot_args":         bootArgs,
 		},
-		"drives":         drives,
+		"drives": drives,
+		// No rate limit. An empty object is the virtio-rng device, so getrandom
+		// does not depend on the host CPU exposing RDRAND to the guest.
+		"entropy":        map[string]any{},
 		"machine-config": map[string]any{"vcpu_count": cpuCount(opts), "mem_size_mib": memMiB(opts)},
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",

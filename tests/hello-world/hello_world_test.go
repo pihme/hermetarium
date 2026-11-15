@@ -141,6 +141,19 @@ func testStrong(t *testing.T, root string) {
 		t.Fatalf("strong wall: guest kernel %s is not the pinned 6.1.188", m[1])
 	}
 	t.Logf("strong wall: guest kernel %s ≠ host %s", m[1], hostRelease)
+	rng := regexp.MustCompile(`GUEST_RNG=(\S+)`).FindStringSubmatch(serial)
+	if rng == nil || !strings.Contains(rng[1], "virtio_rng") {
+		got := "missing"
+		if rng != nil {
+			got = rng[1]
+		}
+		t.Fatalf("strong wall: rng_current %s is not virtio_rng\n%s", got, tail(serial, 2000))
+	}
+	t.Logf("strong wall: rng_current %s", rng[1])
+	if !strings.Contains(serial, "GUEST_GETRANDOM_OK") {
+		t.Fatalf("strong wall: getrandom did not return within 2s\n%s", tail(serial, 2000))
+	}
+	t.Log("strong wall: getrandom returned")
 	if !strings.Contains(serial, "LEAK_FAIL") {
 		t.Fatalf("strong wall: leak did not fail\n%s", tail(serial, 2000))
 	}
