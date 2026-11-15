@@ -174,8 +174,14 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 			return errWait("squid container exited: " + out + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 		}
 		if _, err := os.Stat(pid); err == nil {
-			// cache.log may not exist yet. Readiness is the pid, not the chmod.
-			_ = chmodLogs(logDir)
+			// The pid lands before access.log and cache.log. One failed chmod
+			// is not a failed start, but an error that outlives the deadline is.
+			chmodErr := retryUntil(deadline, time.Now, time.Sleep, func() error {
+				return chmodLogs(container, logDir, time.Until(deadline))
+			})
+			if chmodErr != nil {
+				return fmt.Errorf("chmod gate logs: %w", chmodErr)
+			}
 			return nil
 		}
 		last = "waiting for " + pid
@@ -185,8 +191,49 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 	return errWait("squid not ready: " + last + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 }
 
-func chmodLogs(logDir string) error {
-	_, err := Docker(30*time.Second, "run", "--rm", "-v", logDir+":/log", NetToolsImage,
+// The last error is returned as-is: a missing image or a Docker failure
+// must fail create, not be dropped.
+func retryUntil(deadline time.Time, now func() time.Time, sleep func(time.Duration), work func() error) error {
+	var last error
+	for now().Before(deadline) {
+		err := work()
+		if err == nil {
+			return nil
+		}
+		last = err
+		remain := deadline.Sub(now())
+		if remain <= 0 {
+			break
+		}
+		pause := 200 * time.Millisecond
+		if remain < pause {
+			pause = remain
+		}
+		sleep(pause)
+	}
+	if last == nil {
+		return fmt.Errorf("not ready before deadline")
+	}
+	return last
+}
+
+func chmodLogs(container, logDir string, timeout time.Duration) error {
+	for _, name := range []string{"access.log", "cache.log"} {
+		if _, err := os.Stat(filepath.Join(logDir, name)); err != nil {
+			return err
+		}
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("deadline exceeded")
+	}
+	// Cap a single attempt so a hung daemon cannot consume the whole WaitSquid
+	// budget. Root in the running gate can chmod the proxy-owned logs. A
+	// separate nettools container is what the unit job does not have; its
+	// failure used to be discarded and left the logs unreadable.
+	if timeout > 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	_, err := Docker(timeout, "exec", "-u", "root", container,
 		"chmod", "a+r", "/log/access.log", "/log/cache.log")
 	return err
 }
