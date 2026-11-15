@@ -19,6 +19,9 @@ const (
 	fcURL     = "https://github.com/firecracker-microvm/firecracker/releases/download/" + fcVersion + "/firecracker-" + fcVersion + "-x86_64.tgz"
 	// Release asset firecracker-v1.16.1-x86_64.tgz.sha256.txt.
 	fcSHA256 = "382a02a869e4d6d5cb14c40577f9545e8458021ea8b0b2d3fc10ec14d9c242e6"
+	// Extract stamp: pinned tarball checksum, then the binary's SHA-256.
+	// A missing or different stamp is not a cache hit.
+	fcStampName = "firecracker.stamp"
 	// Firecracker publishes no checksum for CI kernels.
 	kernelURL    = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20261111-778a26c0594c-0/x86_64/vmlinux-6.1.188"
 	kernelFile   = "vmlinux-6.1.188"
@@ -68,22 +71,63 @@ func download(url, dest, want string) error {
 	return requireSHA256(dest, want)
 }
 
-func requireSHA256(path, want string) error {
+func sha256File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func requireSHA256(path, want string) error {
+	got, err := sha256File(path)
+	if err != nil {
 		return err
 	}
-	if hex.EncodeToString(h.Sum(nil)) != want {
-		f.Close()
+	if got != want {
 		_ = os.Remove(path)
 		return fmt.Errorf("checksum mismatch for %s", filepath.Base(path))
 	}
 	return nil
+}
+
+func fcBinaryCurrent(bin, stamp string) (bool, error) {
+	sum, err := sha256File(bin)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	b, err := os.ReadFile(stamp)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(string(b)) == fcSHA256+"\n"+sum, nil
+}
+
+func writeFCStamp(bin, stamp string) error {
+	sum, err := sha256File(bin)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(stamp, []byte(fcSHA256+"\n"+sum+"\n"), 0o644)
+}
+
+// discardFCStampIfTarballRejected drops the extract stamp when the cached
+// tarball is missing or is not the pinned release. download then replaces it.
+func discardFCStampIfTarballRejected(tgz, stamp, want string) {
+	if err := requireSHA256(tgz, want); err != nil {
+		_ = os.Remove(stamp)
+	}
 }
 
 func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
@@ -99,16 +143,28 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	if err != nil {
 		return "", "", err
 	}
+	stamp, err := cacheFile(root, fcStampName)
+	if err != nil {
+		return "", "", err
+	}
+	discardFCStampIfTarballRejected(tgz, stamp, fcSHA256)
 	if err := download(fcURL, tgz, fcSHA256); err != nil {
 		return "", "", err
 	}
-	if _, err := os.Stat(firecracker); err != nil {
+	current, err := fcBinaryCurrent(firecracker, stamp)
+	if err != nil {
+		return "", "", err
+	}
+	if !current {
 		_, err = Docker(2*time.Minute, "run", "--rm",
 			"-v", CacheDir(root)+":/out",
 			AlpineImage, "sh", "-c",
 			"apk add --no-cache tar >/dev/null && tar -xzf /out/"+filepath.Base(tgz)+" -C /tmp && find /tmp -name 'firecracker-*x86_64' ! -name '*debug*' | head -1 | xargs -I{} cp {} /out/firecracker && chmod +x /out/firecracker",
 		)
 		if err != nil {
+			return "", "", err
+		}
+		if err := writeFCStamp(firecracker, stamp); err != nil {
 			return "", "", err
 		}
 	}

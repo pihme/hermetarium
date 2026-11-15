@@ -58,7 +58,8 @@ if [ -f /fc-env ]; then
   set +a
 fi
 # Port 3131 serves the gate CA only when HTTPS is open. busybox wget
-# speaks plain HTTP. curl is the fallback when the image has no busybox.
+# speaks plain HTTP. Linux 6.1 has entropy at boot, so curl is safe, and
+# timeout 3 still bounds the call.
 mkdir -p /etc/ssl /usr/local/share/ca-certificates
 ca=/etc/ssl/hermetarium-mitm.crt
 ca_url=http://172.16.0.1:3131/ca.pem
