@@ -14,8 +14,8 @@ const (
 	TestVendorKey  = "htm-test-key"
 	VendorMockPort = 18082
 	MockVendorPeer = "127.0.0.1 parent 18082 0 no-query no-digest originserver"
-	ClaudeLivePeer = "api.anthropic.com parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
-	GrokLivePeer   = "api.x.ai parent 443 0 no-query no-digest originserver ssl sslflags=DONT_VERIFY_PEER"
+	ClaudeLivePeer = "api.anthropic.com parent 443 0 no-query no-digest originserver ssl tls-cafile=/etc/ssl/certs/ca-certificates.crt"
+	GrokLivePeer   = "api.x.ai parent 443 0 no-query no-digest originserver ssl tls-cafile=/etc/ssl/certs/ca-certificates.crt"
 )
 
 func StartProbe(root, id, netns string) error {

@@ -16,6 +16,7 @@ type CreateOpts struct {
 
 	MemMiB int
 	DiskMB int
+	CPUs   int // 0 means the wall default: one guest CPU, no Docker quota
 
 	// DataPath is a host file attached as a second disk on the strong wall.
 	// DataMiB is used only when that file does not exist yet.
@@ -42,6 +43,13 @@ func diskMB(o CreateOpts) int {
 		return o.DiskMB
 	}
 	return 1024
+}
+
+func cpuCount(o CreateOpts) int {
+	if o.CPUs > 0 {
+		return o.CPUs
+	}
+	return 1
 }
 
 func runAfterGate(opts CreateOpts, id, netns string) error {

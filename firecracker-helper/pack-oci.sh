@@ -4,8 +4,9 @@
 set -eu
 SIZE_MB="${SIZE_MB:-256}"
 apk add --no-cache e2fsprogs tar >/dev/null
-dd if=/dev/zero of=/out/rootfs.ext4 bs=1M count="$SIZE_MB"
-mkfs.ext4 -F /out/rootfs.ext4 >/dev/null
+truncate -s "${SIZE_MB}M" /out/rootfs.ext4
+# mkfs must not allocate the journal and inode tables.
+mkfs.ext4 -F -E lazy_itable_init=1,lazy_journal_init=1 /out/rootfs.ext4 >/dev/null
 mkdir -p /rootfs
 mount /out/rootfs.ext4 /rootfs
 tar -xf /in/rootfs.tar -C /rootfs

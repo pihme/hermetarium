@@ -46,6 +46,16 @@ func TestResolveCreate(t *testing.T) {
 	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data-size", "64"}); err == nil {
 		t.Fatal("expected --data-size to require --data")
 	}
+	if ex.CPUs != 0 {
+		t.Fatalf("default cpus %d", ex.CPUs)
+	}
+	withCPU, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--cpus", "4"})
+	if err != nil || withCPU.CPUs != 4 {
+		t.Fatalf("cpus %+v %v", withCPU, err)
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--cpus", "0"}); err == nil {
+		t.Fatal("expected --cpus to reject 0")
+	}
 }
 
 func TestChooseID(t *testing.T) {

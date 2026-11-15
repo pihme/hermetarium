@@ -40,7 +40,7 @@ Two walls can hold that container. The container image is the same on both. A we
 
 <a id="getting-started"></a>
 
-From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container is privileged. The host itself needs no sudo.
+From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container receives `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`. The host itself needs no sudo.
 
 From source:
 
@@ -118,8 +118,8 @@ The shared shape of the gate is in the [inhabitants README](inhabitants/README.m
 ## Commands
 
 ```text
-hermetarium create --image NAME --acl FILE [--id NAME] [--no-inbound]
-hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--id NAME] [--no-inbound]
+hermetarium create --image NAME --acl FILE [--cpus N] [--id NAME] [--no-inbound]
+hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--id NAME] [--no-inbound]
 hermetarium url YOUR_ID
 hermetarium logs YOUR_ID
 hermetarium destroy YOUR_ID
@@ -131,7 +131,7 @@ hermetarium exec YOUR_ID -- <cmd>
 
 `--id NAME` chooses the id. Leave it off and `create` prints a new one. A name such as `claude` is fine. Use letters, digits, `.`, `_`, and `-`, start with a letter or a digit, and stay within 63 characters. Later commands use that same id.
 
-`--wall strong` is the virtual machine. `--mem` and `--disk` set its size in MiB. The defaults are 512 and 1024. Those two flags belong to the strong wall.
+`--wall strong` is the virtual machine. `--mem` and `--disk` set its size in MiB. The defaults are 512 and 1024. Those two flags belong to the strong wall. The root disk is sparse. `--cpus N` works on both walls: that many processors in the virtual machine, or that CPU quota on Docker. The default is one processor, and no Docker quota.
 
 `url` prints the address, or `this habitat has no inbound address` when the habitat was created with `--no-inbound`. `logs` prints what passed the gate. `destroy` stops the habitat.
 

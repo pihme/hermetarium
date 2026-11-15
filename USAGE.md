@@ -60,12 +60,14 @@ Start the same image in a virtual machine. The defaults are 512 MiB of memory an
 To choose the size, pass MiB. The disk size is in MiB too.
 
 ```bash
-./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image hermetarium/echo:dev --acl examples/echo/squid.conf
+./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --cpus 4 --image hermetarium/echo:dev --acl examples/echo/squid.conf
 ```
 
 `--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for port 8080. The gate file can then omit the `inhabitant` peer and port 18081. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
 
-`--mem` and `--disk` belong to the strong wall. The Docker wall refuses them.
+`--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out.
+
+`--cpus N` works on both walls. The strong wall gives the guest that many processors. The Docker wall sets that CPU quota (`--cpus`). Leave it off and the guest has one processor, and the Docker wall has no quota.
 
 `--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. An existing file is attached as it is and is not resized. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. A file a running habitat has open is refused. The Docker wall refuses `--data`.
 
@@ -142,8 +144,8 @@ Squid listens on three ports. The first is a plain local port Squid wants open. 
 
 ```
 http_port 127.0.0.1:3129
-http_port 0.0.0.0:18081 accel defaultsite=inhabitant vhost
-http_port 0.0.0.0:3128 intercept
+http_port 0.0.0.0:18081 accel defaultsite=inhabitant vhost name=inbound
+http_port 0.0.0.0:3128 intercept name=intercept
 ```
 
 The container's name on the gate is `inhabitant`. Something inside must listen on port 8080. `proxy` is the user in the Squid image.
@@ -160,10 +162,10 @@ always_direct deny all
 never_direct allow all
 ```
 
-Your door is `myport 18081`, and that traffic goes only to `inhabitant`. Squid uses the first matching line, so name `inbound` first and put the allow before the deny.
+Your door is the port named `inbound`. `myport` is not reliable once Squid is intercepting, so the gate matches `myportname` instead. That traffic goes only to `inhabitant`. Squid uses the first matching line, so name `inbound` first and put the allow before the deny.
 
 ```
-acl inbound myport 18081
+acl inbound myportname inbound
 cache_peer_access inhabitant allow inbound
 cache_peer_access inhabitant deny all
 http_access allow inbound
