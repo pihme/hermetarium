@@ -76,9 +76,18 @@ func TestExtract(t *testing.T) {
 		t.Fatal("/fc-env sourced more than once")
 	}
 	failAt := strings.Index(init, "echo DATA_MOUNT_FAIL")
-	exitAt := strings.LastIndex(init, "exit 1")
+	exitAt := -1
+	if failAt >= 0 {
+		rest := init[failAt:]
+		if i := strings.Index(rest, "\n  fi\n"); i >= 0 {
+			rest = rest[:i]
+		}
+		if i := strings.Index(rest, "exit 1"); i >= 0 {
+			exitAt = failAt + i
+		}
+	}
 	envAt := strings.Index(init, ". /fc-env")
-	if strings.Contains(init, "|| echo DATA_MOUNT_FAIL") || failAt < 0 || exitAt < failAt || envAt < exitAt || execAt < exitAt {
+	if strings.Contains(init, "|| echo DATA_MOUNT_FAIL") || exitAt < 0 || envAt < exitAt || execAt < exitAt {
 		t.Fatal("data mount failure must stop before the inhabitant")
 	}
 	if !strings.Contains(string(b), "echo DATA_MOUNT_OK") {
