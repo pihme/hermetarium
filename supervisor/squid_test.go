@@ -1,10 +1,12 @@
 package supervisor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSquidDockerfile(t *testing.T) {
@@ -58,5 +60,114 @@ func TestInstallACLRemovesStalePid(t *testing.T) {
 	}
 	if _, err := os.Stat(pid); !os.IsNotExist(err) {
 		t.Fatalf("squid.pid should be gone, stat err: %v", err)
+	}
+}
+
+func stubDocker(t *testing.T, fn func(time.Duration, ...string) (string, error)) {
+	t.Helper()
+	prev := dockerFn
+	dockerFn = fn
+	t.Cleanup(func() { dockerFn = prev })
+}
+
+func writeGateFile(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWaitSquidRetriesMissingLogUntilDeadline(t *testing.T) {
+	dir := t.TempDir()
+	writeGateFile(t, dir, "squid.pid")
+	writeGateFile(t, dir, "access.log")
+	var inspects, chmods int
+	stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "inspect" {
+			inspects++
+			return "true 0", nil
+		}
+		if strings.Contains(strings.Join(args, " "), "chmod") {
+			chmods++
+			t.Errorf("chmod ran before cache.log existed")
+		}
+		return "", nil
+	})
+	start := time.Now()
+	err := WaitSquid(dir, "gate", 600*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an error while cache.log is missing")
+	}
+	if time.Since(start) < 450*time.Millisecond {
+		t.Fatalf("returned in %s, want to keep retrying until the deadline", time.Since(start))
+	}
+	if inspects < 2 {
+		t.Fatalf("inspects = %d, want retries inside the deadline", inspects)
+	}
+	if chmods != 0 {
+		t.Fatalf("chmod calls = %d, want none until both logs exist", chmods)
+	}
+}
+
+func TestWaitSquidReturnsChmodError(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"squid.pid", "access.log", "cache.log"} {
+		writeGateFile(t, dir, name)
+	}
+	var chmods int
+	stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "inspect" {
+			return "true 0", nil
+		}
+		if strings.Contains(strings.Join(args, " "), "chmod") {
+			chmods++
+			return "", fmt.Errorf("docker [exec -u root gate chmod a+r /log/access.log /log/cache.log]\nError response from daemon: No such container: gate\nexit status 1")
+		}
+		return "", nil
+	})
+	err := WaitSquid(dir, "gate", 600*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "No such container") {
+		t.Fatalf("got %v", err)
+	}
+	if chmods < 2 {
+		t.Fatalf("chmod calls = %d, want a retry after the first failure", chmods)
+	}
+}
+
+func TestWaitSquidChmodSucceedsOnlyWhenBothLogsExist(t *testing.T) {
+	dir := t.TempDir()
+	writeGateFile(t, dir, "squid.pid")
+	writeGateFile(t, dir, "access.log")
+	cache := filepath.Join(dir, "cache.log")
+	wrote := make(chan error, 1)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		wrote <- os.WriteFile(cache, nil, 0o644)
+	}()
+	var chmods int
+	stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "inspect" {
+			return "true 0", nil
+		}
+		if strings.Contains(strings.Join(args, " "), "chmod") {
+			for _, name := range []string{"access.log", "cache.log"} {
+				if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+					return "", fmt.Errorf("chmod before %s exists", name)
+				}
+			}
+			chmods++
+			return "", nil
+		}
+		return "", nil
+	})
+	err := WaitSquid(dir, "gate", 2*time.Second)
+	if werr := <-wrote; werr != nil {
+		t.Fatal(werr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chmods != 1 {
+		t.Fatalf("chmod calls = %d, want one call after both logs exist", chmods)
 	}
 }
