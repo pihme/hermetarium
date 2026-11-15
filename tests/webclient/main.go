@@ -40,6 +40,7 @@ func showCert(host string) {
 		if attempt > 0 {
 			time.Sleep(300 * time.Millisecond)
 		}
+		// codeql[go/disabled-certificate-check] passed-through certificate is reported, not trusted
 		conn, err := tls.Dial("tcp", host+":443", &tls.Config{ServerName: host, InsecureSkipVerify: true})
 		if err != nil {
 			last = err
