@@ -21,21 +21,25 @@ func TestWeakBridgeForwardAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	network := "htm-fwd-" + id
+	var br string
 	t.Cleanup(func() {
-		_ = forgetSameBridge(network)
+		if br != "" {
+			_ = forgetSameBridge(br)
+		}
 		DockerIgnore("network", "rm", network)
 	})
 	if _, err := Docker(30*time.Second, "network", "create", "--driver", "bridge", "--internal",
 		"--subnet", "10.254.254.0/24", network); err != nil {
 		t.Fatal(err)
 	}
-	if err := acceptSameBridge(network); err != nil {
+	br, err = acceptSameBridge(network)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !bridgeForwardRule(t, network, "iptables-nft") {
 		t.Fatal("iptables-nft forward accept missing")
 	}
-	if err := forgetSameBridge(network); err != nil {
+	if err := forgetSameBridge(br); err != nil {
 		t.Fatal(err)
 	}
 	if bridgeForwardRule(t, network, "iptables-nft") || bridgeForwardRule(t, network, "iptables-legacy") {
