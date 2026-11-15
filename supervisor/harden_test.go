@@ -82,16 +82,12 @@ func TestSquidStartupQuiet(t *testing.T) {
 	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	// squid.pid can appear before cache.log, so WaitSquid's chmod misses the
-	// file Squid then creates as the proxy user.
-	if err := chmodLogs(dir); err != nil {
-		t.Fatal(err)
-	}
-	logb, err := os.ReadFile(filepath.Join(dir, "cache.log"))
+	// The proxy user owns cache.log, and the unit job has no nettools image to chmod it.
+	// Root in the running gate can read the path Squid was given.
+	log, err := Docker(15*time.Second, "exec", "-u", "root", name, "cat", "/log/cache.log")
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := string(logb)
 	if strings.Contains(log, "not reliable for interception") {
 		t.Fatalf("myport warning:\n%s", log)
 	}
