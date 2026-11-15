@@ -212,7 +212,13 @@ func SyncAccessLog(accessPath, jsonlPath string) error {
 	if err := sc.Err(); err != nil {
 		return err
 	}
-	return appendDNSLog(enc, filepath.Join(filepath.Dir(accessPath), "dns.jsonl"))
+	// Lines rotated off dns.jsonl live in dns.jsonl.1. Read that file first,
+	// then the current one, so a sync still has every retained query.
+	dnsPath := filepath.Join(filepath.Dir(accessPath), "dns.jsonl")
+	if err := appendDNSLog(enc, dnsPath+".1"); err != nil {
+		return err
+	}
+	return appendDNSLog(enc, dnsPath)
 }
 
 func appendDNSLog(enc *json.Encoder, path string) error {

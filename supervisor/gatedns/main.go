@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,24 @@ import (
 	"sync"
 	"time"
 )
+
+const (
+	// One habitat can send as fast as the socket allows. Past this, new
+	// queries are dropped instead of starting another goroutine.
+	maxInflight = 32
+	// io.jsonl is rewritten from Squid's access log and has no cap. This
+	// file only grows, so keep it and one previous generation bounded.
+	dnsLogCap = 1 << 20
+	// A UDP client retries on TCP when the message does not fit in 512 octets.
+	udpAnswerMax = 512
+	// One habitat TCP read. Past this the connection is closed.
+	tcpDeadline = 5 * time.Second
+)
+
+// reopenLog is the open of a fresh dns.jsonl after rotation. Tests fail it.
+var reopenLog = func(name string) (*os.File, error) {
+	return os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+}
 
 type dnsRec struct {
 	Time        string `json:"time"`
@@ -28,12 +47,17 @@ type dnsRec struct {
 }
 
 type gateDNS struct {
-	open  bool
-	gate  net.IP
-	names map[string]struct{}
-	up    []string
-	mu    sync.Mutex
-	log   *os.File
+	open    bool
+	gate    net.IP
+	names   map[string]struct{}
+	up      []string
+	upPort  string        // set by tests; production uses 53
+	tcpWait time.Duration // set by tests; production uses tcpDeadline
+	slots   chan struct{}
+	logCap  int64
+	mu      sync.Mutex
+	log     *os.File
+	logN    int64
 }
 
 func main() {
@@ -61,20 +85,44 @@ func main() {
 		os.Exit(1)
 	}
 	go g.serveTCP(tcp)
+	g.serveUDP(udp)
+}
+
+func (g *gateDNS) serveUDP(udp net.PacketConn) {
 	buf := make([]byte, 4096)
 	for {
 		n, addr, err := udp.ReadFrom(buf)
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			continue
 		}
 		q := append([]byte(nil), buf[:n]...)
+		if !g.acquire() {
+			continue
+		}
 		go func(addr net.Addr) {
-			resp := g.answer(q)
+			defer g.release()
+			resp := g.answer(q, false)
 			if len(resp) > 0 {
 				_, _ = udp.WriteTo(resp, addr)
 			}
 		}(addr)
 	}
+}
+
+func (g *gateDNS) acquire() bool {
+	select {
+	case g.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *gateDNS) release() {
+	<-g.slots
 }
 
 func loadGateDNS(confPath, logPath string) (*gateDNS, error) {
@@ -113,22 +161,61 @@ func loadGateDNS(confPath, logPath string) (*gateDNS, error) {
 		up = append(up, s)
 	}
 	g.up = up
-	g.log, err = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
+	g.slots = make(chan struct{}, maxInflight)
+	if err := g.openLog(logPath); err != nil {
 		return nil, err
 	}
 	return g, nil
+}
+
+func (g *gateDNS) limit() int64 {
+	if g.logCap > 0 {
+		return g.logCap
+	}
+	return dnsLogCap
+}
+
+func (g *gateDNS) openLog(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	g.log = f
+	g.logN = st.Size()
+	if g.logN > g.limit() {
+		// Rotating keeps the bytes for the I/O log. Truncating would drop
+		// queries that have not been copied yet.
+		g.rotate()
+	}
+	return nil
 }
 
 func (g *gateDNS) serveTCP(ln net.Listener) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			continue
+		}
+		if !g.acquire() {
+			c.Close()
 			continue
 		}
 		go func(c net.Conn) {
+			defer g.release()
 			defer c.Close()
-			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+			wait := g.tcpWait
+			if wait == 0 {
+				wait = tcpDeadline
+			}
+			_ = c.SetDeadline(time.Now().Add(wait))
 			var n uint16
 			if err := binary.Read(c, binary.BigEndian, &n); err != nil || n > 4096 {
 				return
@@ -137,8 +224,8 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 			if _, err := io.ReadFull(c, q); err != nil {
 				return
 			}
-			resp := g.answer(q)
-			if len(resp) == 0 {
+			resp := g.answer(q, true)
+			if len(resp) == 0 || len(resp) > 65535 {
 				return
 			}
 			_ = binary.Write(c, binary.BigEndian, uint16(len(resp)))
@@ -147,7 +234,7 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 	}
 }
 
-func (g *gateDNS) answer(q []byte) []byte {
+func (g *gateDNS) answer(q []byte, fromTCP bool) []byte {
 	name, typ, qend, ok := parseQuestion(q)
 	if !ok {
 		return nil
@@ -167,7 +254,7 @@ func (g *gateDNS) answer(q []byte) []byte {
 		g.record(name, typ, "NXDOMAIN", false)
 		return resp
 	}
-	resp, err := g.forward(q)
+	resp, err := g.forward(q, fromTCP)
 	if err != nil {
 		resp = localResp(q, qend, 2, false, nil)
 		g.record(name, typ, "SERVFAIL", true)
@@ -177,34 +264,98 @@ func (g *gateDNS) answer(q []byte) []byte {
 	return resp
 }
 
-func (g *gateDNS) forward(q []byte) ([]byte, error) {
+func (g *gateDNS) resolverAddr(ip string) string {
+	port := g.upPort
+	if port == "" {
+		port = "53"
+	}
+	return net.JoinHostPort(ip, port)
+}
+
+func (g *gateDNS) forward(q []byte, fromTCP bool) ([]byte, error) {
 	var last error
 	for _, s := range g.up {
-		conn, err := net.DialTimeout("udp", net.JoinHostPort(s, "53"), time.Second)
-		if err != nil {
+		addr := g.resolverAddr(s)
+		if fromTCP {
+			resp, err := exchangeTCP(addr, q)
+			if err != nil || len(resp) < 12 {
+				last = err
+				continue
+			}
+			return resp, nil
+		}
+		resp, err := exchangeUDP(addr, q)
+		if err != nil || len(resp) < 12 {
 			last = err
 			continue
 		}
-		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-		_, err = conn.Write(q)
-		if err != nil {
-			conn.Close()
-			last = err
-			continue
+		if !dnsTruncated(resp) {
+			return resp, nil
 		}
-		buf := make([]byte, 4096)
-		n, err := conn.Read(buf)
-		conn.Close()
-		if err != nil || n < 12 {
-			last = err
-			continue
+		// The UDP answer does not fit. Take the TCP message when the
+		// client can still receive it; otherwise leave TC set so it retries.
+		full, ferr := exchangeTCP(addr, q)
+		if ferr != nil || len(full) < 12 || len(full) > udpAnswerMax {
+			return resp, nil
 		}
-		return buf[:n], nil
+		return full, nil
 	}
 	if last == nil {
 		last = fmt.Errorf("no upstream resolver")
 	}
 	return nil, last
+}
+
+func exchangeUDP(addr string, q []byte) ([]byte, error) {
+	conn, err := net.DialTimeout("udp", addr, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Write(q); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+func exchangeTCP(addr string, q []byte) ([]byte, error) {
+	if len(q) > 65535 {
+		return nil, fmt.Errorf("query too long")
+	}
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	pkt := make([]byte, 2+len(q))
+	binary.BigEndian.PutUint16(pkt[:2], uint16(len(q)))
+	copy(pkt[2:], q)
+	if _, err := conn.Write(pkt); err != nil {
+		return nil, err
+	}
+	var n uint16
+	if err := binary.Read(conn, binary.BigEndian, &n); err != nil {
+		return nil, err
+	}
+	if n < 12 {
+		return nil, fmt.Errorf("short dns response")
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func dnsTruncated(pkt []byte) bool {
+	return len(pkt) >= 12 && pkt[2]&0x02 != 0
 }
 
 func (g *gateDNS) record(name, typ, result string, allowed bool) {
@@ -224,7 +375,38 @@ func (g *gateDNS) record(name, typ, result string, allowed bool) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	_, _ = g.log.Write(append(b, '\n'))
+	g.writeLine(append(b, '\n'))
+}
+
+func (g *gateDNS) writeLine(line []byte) {
+	if g.log == nil {
+		return
+	}
+	if g.logN > 0 && g.logN+int64(len(line)) > g.limit() {
+		g.rotate()
+	}
+	n, err := g.log.Write(line)
+	if err != nil {
+		return
+	}
+	g.logN += int64(n)
+}
+
+func (g *gateDNS) rotate() {
+	// Rename replaces .1. If the new file cannot be opened, put the name
+	// back and keep this fd, so later lines still append to dns.jsonl.
+	name := g.log.Name()
+	if err := os.Rename(name, name+".1"); err != nil {
+		return
+	}
+	f, err := reopenLog(name)
+	if err != nil {
+		_ = os.Rename(name+".1", name)
+		return
+	}
+	_ = g.log.Close()
+	g.log = f
+	g.logN = 0
 }
 
 func localResp(q []byte, qend, rcode int, aa bool, rr []byte) []byte {

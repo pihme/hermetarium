@@ -133,3 +133,26 @@ func TestSyncMergesDNS(t *testing.T) {
 		t.Fatalf("missing access.log %+v", recs)
 	}
 }
+
+func TestSyncReadsRotatedDNS(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"time":"2026-01-01T00:00:00Z","direction":"out","protocol":"dns","destination":"old.example","port":53,"method":"A","result":"A 192.0.2.1","allowed":true}` + "\n"
+	cur := `{"time":"2026-01-01T00:00:01Z","direction":"out","protocol":"dns","destination":"new.example","port":53,"method":"A","result":"A 192.0.2.2","allowed":true}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "dns.jsonl.1"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dns.jsonl"), []byte(cur), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := filepath.Join(dir, "io.jsonl")
+	if err := SyncAccessLog(filepath.Join(dir, "access.log"), jsonl); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := ReadIoLog(jsonl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 || recs[0].Destination != "old.example" || recs[1].Destination != "new.example" {
+		t.Fatalf("%+v", recs)
+	}
+}
