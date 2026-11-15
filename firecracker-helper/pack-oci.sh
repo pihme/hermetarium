@@ -82,6 +82,10 @@ if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   # Do not start the inhabitant when the disk will not mount.
   if ! mount -t ext4 -o sync,noatime /dev/vdb /data; then
     echo DATA_MOUNT_FAIL
+    # panic=1 drops the tty buffer when PID 1 exits. Stay up past the
+    # host's 200ms poll so the mount error is in the helper log.
+    # destroy stops the helper; create does not wait out this sleep.
+    sleep 1
     exit 1
   fi
   echo DATA_MOUNT_OK

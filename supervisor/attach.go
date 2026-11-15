@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -8,14 +9,18 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -87,7 +92,8 @@ func loadRunning(root, id string) (running, error) {
 
 func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
 	args := []string{"exec", "-i"}
-	if isTTY(in) {
+	tty := isTTY(in)
+	if tty {
 		args = append(args, "-t")
 	}
 	args = append(args, box)
@@ -96,7 +102,12 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	return waitSignal(cmd, sig, stop)
+	if !tty {
+		return waitSignal(cmd, sig, stop)
+	}
+	// docker exec -t copies the window once, at start. A later SIGWINCH
+	// on the CLI does not resize that session.
+	return waitExecTTY(cmd, box, in, sig, stop)
 }
 
 // attachSSH runs ssh in a throwaway container that shares the helper network
@@ -199,6 +210,171 @@ func waitSignal(cmd *exec.Cmd, sig <-chan os.Signal, stop <-chan struct{}) (int,
 		return ee.ExitCode(), nil
 	}
 	return 1, err
+}
+
+// errExecGone means this exec id has already exited. A replayed exec_start
+// from the previous attach is not the session we just started.
+var errExecGone = errors.New("attach: exec is gone")
+
+type execWatch struct {
+	cmd  *exec.Cmd
+	ids  <-chan string
+	done chan struct{}
+}
+
+func startExecWatch(box string) (*execWatch, error) {
+	// --since covers the gap before the events stream is subscribed.
+	since := time.Now().Add(-2 * time.Second).UTC().Format(time.RFC3339)
+	cmd := exec.Command("docker", "events",
+		"--since", since,
+		"--filter", "type=container",
+		"--filter", "event=exec_start",
+		"--filter", "container="+box,
+		"--format", "{{.Actor.Attributes.execID}}",
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	ids := make(chan string)
+	done := make(chan struct{})
+	go func() {
+		defer close(ids)
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			id := strings.TrimSpace(sc.Text())
+			if id == "" {
+				continue
+			}
+			select {
+			case ids <- id:
+			case <-done:
+				return
+			}
+		}
+	}()
+	return &execWatch{cmd: cmd, ids: ids, done: done}, nil
+}
+
+func (w *execWatch) stop() {
+	close(w.done)
+	if w.cmd.Process != nil {
+		_ = w.cmd.Process.Kill()
+	}
+	_ = w.cmd.Wait()
+}
+
+func waitExecTTY(cmd *exec.Cmd, box string, in *os.File, sig <-chan os.Signal, _ <-chan struct{}) (int, error) {
+	watch, err := startExecWatch(box)
+	if err != nil {
+		return 1, err
+	}
+	defer watch.stop()
+	if err := cmd.Start(); err != nil {
+		return 1, err
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+
+	var id string
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for id == "" {
+		select {
+		case got, ok := <-watch.ids:
+			if !ok {
+				return reapExec(cmd, waitCh, fmt.Errorf("attach: exec id not found"))
+			}
+			err := resizeDockerExec(got, in)
+			if err == nil {
+				id = got
+				continue
+			}
+			if !errors.Is(err, errExecGone) {
+				return reapExec(cmd, waitCh, err)
+			}
+		case err := <-waitCh:
+			return commandStatus(err)
+		case <-deadline.C:
+			return reapExec(cmd, waitCh, fmt.Errorf("attach: exec id not found"))
+		}
+	}
+	for {
+		select {
+		case <-sig:
+			if cmd.Process != nil {
+				_ = cmd.Process.Signal(syscall.SIGWINCH)
+			}
+			if err := resizeDockerExec(id, in); err != nil {
+				return reapExec(cmd, waitCh, err)
+			}
+		case err := <-waitCh:
+			return commandStatus(err)
+		}
+	}
+}
+
+func reapExec(cmd *exec.Cmd, waitCh <-chan error, err error) (int, error) {
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	<-waitCh
+	return 1, err
+}
+
+func commandStatus(err error) (int, error) {
+	if err == nil {
+		return 0, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode(), nil
+	}
+	return 1, err
+}
+
+func dockerSocket() (string, error) {
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		return "/var/run/docker.sock", nil
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Scheme != "unix" || u.Path == "" {
+		return "", fmt.Errorf("attach: DOCKER_HOST %q is not a unix socket", host)
+	}
+	return u.Path, nil
+}
+
+func resizeDockerExec(id string, in *os.File) error {
+	sock, err := dockerSocket()
+	if err != nil {
+		return err
+	}
+	row, col := termSize(in)
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return fmt.Errorf("attach: docker socket: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	req := fmt.Sprintf("POST /exec/%s/resize?h=%d&w=%d HTTP/1.0\r\nHost: docker\r\n\r\n", id, row, col)
+	if _, err := io.WriteString(conn, req); err != nil {
+		return fmt.Errorf("attach: resize: %w", err)
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("attach: resize: %w", err)
+	}
+	if strings.Contains(line, " 404 ") {
+		return errExecGone
+	}
+	if !strings.Contains(line, " 200 ") {
+		return fmt.Errorf("attach: resize: %s", strings.TrimSpace(line))
+	}
+	return nil
 }
 
 // ssh joins its arguments and the guest shell parses that string. Quoting
