@@ -17,6 +17,11 @@ type CreateOpts struct {
 	MemMiB int
 	DiskMB int
 
+	// DataPath is a host file attached as a second disk on the strong wall.
+	// DataMiB is used only when that file does not exist yet.
+	DataPath string
+	DataMiB  int
+
 	// NoInbound publishes no host port and does not wait for port 8080.
 	NoInbound bool
 }

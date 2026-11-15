@@ -67,6 +67,17 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--mem` and `--disk` belong to the strong wall. The Docker wall refuses them.
 
+`--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. An existing file is attached as it is and is not resized. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. A file a running habitat has open is refused. The Docker wall refuses `--data`.
+
+To read the file on the host, stop the habitat first. `destroy` powers the machine off, so replay the journal before the read-only mount:
+
+```bash
+sudo e2fsck -p FILE
+sudo mount -o loop,ro,noexec,nosuid,nodev FILE /mnt
+```
+
+`e2fsck -p` only replays the journal. `noexec,nosuid,nodev` keeps a program stored on the disk from running while you read it. Unmount the file before the next `create --data`.
+
 Ask where it is listening:
 
 ```bash

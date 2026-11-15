@@ -21,6 +21,20 @@ exec >/dev/ttyS0 2>&1 || exec >/dev/console 2>&1 || true
 mount -t proc none /proc 2>/dev/null || true
 mount -t sysfs none /sys 2>/dev/null || true
 mount -t devtmpfs none /dev 2>/dev/null || true
+# hermetarium.data=1 means create --data. The node can lag devtmpfs.
+if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
+  i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -b /dev/vdb ]; then
+      break
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  mkdir -p /data
+  # destroy powers the machine off. sync makes a finished write durable.
+  mount -t ext4 -o sync,noatime /dev/vdb /data || echo DATA_MOUNT_FAIL
+fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"
 $IP link set lo up 2>/dev/null || true
