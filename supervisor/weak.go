@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,11 +18,15 @@ type WeakInstance struct {
 	GateIP     string `json:"gateIp"`
 	BoxIP      string `json:"boxIp"`
 	InboundURL string `json:"inboundUrl"`
+	NoInbound  bool   `json:"noInbound"`
 	LogPath    string `json:"logPath"`
 	Dir        string `json:"dir"`
 }
 
 func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
+	if opts.DataPath != "" {
+		return nil, fmt.Errorf("--data applies only to --wall strong")
+	}
 	if err := EnsureImageExists(opts.Image); err != nil {
 		return nil, err
 	}
@@ -138,7 +143,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	inst := &WeakInstance{
 		ID: id, Wall: "weak", Network: network, Gate: gate, Box: box,
-		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url,
+		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")

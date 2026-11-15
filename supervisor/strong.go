@@ -4,11 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	fchelper "github.com/pihme/hermetarium/firecracker-helper"
@@ -35,6 +37,7 @@ type StrongInstance struct {
 	Wall       string `json:"wall"`
 	Helper     string `json:"helper"`
 	InboundURL string `json:"inboundUrl"`
+	NoInbound  bool   `json:"noInbound"`
 	LogPath    string `json:"logPath"`
 	SerialPath string `json:"serialPath"`
 	Dir        string `json:"dir"`
@@ -226,17 +229,50 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	helperScript := filepath.Join(helpers, "entrypoint.sh")
+	if opts.DataPath != "" {
+		abs, err := filepath.Abs(opts.DataPath)
+		if err != nil {
+			return nil, err
+		}
+		// A colon breaks the helper's docker -v mount of this file.
+		if strings.Contains(abs, ":") {
+			return nil, fmt.Errorf("data disk path %s must not contain ':'", abs)
+		}
+		opts.DataPath = abs
+		// Held until this boot's data.claimed is visible (function return is
+		// after waitDataClaim). A second create is "in use" for that window,
+		// including mkfs.
+		lock, err := lockDataDisk(opts.DataPath)
+		if err != nil {
+			return nil, err
+		}
+		defer lock.Close()
+		if err := ensureDataDisk(opts.DataPath, opts.DataMiB); err != nil {
+			return nil, err
+		}
+	}
+	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init"
+	drives := []map[string]any{{
+		"drive_id":       "rootfs",
+		"path_on_host":   "/opt/rootfs.ext4",
+		"is_root_device": true,
+		"is_read_only":   false,
+	}}
+	if opts.DataPath != "" {
+		bootArgs += " hermetarium.data=1"
+		drives = append(drives, map[string]any{
+			"drive_id":       "data",
+			"path_on_host":   "/opt/data.ext4",
+			"is_root_device": false,
+			"is_read_only":   false,
+		})
+	}
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
-			"boot_args":         "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init",
+			"boot_args":         bootArgs,
 		},
-		"drives": []map[string]any{{
-			"drive_id":       "rootfs",
-			"path_on_host":   "/opt/rootfs.ext4",
-			"is_root_device": true,
-			"is_read_only":   false,
-		}},
+		"drives":         drives,
 		"machine-config": map[string]any{"vcpu_count": cpuCount(opts), "mem_size_mib": memMiB(opts)},
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",
@@ -269,6 +305,19 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", rootfs+":/opt/rootfs.ext4",
+	)
+	if opts.DataPath != "" {
+		helperArgs = append(helperArgs,
+			"-v", opts.DataPath+":/opt/data.ext4",
+			"-v", opts.DataPath+".lock:/opt/data.lock",
+		)
+		// A reused id keeps the instance dir. An old claim would look like
+		// this boot's helper already holds the disk.
+		if err := os.Remove(filepath.Join(dir, "data.claimed")); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	helperArgs = append(helperArgs,
 		"-v", helperScript+":/fc-helper.sh:ro",
 		"-v", dir+":/log",
 		NetToolsImage,
@@ -276,6 +325,12 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	)
 	if _, err := Docker(30*time.Second, helperArgs...); err != nil {
 		return nil, err
+	}
+	if opts.DataPath != "" {
+		if err := waitDataClaim(dir, helper); err != nil {
+			_ = DestroyStrong(id)
+			return nil, err
+		}
 	}
 
 	gate := "htm-gate-" + id
@@ -291,6 +346,12 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		_ = DestroyStrong(id)
 		return nil, err
 	}
+	if opts.DataPath != "" {
+		if err := waitDataMounted(helper); err != nil {
+			_ = DestroyStrong(id)
+			return nil, err
+		}
+	}
 
 	url, err := finishInbound(helper, opts.NoInbound, 40*time.Second)
 	if err != nil {
@@ -298,7 +359,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", Helper: helper, InboundURL: url,
+		ID: id, Wall: "strong", Helper: helper, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
@@ -314,11 +375,8 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 }
 
 func helperLogs(name string) string {
-	out, err := Docker(10*time.Second, "logs", name)
-	if err != nil {
-		return ""
-	}
-	return out
+	stdout, stderr, _ := DockerExec(10*time.Second, "logs", name)
+	return stdout + stderr
 }
 
 func helperRunning(name string) bool {
@@ -352,6 +410,132 @@ func extraFC(inst *StrongInstance) string {
 		return ""
 	}
 	return "\n--- fc.log ---\n" + string(b)
+}
+
+func ensureDataDisk(path string, sizeMiB int) error {
+	if strings.Contains(path, ":") {
+		return fmt.Errorf("data disk path %s must not contain ':'", path)
+	}
+	if sizeMiB <= 0 {
+		sizeMiB = 1024
+	}
+	if st, err := os.Stat(path); err == nil {
+		if !st.Mode().IsRegular() {
+			return fmt.Errorf("data disk %s is not a file", path)
+		}
+		// 0xEF53 at byte 1080 is the ext4 superblock magic. Anything else
+		// stays unattached: a failed guest mount would otherwise write
+		// /data onto the shared rootfs cache.
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		var magic [2]byte
+		_, rerr := f.ReadAt(magic[:], 0x438)
+		f.Close()
+		if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
+			return fmt.Errorf("data disk %s is not ext4", path)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Truncate(int64(sizeMiB) << 20); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	// Same -E flags as the root disk: lazy init does not fill the sparse file.
+	if _, err := Docker(2*time.Minute, "run", "--rm",
+		"-v", path+":/data.ext4",
+		AlpineImage, "sh", "-c",
+		"apk add --no-cache e2fsprogs >/dev/null && mkfs.ext4 -F -E lazy_itable_init=1,lazy_journal_init=1 /data.ext4 >/dev/null",
+	); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+// lockDataDisk holds an exclusive POSIX lock on path.lock until the caller
+// closes it. flock does not conflict with that lock, so the helper can
+// still flock the file for the life of the VM. A second open of this file
+// must not be closed while the lock is held: closing any descriptor drops
+// the POSIX lock. The in-use probe is therefore a flock on this same
+// descriptor, released before the helper's own nonblocking flock.
+func lockDataDisk(path string) (*os.File, error) {
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	lk := syscall.Flock_t{Type: syscall.F_WRLCK, Whence: io.SeekStart}
+	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lk); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EACCES) {
+			return nil, fmt.Errorf("data disk %s is in use", path)
+		}
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("data disk %s is in use", path)
+		}
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func waitDataClaim(dir, helper string) error {
+	claimed := filepath.Join(dir, "data.claimed")
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(claimed); err == nil {
+			return nil
+		}
+		if !helperRunning(helper) {
+			logs := helperLogs(helper)
+			if strings.Contains(logs, "data disk in use") {
+				return fmt.Errorf("data disk is in use")
+			}
+			return fmt.Errorf("helper exited before the data disk was claimed: %s", logs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("data disk was not claimed")
+}
+
+// The guest prints one of these after it tries /dev/vdb. Create does not
+// succeed on DATA_MOUNT_FAIL; fc-init does not start the inhabitant either.
+func waitDataMounted(helper string) error {
+	deadline := time.Now().Add(60 * time.Second)
+	var logs string
+	for time.Now().Before(deadline) {
+		logs = helperLogs(helper)
+		if strings.Contains(logs, "DATA_MOUNT_FAIL") {
+			return fmt.Errorf("data disk did not mount")
+		}
+		if strings.Contains(logs, "DATA_MOUNT_OK") {
+			return nil
+		}
+		if !helperRunning(helper) {
+			return fmt.Errorf("helper exited before the data disk mounted: %s", logs)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("data disk was not mounted: %s", logs)
 }
 
 func DestroyStrong(id string) error {

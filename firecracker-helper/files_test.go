@@ -43,6 +43,12 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
 		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
 	}
+	if strings.Contains(string(b), "|| echo DATA_MOUNT_FAIL") || !strings.Contains(string(b), "echo DATA_MOUNT_FAIL\n    exit 1") {
+		t.Fatal("data mount failure must stop before the inhabitant")
+	}
+	if !strings.Contains(string(b), "echo DATA_MOUNT_OK") {
+		t.Fatal("pack-oci.sh missing DATA_MOUNT_OK")
+	}
 
 	st1, err := os.Stat(ep)
 	if err != nil {
