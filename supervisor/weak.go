@@ -307,10 +307,12 @@ fi
 // Exit 0 only when every backend that exists no longer has the rule.
 // A missing binary is skipped. -C exit 1 is "no match"; any other failure
 // still has to be retried, because the bridge name is all destroy kept.
-// OWNED=1 means hermetarium created table ip filter. A chain with no rules
-// is removed. A set, map, counter, flowtable, or rule is host state: leave
-// the table. A delete that finds the table already gone is success; one that
-// finds new content is not, so the marker stays.
+// OWNED=1 means hermetarium created table ip filter. Delete only when the
+// listing is nothing but FORWARD, INPUT, and OUTPUT, each with no rules and
+// policy accept. A drop policy, another chain, a rule, or a named object stays.
+// Real nft delete table removes a non-empty table and does not fail, so the
+// delete is not a content check. A delete nft refuses is listed again; the
+// test fake returns EBUSY for that path, and the marker then stays.
 const dropOwnedFilterTableScript = `filter_table_has_content() {
   case "$1" in
     *'"rule"'*|*'{"set":'*|*'{"map":'*|*'{"counter":'*|*'{"flowtable":'*)
@@ -318,6 +320,197 @@ const dropOwnedFilterTableScript = `filter_table_has_content() {
       ;;
   esac
   return 1
+}
+# Allow-list, not a search for objects we know. A policy drop has no rule
+# and would otherwise be deleted, which fails open.
+filter_table_disposable() {
+  printf '%s' "$1" | awk '
+function skip_ws() {
+  while (i <= n) {
+    c = substr(s, i, 1)
+    if (c != " " && c != "\t" && c != "\n" && c != "\r") return
+    i++
+  }
+}
+function parse_string(    res, c) {
+  if (badparse) return ""
+  if (substr(s, i, 1) != "\"") { badparse = 1; return "" }
+  i++
+  res = ""
+  while (i <= n) {
+    c = substr(s, i, 1)
+    i++
+    if (c == "\\") {
+      if (i > n) { badparse = 1; return "" }
+      c = substr(s, i, 1)
+      i++
+      res = res c
+      continue
+    }
+    if (c == "\"") return res
+    res = res c
+  }
+  badparse = 1
+  return ""
+}
+function parse_skip(    c, depth, instr, esc) {
+  if (badparse) return
+  skip_ws()
+  if (i > n) { badparse = 1; return }
+  c = substr(s, i, 1)
+  if (c == "\"") { parse_string(); return }
+  if (c != "{" && c != "[") {
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (c == "," || c == "]" || c == "}" || c == " " || c == "\t" || c == "\n" || c == "\r") return
+      i++
+    }
+    return
+  }
+  depth = 0
+  instr = 0
+  esc = 0
+  while (i <= n) {
+    c = substr(s, i, 1)
+    i++
+    if (instr) {
+      if (esc) { esc = 0; continue }
+      if (c == "\\") { esc = 1; continue }
+      if (c == "\"") instr = 0
+      continue
+    }
+    if (c == "\"") { instr = 1; continue }
+    if (c == "{" || c == "[") depth++
+    else if (c == "}" || c == "]") {
+      depth--
+      if (depth == 0) return
+    }
+  }
+  badparse = 1
+}
+function parse_chain_body(    key, name, policy, c, seen_name, seen_policy) {
+  if (badparse) return
+  skip_ws()
+  if (substr(s, i, 1) != "{") { badparse = 1; return }
+  i++
+  name = ""
+  policy = ""
+  seen_name = 0
+  seen_policy = 0
+  skip_ws()
+  if (substr(s, i, 1) == "}") { i++; keep = 1; return }
+  while (i <= n && !badparse) {
+    skip_ws()
+    key = parse_string()
+    if (badparse) return
+    skip_ws()
+    if (substr(s, i, 1) != ":") { badparse = 1; return }
+    i++
+    skip_ws()
+    if (key == "name") {
+      name = parse_string()
+      seen_name = 1
+    } else if (key == "policy") {
+      policy = parse_string()
+      seen_policy = 1
+    } else {
+      c = substr(s, i, 1)
+      if (c == "{" || c == "[") keep = 1
+      parse_skip()
+    }
+    if (badparse) return
+    skip_ws()
+    c = substr(s, i, 1)
+    if (c == ",") { i++; continue }
+    if (c == "}") { i++; break }
+    badparse = 1
+    return
+  }
+  if (!seen_name || !seen_policy) keep = 1
+  if (name != "FORWARD" && name != "INPUT" && name != "OUTPUT") keep = 1
+  if (policy != "accept") keep = 1
+}
+function parse_element(    key, c) {
+  if (badparse) return
+  skip_ws()
+  if (substr(s, i, 1) != "{") { badparse = 1; return }
+  i++
+  skip_ws()
+  if (substr(s, i, 1) == "}") { i++; keep = 1; return }
+  while (i <= n && !badparse) {
+    skip_ws()
+    key = parse_string()
+    if (badparse) return
+    skip_ws()
+    if (substr(s, i, 1) != ":") { badparse = 1; return }
+    i++
+    skip_ws()
+    if (key == "chain") parse_chain_body()
+    else if (key == "metainfo" || key == "table") parse_skip()
+    else { keep = 1; parse_skip() }
+    if (badparse) return
+    skip_ws()
+    c = substr(s, i, 1)
+    if (c == ",") { i++; continue }
+    if (c == "}") { i++; return }
+    badparse = 1
+    return
+  }
+}
+function parse_elements(    c) {
+  if (badparse) return
+  skip_ws()
+  if (substr(s, i, 1) != "[") { badparse = 1; return }
+  i++
+  skip_ws()
+  if (substr(s, i, 1) == "]") { i++; return }
+  while (!badparse) {
+    parse_element()
+    if (badparse) return
+    skip_ws()
+    c = substr(s, i, 1)
+    if (c == ",") { i++; continue }
+    if (c == "]") { i++; return }
+    badparse = 1
+    return
+  }
+}
+function parse_root(    key) {
+  skip_ws()
+  if (substr(s, i, 1) != "{") { badparse = 1; return }
+  i++
+  skip_ws()
+  key = parse_string()
+  if (badparse || key != "nftables") { badparse = 1; return }
+  skip_ws()
+  if (substr(s, i, 1) != ":") { badparse = 1; return }
+  i++
+  parse_elements()
+  if (badparse) return
+  skip_ws()
+  if (substr(s, i, 1) == ",") { keep = 1; i++; parse_skip() }
+  skip_ws()
+  if (substr(s, i, 1) != "}") { badparse = 1; return }
+  i++
+  skip_ws()
+  if (i <= n) badparse = 1
+}
+{
+  s = s $0
+}
+END {
+  n = length(s)
+  i = 1
+  keep = 0
+  badparse = 0
+  parse_root()
+  if (badparse || keep) exit 1
+  exit 0
+}
+'
+}
+filter_table_keep() {
+  filter_table_has_content "$1" || ! filter_table_disposable "$1"
 }
 if [ "${OWNED:-}" = 1 ]; then
   command -v nft >/dev/null 2>&1 || {
@@ -338,7 +531,7 @@ if [ "${OWNED:-}" = 1 ]; then
     printf 'nft: %s\n' "$rules" >&2
     exit 1
   }
-  if filter_table_has_content "$rules"; then
+  if filter_table_keep "$rules"; then
     exit 0
   fi
   if ! err=$(nft delete table ip filter 2>&1); then
@@ -352,7 +545,7 @@ if [ "${OWNED:-}" = 1 ]; then
       printf 'nft: %s\n' "$again" >&2
       exit 1
     }
-    if filter_table_has_content "$again"; then
+    if filter_table_keep "$again"; then
       exit 0
     fi
     printf 'nft: %s\n' "$err" >&2
@@ -438,14 +631,10 @@ func parseBridgeOwner(out string) (string, bool, error) {
 }
 
 // The creator may be destroyed while another habitat still has a rule, so the
-// flag lives beside the instance dirs until a later destroy finds the table empty.
+// flag lives beside the instance dirs until a later destroy finds only the
+// empty iptables-nft accept chains.
 func filterOwnedPath(root string) string {
 	return filepath.Join(VarDir(root), ".ip-filter-owned")
-}
-
-func filterTableOwned(root string) bool {
-	fi, err := os.Stat(filterOwnedPath(root))
-	return err == nil && !fi.IsDir()
 }
 
 func rememberFilterTableOwned() error {

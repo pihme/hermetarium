@@ -39,7 +39,7 @@ On the Docker wall, root in the container reaches the host if the kernel is expl
 
 Both walls let only the gate reach the Internet. The Docker wall puts the container on an internal network with no NAT, and gives only the gate a second path out. [How that works](inhabitants/README.md#how-the-gate-reaches-the-internet).
 
-The weak wall inserts `FORWARD -i br-<id> -o br-<id> -j ACCEPT` in both iptables-nft and iptables-legacy, through a privileged host-network container. Destroy removes nft `table ip filter` when that insert created it and nothing remains but chains. A table the host already had, or one that still has a rule, set, map, counter, or flowtable, stays.
+The weak wall inserts `FORWARD -i br-<id> -o br-<id> -j ACCEPT` in both iptables-nft and iptables-legacy, through a privileged host-network container. Destroy removes nft `table ip filter` only while the owned marker is still held and the table contains nothing but iptables-nft's FORWARD, INPUT, and OUTPUT chains, each with no rules and policy accept. Anything else stays, including a drop policy or a table the host restored over a stale marker.
 
 Build the hello-world image. It needs Docker. The tag is `hermetarium/echo:dev`.
 

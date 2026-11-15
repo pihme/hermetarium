@@ -274,17 +274,38 @@ func TestNftFilterTableDrop(t *testing.T) {
 		cases := []struct {
 			name       string
 			owned      bool
-			mode       string
+			json       string
 			wantDelete bool
 			wantDrop   bool
 		}{
-			{name: "empty", owned: true, mode: "empty", wantDelete: true, wantDrop: true},
-			{name: "preexisting", owned: false, mode: "empty", wantDelete: false, wantDrop: false},
-			{name: "rule", owned: true, mode: "rule", wantDelete: false, wantDrop: false},
-			{name: "set", owned: true, mode: "set", wantDelete: false, wantDrop: false},
-			{name: "map", owned: true, mode: "map", wantDelete: false, wantDrop: false},
-			{name: "counter", owned: true, mode: "counter", wantDelete: false, wantDrop: false},
-			{name: "flowtable", owned: true, mode: "flowtable", wantDelete: false, wantDrop: false},
+			{name: "empty", owned: true, wantDelete: true, wantDrop: true,
+				json: `{"nftables":[{"table":{"name":"filter"}},{"chain":{"name":"FORWARD","policy":"accept"}}]}`},
+			{name: "builtins", owned: true, wantDelete: true, wantDrop: true,
+				json: `{"nftables":[{"chain":{"name":"INPUT","policy":"accept"}},{"chain":{"name":"FORWARD","policy":"accept"}},{"chain":{"name":"OUTPUT","policy":"accept"}}]}`},
+			{name: "spaced", owned: true, wantDelete: true, wantDrop: true,
+				json: `{"nftables": [{"metainfo": {"version": "1.1.6", "release_name": "Commodore Bullmoose #7", "json_schema_version": 1}}, {"table": {"family": "ip", "name": "filter", "handle": 1}}, {"chain": {"family": "ip", "table": "filter", "name": "FORWARD", "handle": 1, "type": "filter", "hook": "forward", "prio": 0, "policy": "accept"}}]}`},
+			{name: "preexisting", owned: false, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}}]}`},
+			{name: "rule", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"rule":{"chain":"FORWARD"}}]}`},
+			{name: "set", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"name":"FORWARD"}},{"set":{"name":"peers"}}]}`},
+			{name: "map", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"map":{"name":"peers"}}]}`},
+			{name: "counter", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"counter":{"name":"hits"}}]}`},
+			{name: "flowtable", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"flowtable":{"name":"ft"}}]}`},
+			{name: "drop", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables": [{"chain": {"name": "FORWARD", "policy": "drop"}}]}`},
+			{name: "user", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}},{"chain":{"name":"USERCHAIN"}}]}`},
+			{name: "quota", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}},{"quota":{"name":"q"}}]}`},
+			{name: "limit", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}},{"limit":{"name":"lim"}}]}`},
+			{name: "synproxy", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}},{"synproxy":{"name":"sp","flags":["timestamp"]}}]}`},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -292,30 +313,21 @@ func TestNftFilterTableDrop(t *testing.T) {
 				bin := t.TempDir()
 				body := `#!/bin/sh
 printf '%s\n' "$*" >> "$LOG"
-json='{"nftables":[{"table":{"name":"filter"}},{"chain":{"name":"FORWARD","policy":"accept"}}]}'
-case "$MODE" in
-rule) json='{"nftables":[{"rule":{"chain":"FORWARD"}}]}' ;;
-set) json='{"nftables":[{"chain":{"name":"FORWARD"}},{"set":{"name":"peers"}}]}' ;;
-map) json='{"nftables":[{"map":{"name":"peers"}}]}' ;;
-counter) json='{"nftables":[{"counter":{"name":"hits"}}]}' ;;
-flowtable) json='{"nftables":[{"flowtable":{"name":"ft"}}]}' ;;
-esac
-case "$MODE" in
-empty|rule|set|map|counter|flowtable)
-  if [ "$1" = "-j" ] || [ "$MODE" != "empty" ]; then
-    printf '%s\n' "$json"
-  fi
-  exit 0
-  ;;
-esac
-printf '%s\n' 'Error: No such file or directory' >&2
-exit 1
+if [ "$1" = "-j" ]; then
+  printf '%s\n' "$JSON"
+fi
+exit 0
 `
 				if err := os.WriteFile(filepath.Join(bin, "nft"), []byte(body), 0o755); err != nil {
 					t.Fatal(err)
 				}
 				cmd := exec.Command("sh", "-c", dropOwnedFilterTableScript)
-				cmd.Env = []string{"PATH=" + bin, "LOG=" + logPath, "MODE=" + tc.mode}
+				// awk is the host one. nft in bin has to win over a real nft.
+				cmd.Env = []string{
+					"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+					"LOG=" + logPath,
+					"JSON=" + tc.json,
+				}
 				if tc.owned {
 					cmd.Env = append(cmd.Env, "OWNED=1")
 				}
@@ -471,13 +483,13 @@ exit 0
 		if err != nil || br != "br-abc" {
 			t.Fatalf("accept: %v %q", err, br)
 		}
-		if !filterTableOwned(root) {
+		if !hasFilterMarker(root) {
 			t.Fatal("owned marker was not written")
 		}
 		if err := forgetSameBridge("br-abc"); err != nil {
 			t.Fatal(err)
 		}
-		if filterTableOwned(root) {
+		if hasFilterMarker(root) {
 			t.Fatal("marker remains after dropped")
 		}
 		if err := rememberFilterTableOwned(); err != nil {
@@ -486,7 +498,7 @@ exit 0
 		if err := forgetSameBridge("br-abc"); err != nil {
 			t.Fatal(err)
 		}
-		if !filterTableOwned(root) {
+		if !hasFilterMarker(root) {
 			t.Fatal("marker cleared while a rule remained")
 		}
 		ownedRuns := 0
@@ -576,6 +588,8 @@ exit 0
 		}
 	})
 
+	// Artificial. Real nft delete table succeeds when the table is not empty,
+	// so this re-list does not run there. The fake returns EBUSY.
 	t.Run("delete loses to content", func(t *testing.T) {
 		for _, mode := range []string{"rule", "set"} {
 			t.Run(mode, func(t *testing.T) {
@@ -668,7 +682,7 @@ exit 1
 		if maxIn != 1 {
 			t.Fatalf("overlapping nft runs = %d, want 1", maxIn)
 		}
-		if filterTableOwned(root) {
+		if hasFilterMarker(root) {
 			t.Fatal("marker remains after the table is gone")
 		}
 	})
@@ -742,7 +756,7 @@ exit 1
 		if err := forgetSameBridge("br-abc"); err != nil {
 			t.Fatal(err)
 		}
-		if !filterTableOwned(root) {
+		if !hasFilterMarker(root) {
 			t.Fatal("replaced marker was removed")
 		}
 		now, err := readIPFilterMarker(root)
@@ -808,6 +822,52 @@ iptables-nft -w -I FORWARD 1 -i "$br" -o "$br" -j ACCEPT
 BR="$br" OWNED=1 sh -c "$FORGET"
 nft list set ip filter peers >/dev/null
 nft delete table ip filter
+
+echo phase-policy
+out=$(GW="$gw" sh -c "$ACCEPT")
+printf '%s\n' "$out" | grep -qx owned
+iptables-nft -w -P FORWARD DROP
+BR="$br" OWNED=1 sh -c "$FORGET"
+nft list table ip filter >/dev/null
+nft -j list table ip filter | grep -q '"policy": "drop"'
+if iptables-nft -w -C FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1; then
+  echo "bridge rule remains beside drop policy" >&2
+  exit 1
+fi
+nft delete table ip filter
+
+echo phase-user
+nft add table ip filter
+nft add chain ip filter FORWARD '{ type filter hook forward priority 0; policy accept; }'
+nft add chain ip filter mine
+iptables-nft -w -I FORWARD 1 -i "$br" -o "$br" -j ACCEPT
+BR="$br" OWNED=1 sh -c "$FORGET"
+nft list chain ip filter mine >/dev/null
+nft delete table ip filter
+
+echo phase-objects
+nft add table ip filter
+nft add chain ip filter FORWARD '{ type filter hook forward priority 0; policy accept; }'
+nft add quota ip filter q 25 mbytes
+nft add limit ip filter lim rate 3/second
+nft add synproxy ip filter sp mss 1460 wscale 7 timestamp sack-perm
+iptables-nft -w -I FORWARD 1 -i "$br" -o "$br" -j ACCEPT
+BR="$br" OWNED=1 sh -c "$FORGET"
+nft list quota ip filter q >/dev/null
+nft list limit ip filter lim >/dev/null
+nft list synproxy ip filter sp >/dev/null
+nft delete table ip filter
+
+echo phase-builtins
+out=$(GW="$gw" sh -c "$ACCEPT")
+printf '%s\n' "$out" | grep -qx owned
+iptables-nft -w -P INPUT ACCEPT
+iptables-nft -w -P OUTPUT ACCEPT
+BR="$br" OWNED=1 sh -c "$FORGET"
+if nft list table ip filter >/dev/null 2>&1; then
+  echo "accept chains remain" >&2
+  exit 1
+fi
 `
 	out, err := Docker(2*time.Minute, "run", "--rm", "--cap-add", "NET_ADMIN",
 		"-e", "ACCEPT="+acceptSameBridgeScript,
@@ -825,10 +885,92 @@ func writeExec(t *testing.T, path, body string) {
 	}
 }
 
+func hasFilterMarker(root string) bool {
+	_, err := readIPFilterMarker(root)
+	return err == nil
+}
+
+func TestNftFilterRulesBeforeTable(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	bin := t.TempDir()
+	ipt := `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+name=${0##*/}
+n=0
+if [ -f "$COUNT.$name" ]; then
+  IFS= read -r n < "$COUNT.$name" || n=0
+fi
+n=$((n + 1))
+printf '%s\n' "$n" > "$COUNT.$name"
+if [ "$2" = "-C" ]; then
+  if [ "$n" -eq 1 ]; then
+    exit 0
+  fi
+  exit 1
+fi
+exit 0
+`
+	writeExec(t, filepath.Join(bin, "iptables-legacy"), ipt)
+	writeExec(t, filepath.Join(bin, "iptables-nft"), ipt)
+	writeExec(t, filepath.Join(bin, "nft"), `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+if [ "$1" = "-j" ]; then
+  printf '%s\n' '{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}}]}'
+fi
+exit 0
+`)
+	cmd := exec.Command("sh", "-c", forgetSameBridgeScript)
+	cmd.Env = []string{
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LOG=" + logPath,
+		"COUNT=" + logPath + ".n",
+		"BR=br-test",
+		"OWNED=1",
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("script: %v\n%s%s", err, stderr.String(), stdout.String())
+	}
+	logb, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(logb), "\n")
+	lastRule := -1
+	deleteAt := -1
+	deletes := 0
+	rules := 0
+	for i, line := range lines {
+		if strings.Contains(line, "-D FORWARD") {
+			rules++
+			lastRule = i
+		}
+		if strings.TrimSpace(line) == "delete table ip filter" {
+			deletes++
+			deleteAt = i
+		}
+	}
+	// Both backends drop their FORWARD accept before the table goes.
+	if deletes != 1 || rules != 2 || deleteAt < lastRule {
+		t.Fatalf("table delete must follow the FORWARD deletes\nlog:\n%s", logb)
+	}
+	if !scriptDroppedFilterTable(stdout.String()) {
+		t.Fatalf("stdout:\n%s", stdout.String())
+	}
+}
+
 func runOwnedFilterScript(t *testing.T, bin, logPath, extra string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", dropOwnedFilterTableScript)
-	cmd.Env = []string{"PATH=" + bin, "LOG=" + logPath, "OWNED=1", "COUNT=" + logPath + ".n"}
+	// awk parses the listing. nft in bin has to win over a real nft.
+	cmd.Env = []string{
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LOG=" + logPath,
+		"OWNED=1",
+		"COUNT=" + logPath + ".n",
+	}
 	if extra != "" {
 		cmd.Env = append(cmd.Env, extra)
 	}
