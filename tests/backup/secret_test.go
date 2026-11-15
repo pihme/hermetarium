@@ -174,6 +174,66 @@ func TestSecretRefusal(t *testing.T) {
 	}
 }
 
+// find exits non-zero when one subdirectory cannot be read, after listing
+// the rest. That used to be reported as a gate file. The backup still
+// must not start.
+func TestSecretRefusalWalk(t *testing.T) {
+	checkout, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	id := "hab1"
+	disk, _ := writeHabitat(t, root, id)
+	journal := filepath.Join(root, "journal-dir")
+	if err := os.MkdirAll(journal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(journal, "notes"), []byte("n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sealed := filepath.Join(journal, "unreadable-walk")
+	if err := os.Mkdir(sealed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sealed, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o755) })
+	if f, openErr := os.Open(sealed); openErr == nil {
+		f.Close()
+		t.Fatal("unreadable directory is readable")
+	}
+
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stamp := filepath.Join(t.TempDir(), "backup-started")
+	writeExe(t, filepath.Join(bin, "restic"), "#!/bin/sh\nif [ \"$1\" = backup ]; then\n  : > \"$BACKUP_STAMP\"\nfi\nexit 0\n")
+	writeExe(t, filepath.Join(bin, "docker"), "#!/bin/sh\nexit 0\n")
+	herm := filepath.Join(root, "hermetarium")
+	writeExe(t, herm, "#!/bin/sh\nexit 0\n")
+	cmd := exec.Command(filepath.Join(checkout, "omakase", "backup.sh"))
+	cmd.Env = scriptEnv(t, root, bin, herm, id, disk, journal, []string{
+		"BACKUP_STAMP=" + stamp,
+	})
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("backup.sh exited 0\n%s", out)
+	}
+	text := string(out)
+	if strings.Contains(text, "gate file") || strings.Contains(text, "gate private key") {
+		t.Fatalf("walk error reported as a gate file\n%s", text)
+	}
+	if !strings.Contains(text, sealed) {
+		t.Fatalf("walk error missing\n%s", text)
+	}
+	if _, statErr := os.Stat(stamp); statErr == nil {
+		t.Fatalf("restic backup started\n%s", text)
+	}
+}
+
 func writeExe(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {

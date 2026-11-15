@@ -48,11 +48,23 @@ path_under() {
 # 0 when directory $1 holds a regular file with one of the device:inode
 # values in the remaining arguments. Do not follow symlinks or read bytes.
 # No -xdev: restic backup crosses filesystems, so a nested mount is archived.
-# A walk that fails is treated as a match so the backup stops.
+# A match counts only after find itself succeeds. A failed walk is that
+# error, not a gate-file refusal, and it still stops before restic backup.
 dir_holds_inode() {
   dir=$1
   shift
-  list=$(find -P "$dir" -type f -printf '%D:%i\n') || return 0
+  err=$(mktemp) || die "could not walk $dir"
+  status=0
+  list=$(find -P "$dir" -type f -printf '%D:%i\n' 2>"$err") || status=$?
+  walk=$(cat "$err" 2>/dev/null || true)
+  rm -f "$err"
+  if [ "$status" -ne 0 ]; then
+    if [ -n "$walk" ]; then
+      printf '%s\n' "$walk" >&2
+      exit 1
+    fi
+    die "could not walk $dir"
+  fi
   for ino in "$@"; do
     case "
 $list
