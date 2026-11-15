@@ -63,6 +63,9 @@ In-process. No Docker habitat.
 | `TestGateFilesHardened` | Shipped gate files do not set `DONT_VERIFY_PEER` or `dns_v4_first`, and no active line uses `myport`. |
 | `TestDockerRunNotPrivileged` | No non-test `.go` file under `supervisor/` contains `--privileged`. |
 | `TestSquidStartupQuiet` | Needs Docker. Squid started with the echo gate file does not log the `myport` or `dns_v4_first` warnings. |
+| `TestWaitSquidRetriesMissingLogUntilDeadline` | With the pid present but cache.log missing, WaitSquid keeps retrying until the deadline, runs no chmod, and then fails. |
+| `TestWaitSquidReturnsChmodError` | A Docker error from the chmod is retried and, once the deadline passes, returned as the create error. |
+| `TestWaitSquidChmodSucceedsOnlyWhenBothLogsExist` | The chmod runs once, after both access.log and cache.log exist, and WaitSquid then succeeds. |
 | `TestUntrustedVendorGetsNoKey` | Needs Docker. A vendor certificate the gate does not trust gets no request and no key. The same certificate trusted via `tls-cafile` does. |
 | `TestInstallACL` | An empty ACL path fails. A file is copied to `<instance>/squid.conf`. |
 | `TestInstallACLMissingFile` | A missing ACL path fails with `read ACL`. |
