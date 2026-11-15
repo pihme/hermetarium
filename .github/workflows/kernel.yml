@@ -1,0 +1,125 @@
+name: kernel
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/kernel.yml
+      - .github/scripts/build-strong-kernel.sh
+      - supervisor/strong.go
+  push:
+    branches:
+      - main
+      # One push of this branch registers the workflow and publishes when the
+      # hash matches. Removed before the pull request: publish is not a push job.
+      - ci/kernel-release
+    paths:
+      - .github/workflows/kernel.yml
+      - .github/scripts/build-strong-kernel.sh
+      - supervisor/strong.go
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: vmlinux-6.1.188
+    # workflow_dispatch, plus the one-shot branch push that first publishes.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/ci/kernel-release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain recorded in the pinned kernel
+        # CONFIG_CC_VERSION_TEXT, CONFIG_LD_VERSION, and CONFIG_PAHOLE_VERSION
+        # are inside the image. gcc must be invoked as gcc, not gcc-13, or the
+        # version text changes.
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bc bison flex make patch curl ca-certificates git python3 \
+            libelf-dev libssl-dev \
+            gcc-13=13.3.0-6ubuntu2~24.04.1 \
+            binutils=2.42-4ubuntu2.10 \
+            dwarves=1.25-0ubuntu3
+          if [[ ! -e /usr/bin/gcc || "$(readlink -f /usr/bin/gcc)" != "$(readlink -f /usr/bin/gcc-13)" ]]; then
+            sudo ln -sfn gcc-13 /usr/bin/gcc
+          fi
+
+      - name: Build vmlinux-6.1.188
+        run: bash .github/scripts/build-strong-kernel.sh "${RUNNER_TEMP}/vmlinux-6.1.188"
+
+      - name: Upload the built kernel
+        # Always, including when the hash is not the release pin, so the bytes
+        # can be recovered. This is not the GitHub release asset.
+        uses: actions/upload-artifact@v7
+        with:
+          name: vmlinux-6.1.188
+          path: ${{ runner.temp }}/vmlinux-6.1.188
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish kernel/6.1.188 only for the known bytes
+        # The gate is the file from Actions run 43709607196, not kernelSHA256.
+        # kernelSHA256 still names the S3 object until that release exists.
+        # A different hash fails this job and is not uploaded as a release asset.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          file="${RUNNER_TEMP}/vmlinux-6.1.188"
+          got=$(sha256sum "$file" | awk '{print $1}')
+          want=bb54a09212ca102c67fc4af017bd461961127207463e1be9ae6424411a6b547f
+          echo "got  ${got}"
+          echo "want ${want}"
+          if [[ "$got" != "$want" ]]; then
+            echo "refusing to publish ${got}" >&2
+            exit 1
+          fi
+          if gh release view kernel/6.1.188 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "kernel/6.1.188 already exists; not publishing again"
+            exit 0
+          fi
+          gh release create kernel/6.1.188 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --latest=false \
+            --title "kernel/6.1.188" \
+            --notes "$(printf '%s\n' \
+              "Strong-wall guest kernel vmlinux-6.1.188." \
+              "" \
+              "SHA-256: ${want}" \
+              "" \
+              "Built from Firecracker commit 778a26c0594c80025ed798088a66c2511ba618de and Amazon Linux tag microvm-kernel-6.1.188-56.393.amzn2023, using that commit's published 6.1 guest config.")" \
+            "$file"
+
+  release-asset:
+    name: release asset matches kernelSHA256
+    # Download only. A fresh compile is not this check, and a compile whose
+    # hash differs does not fail it. Skipped on the one-shot publish push,
+    # which still has the S3 pin in strong.go.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Downloaded kernel matches kernelSHA256
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^[[:space:]]*kernelSHA256[[:space:]]*=[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p' supervisor/strong.go)
+          test -n "$want"
+          curl -fsSL -o vmlinux-6.1.188 \
+            https://github.com/pihme/hermetarium/releases/download/kernel/6.1.188/vmlinux-6.1.188
+          got=$(sha256sum vmlinux-6.1.188 | awk '{print $1}')
+          echo "got  ${got}"
+          echo "want ${want}"
+          test "$got" = "$want"
