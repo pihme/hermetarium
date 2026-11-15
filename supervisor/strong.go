@@ -378,7 +378,18 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		}
 	}
 
-	url, err := finishInbound(helper, opts.NoInbound, 40*time.Second)
+	// No inbound port, so the serial line is the signal the guest reached
+	// user space. It is printed only after a data disk has mounted.
+	inboundTimeout := 40 * time.Second
+	if opts.NoInbound {
+		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
+			return helperLogs(helper), helperRunning(helper)
+		}); err != nil {
+			_ = DestroyStrong(id)
+			return nil, err
+		}
+	}
+	url, err := finishInbound(helper, opts.NoInbound, inboundTimeout)
 	if err != nil {
 		endStrong(id, dir)
 		return nil, err
@@ -601,6 +612,43 @@ func waitDataClaim(dir, helper string) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("data disk was not claimed")
+}
+
+// waitGuestUname blocks until fc-init prints GUEST_UNAME= on the helper
+// serial console. A dead or missing helper fails immediately. fc-init prints
+// DATA_MOUNT_FAIL and exits before that line, so a mount failure must not
+// turn into a boot timeout.
+func waitGuestUname(dir string, timeout time.Duration, console func() (string, bool)) error {
+	deadline := time.Now().Add(timeout)
+	var text string
+	var running bool
+	for {
+		text, running = console()
+		if strings.Contains(text, "DATA_MOUNT_FAIL") {
+			return fmt.Errorf("data disk did not mount")
+		}
+		if strings.Contains(text, "GUEST_UNAME=") {
+			return nil
+		}
+		if !running || !time.Now().Before(deadline) {
+			parts := make([]string, 0, 2)
+			if fc := strings.TrimSpace(tailHostFile(filepath.Join(dir, "fc.log"))); fc != "" {
+				parts = append(parts, fc)
+			}
+			serial := strings.TrimSpace(tailHostFile(filepath.Join(dir, "serial.log")))
+			if serial == "" {
+				if len(text) > 4000 {
+					text = text[len(text)-4000:]
+				}
+				serial = strings.TrimSpace(text)
+			}
+			if serial != "" {
+				parts = append(parts, serial)
+			}
+			return fmt.Errorf("guest did not boot: %s", strings.Join(parts, "\n"))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // The guest prints one of these after it tries /dev/vdb. Create does not
