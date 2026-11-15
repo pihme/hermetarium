@@ -63,10 +63,10 @@ jobs:
         # build when the image exists.
         run: |
           echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
+          bash .github/scripts/restart-docker.sh
           docker build -t hermetarium-squid:local supervisor/squid
           sudo rm /etc/docker/daemon.json
-          sudo systemctl restart docker
+          bash .github/scripts/restart-docker.sh
 
       - uses: actions/cache@v6
         with:
@@ -82,7 +82,7 @@ jobs:
       - name: Release binaries are static (glibc baseline)
         if: matrix.name == 'unit'
         run: |
-          rm -f supervisor/fcattach.bin supervisor/gatedns.bin
+          rm -f supervisor/gatedns.bin
           python3 .github/scripts/release.py --check-build
 
 
@@ -121,10 +121,10 @@ jobs:
         # build when the image exists.
         run: |
           echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
+          bash .github/scripts/restart-docker.sh
           docker build -t hermetarium-squid:local supervisor/squid
           sudo rm /etc/docker/daemon.json
-          sudo systemctl restart docker
+          bash .github/scripts/restart-docker.sh
 
       - name: Live tests
         run: |

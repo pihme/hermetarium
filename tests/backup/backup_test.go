@@ -54,9 +54,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	}
 	resticBin := ensureRestic(t, checkout)
 	cli := buildCLI(t, checkout)
-	// The attach socket is a unix path, capped at 107 bytes. A long checkout
-	// cannot hold it, so the habitat files move to a short directory.
-	root := habitatRoot(t, checkout)
+	root := checkout
 
 	disk := filepath.Join(t.TempDir(), "disk.ext4")
 	acl := filepath.Join(t.TempDir(), "squid.conf")
@@ -361,26 +359,6 @@ func fileSize(t *testing.T, path string) int64 {
 		t.Fatal(err)
 	}
 	return st.Size()
-}
-
-func habitatRoot(t *testing.T, checkout string) string {
-	t.Helper()
-	sample := filepath.Join(checkout, "var", ".vsock", "0123456789ab", "vsock.sock")
-	if len(sample) <= 107 {
-		return checkout
-	}
-	dir, err := os.MkdirTemp("/tmp", "htm")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	src := filepath.Join(checkout, ".cache")
-	if st, err := os.Stat(src); err == nil && st.IsDir() {
-		if out, err := exec.Command("cp", "-a", src, filepath.Join(dir, ".cache")).CombinedOutput(); err != nil {
-			t.Fatalf("copy cache: %v\n%s", err, out)
-		}
-	}
-	return dir
 }
 
 func buildCLI(t *testing.T, root string) string {

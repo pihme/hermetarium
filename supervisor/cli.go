@@ -286,6 +286,6 @@ func usage() {
        hermetarium version
 
 --cpus N works on both walls: that many processors in the virtual machine (1 to 32), or that CPU quota on Docker (1 to the host CPU count). The default is one processor, and no Docker quota.
-attach opens a terminal on either wall. With no command it runs sh. Bytes on that terminal stay out of the I/O log.
+attach opens a terminal on either wall. With no command it runs sh. The strong wall reaches it over SSH, so that image includes an SSH server. Bytes on that terminal stay out of the I/O log.
 `)
 }

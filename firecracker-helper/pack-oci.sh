@@ -14,10 +14,6 @@ chmod +x /rootfs/fc-cmd 2>/dev/null || true
 if [ -f /in/fc-env ]; then
   cp /in/fc-env /rootfs/fc-env
 fi
-if [ -f /in/fc-attach ]; then
-  cp /in/fc-attach /rootfs/fc-attach
-  chmod +x /rootfs/fc-attach
-fi
 # Static amd64 ELF: ET_EXEC, one PT_LOAD (R+X) at vaddr 0x400000, filesz 0xa9,
 # entry 0x400078. Code is file offset 0x78. buf is in the red zone.
 #   78: 48 c7 c0 3e 01 00 00   mov rax, 0x13e   # getrandom
@@ -86,6 +82,10 @@ if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   # Do not start the inhabitant when the disk will not mount.
   if ! mount -t ext4 -o sync,noatime /dev/vdb /data; then
     echo DATA_MOUNT_FAIL
+    # panic=1 drops the tty buffer when PID 1 exits. Stay up past the
+    # host's 200ms poll so the mount error is in the helper log.
+    # destroy stops the helper; create does not wait out this sleep.
+    sleep 1
     exit 1
   fi
   echo DATA_MOUNT_OK
@@ -97,9 +97,6 @@ if [ -f /fc-env ]; then
   # shellcheck disable=SC1091
   . /fc-env
   set +a
-fi
-if [ -x /fc-attach ]; then
-  /fc-attach >/dev/null 2>/dev/ttyS0 &
 fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"
@@ -119,6 +116,48 @@ $IP route add default via 172.16.0.1 2>/dev/null || true
 printf 'nameserver 172.16.0.1\n' > /etc/resolv.conf
 printf '127.0.0.1 localhost\n' >> /etc/hosts
 printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test model.hermetarium.test\n' >> /etc/hosts
+# The image that wants a terminal brings sshd. The public key is per habitat,
+# on the kernel command line, so one cached rootfs can boot many habitats.
+b64=
+for tok in $(cat /proc/cmdline); do
+  case $tok in
+    hermetarium.pub=*) b64=${tok#hermetarium.pub=} ;;
+  esac
+done
+case $b64 in
+  *[!A-Za-z0-9+/=]*|"") b64="" ;;
+esac
+if [ -n "$b64" ] && [ -x /usr/sbin/sshd ]; then
+  # The tmpfs on /run hides the directory Debian's sshd requires.
+  mkdir -p /root/.ssh /var/empty /run/sshd
+  chmod 700 /root /root/.ssh
+  chmod 755 /run/sshd
+  printf 'ssh-ed25519 %s hermetarium\n' "$b64" > /root/.ssh/authorized_keys
+  chmod 600 /root/.ssh/authorized_keys
+  if [ -x /usr/bin/ssh-keygen ]; then
+    /usr/bin/ssh-keygen -A >/dev/null 2>&1 || true
+  fi
+  cat > /fc-sshd.conf << 'END'
+ListenAddress 172.16.0.2
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UseDNS no
+PidFile /run/sshd.pid
+AuthorizedKeysFile /root/.ssh/authorized_keys
+AllowTcpForwarding no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+PrintMotd no
+AddressFamily inet
+END
+  # This sshd refuses a bare command name.
+  if ! /usr/sbin/sshd -f /fc-sshd.conf; then
+    echo "fc-init: sshd did not start"
+  fi
+fi
 echo "GUEST_UNAME=$(uname -r)"
 if [ -x /bin/busybox ] && /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
   echo LEAK_OK

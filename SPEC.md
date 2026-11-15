@@ -28,7 +28,7 @@ operator machine or cluster
                 └── inhabitant (HTTP server: echo, or a coding-agent harness)
 ```
 
-The outside network reaches the inhabitant only through Squid. The operator also has `hermetarium attach`: a terminal into a running habitat on both walls. What passes over that terminal is not in the I/O log. The weak wall terminal is Docker. The strong wall terminal is a Firecracker vsock to a pty inside the guest. The inhabitant's only network route remains the gate. Escape sequences from the habitat reach the operator's terminal as they are.
+The outside network reaches the inhabitant only through Squid. The operator also has `hermetarium attach`: a terminal into a running habitat on both walls. What passes over that terminal is not in the I/O log. The weak wall terminal is `docker exec`. The strong wall terminal is SSH to the guest. An image that wants a terminal includes an SSH server, the same kind of contract as having `ip`. At `create`, Hermetarium makes a key pair for that habitat, passes the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the helper's network namespace. The inhabitant's only network route remains the gate. Escape sequences from the habitat reach the operator's terminal as they are.
 
 ## 4. What it is not
 
@@ -119,6 +119,8 @@ Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` fi
 Hermetarium does not care which program it holds. One or more inhabitants start already inside and may change the image. They talk to the outside only through the logged path. The outside talks in the same way: the inhabitant **is** an HTTP server on that path.
 
 `hermetarium attach <id> [-- CMD]` opens a terminal in a running habitat. With no command, the shell is `sh`. The image entrypoint stays the habitat's own process. Bytes on the terminal are not in the I/O log, and the command gains no network path.
+
+On the weak wall the terminal is `docker exec` with a TTY. On the strong wall it is SSH. The image brings the SSH server. Images are reused across habitats, so the key is not baked into the image: `create` writes a key pair under `var/.attach/<id>/` on the host, and the guest init writes that public key into `authorized_keys` when it starts. The private key is mounted only into the short-lived SSH client, which shares the helper network namespace. No SSH port is published. The client does not check the guest host key (`StrictHostKeyChecking=no`, known hosts `/dev/null`). That is acceptable because the client reaches the habitat only through the helper network namespace, and there is no published port. Guest init mounts `/dev/pts` so the session has a pty. Closing the strong-wall terminal sends SIGHUP to a command that is not in `tmux`. A `tmux` session keeps running, and a later `attach` shows it. An image with no SSH server still boots; `attach` on that strong-wall habitat has no server to reach.
 
 ### 9a. Operator HTTP
 

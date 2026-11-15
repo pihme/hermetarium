@@ -118,14 +118,14 @@ The address from `url` is how you talk to the habitat. `exec` runs a command on 
 ./bin/hermetarium exec YOUR_ID -- hostname
 ```
 
-`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`.
+`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`. On the Docker wall that is `docker exec` with a TTY. On the strong wall it is SSH to the guest. An image that wants that terminal includes an SSH server. `create` makes a key pair for the habitat, hands the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the helper's network namespace.
 
 ```bash
 ./bin/hermetarium attach YOUR_ID
 ./bin/hermetarium attach YOUR_ID -- sh -c 'tty; stty size'
 ```
 
-The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. Escape sequences from the habitat reach the operator's terminal as they are. This path is not in the I/O log. It opens no network route out of the habitat.
+The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. On the strong wall, closing the terminal sends SIGHUP to a command that is not in `tmux`. Escape sequences from the habitat reach the operator's terminal as they are. This path is not in the I/O log. It opens no network route out of the habitat.
 
 The folders `examples/` and `inhabitants/` are images you build. They are not command names.
 
@@ -242,6 +242,8 @@ The image listens on port 8080. A POST is one turn. A GET may answer `ok`.
 The image runs as root.
 
 The image contains `iproute2`, and usually `iptables`, so the wall can set the default route.
+
+A strong-wall terminal needs an SSH server at `/usr/sbin/sshd`, plus `ssh-keygen` or host keys that already exist. Alpine is `apk add openssh`. Debian is `apt-get install openssh-server`.
 
 Model calls go to the stand-in host on the gate: `http://claude.hermetarium.test` or `http://grok.hermetarium.test`. Squid is the one that connects to the real API.
 

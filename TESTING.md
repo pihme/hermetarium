@@ -50,8 +50,11 @@ In-process. No Docker habitat.
 | `TestOpenWeb` | Needs Docker and KVM. On both walls the shipped gate file keeps the bumped connection Squid already opened to the origin and checks that certificate with the system CA. The test replaces only that CA path with the mock CA. The gate token replaces two box `Authorization` values on `api.github.com`. A `DELETE`, a contents write, `POST /graphql`, `PATCH`, and a Git refs write are denied and do not reach the origin. A POST whose path contains `..` or `%` is denied and does not reach the origin. Cleartext `api.github.com` is denied, and that request does not carry the gate token. Creating a repository passes. A pass-through host shows its own certificate in the box and its name in the log as `passthrough`. The token is not in the box. |
 | `TestACLOpensWeb` | An `http_access allow` for inbound, vendor, or probe does not open the web. `container_out` and `container_tls` do. |
 | `TestGateDNS` | Needs Docker and KVM. On both walls, with a closed gate file, `example.com` does not resolve and the log says `NXDOMAIN`, while `probe.hermetarium.test` resolves to the gate and is logged. With the web open, `example.com` resolves and the log has the address. A query to `1.1.1.1` gets no answer, and on the weak wall `127.0.0.11` cannot resolve an outside name. `localhost` is `127.0.0.1`. |
-| `TestAttachProgramEmbedded` | The release binary embeds an ELF `fc-attach` for the strong-wall guest. |
-| `TestAttachTTY` | Needs Docker and KVM. `attach` on both walls gives a command a pty and the window size set on the operator terminal, follows a resize, and a later attach still sees a detached tmux session. The I/O log stays empty. |
+| `TestAttachKeyOutsideGate` | Each habitat gets its own key pair. The private key is mode `0600` under `var/.attach/<id>/`, outside the instance directory the gate mounts. The boot argument is `hermetarium.pub=` plus that public key. The strong-wall helper does not mount the private key, and `attach` does not publish a port. |
+| `TestSSHRemoteCommand` | The strong-wall command is one quoted `exec` of the operator's argv, including a newline and a single quote. |
+| `TestAttachTTY` | Needs Docker and KVM. `attach` on both walls gives a command a pty and the window size set on the operator terminal, follows a resize, and a later attach still sees a detached tmux session. The I/O log stays empty. The strong wall uses SSH. The private key is absent from `vm.json`, the gate file, and the root disk, and neither the helper nor the gate publishes a port. |
+| `TestAttachGuestStderr` | Needs Docker and KVM. A non-TTY `attach ID -- CMD` on the strong wall returns status 0 when the command prints `Connection refused` on stderr. That output is not an attach error, and the command is not run again. |
+| `TestDebianSshdPrivsep` | Needs Docker. Debian OpenSSH refuses to start when `/run/sshd` is missing. `fc-init` creates that directory mode `0755` before `sshd`, and `sshd -t` then accepts the guest config. |
 | `TestChooseID` | With no `--id`, `create` still makes a 12-character id. `--id claude` is kept. A blank, a space, a slash, a leading `-` or `.`, and a name longer than 63 characters are rejected. `claude` and `grok` do not share a subnet. |
 | `TestCreateRejectsSizeFlagsOnWeakWall` | `create --wall weak` with `--mem` exits 2. |
 | `TestCreateRejectsCPUsAboveWallLimit` | `--cpus` above 32 on the strong wall, or above `runtime.NumCPU` on the weak wall, exits 2 and names the limit. No habitat is started. The check still allows 32, the host CPU count, and an omitted `--cpus`. |
@@ -93,7 +96,7 @@ In-process. No Docker habitat.
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
 | `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcHelperDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-helper/` directory there. |
-| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). A second extract leaves the entrypoint mtime unchanged. |
+| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). fc-init starts `sshd` after the guest address and `/run/sshd` (mode 0755) and before the inhabitant, and only when `[ -x /usr/sbin/sshd ]`. The scripts do not build a vsock terminal. `DATA_MOUNT_FAIL` exits before the inhabitant. A second extract leaves the entrypoint mtime unchanged. |
 | `TestGateCAFallsThroughToCurl` | The fc-init gate CA fetch runs against a fake busybox without wget: curl is tried next under timeout 3 and writes the CA to both paths. With no curl, the only output is `fc-init: could not fetch the gate CA`. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
@@ -119,7 +122,7 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 
 ### Terminal
 
-`TestAttachTTY`. Image `hermetarium-attach:local` (Alpine with tmux, command `sleep`). `--no-inbound` on both walls.
+`TestAttachTTY`. Image `hermetarium-attach:local` (Alpine with `openssh` and tmux, command `sleep`). `--no-inbound` on both walls. The strong wall connects with SSH. The private key stays on the host.
 
 A command run through `attach` prints a pty name under `/dev/pts` and `stty size` of 40 rows by 100 columns, the size set on the operator's pty before the call. The operator pty is then resized to 24 by 80 and the process receives `SIGWINCH`. A later `stty size` in that same command prints 24 by 80.
 
@@ -133,7 +136,7 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 ### Backup
 
-`tests/backup` `TestBackupWhileWriting`. Needs Docker and `/dev/kvm`. `restic` comes from `PATH`. When it is missing, the test downloads the pinned official linux-amd64 binary into `.cache` and does not commit it. Strong wall, `--no-inbound`, a 32 MiB data disk. The guest keeps rewriting `/data/churn` after writing `/data/known`. `omakase/backup.sh` freezes `/data` with `fsfreeze` through `hermetarium attach`, then Restic reads the host file. A restore to another directory passes `e2fsck -fn`, and `/data/known` is `known-v1`. A fake model key that exists only in the gate file, and a fake gate private key planted at `mitm/ca.key`, are absent from the snapshot listing and from the restored tree. A second backup, while the guest has changed the disk only a little, adds little data. The guest is still writing after the script returns.
+`tests/backup` `TestBackupWhileWriting`. Needs Docker and `/dev/kvm`. `restic` comes from `PATH`. When it is missing, the test downloads the pinned official linux-amd64 binary into `.cache` and does not commit it. Strong wall, `--no-inbound`, a 32 MiB data disk. The image includes `sshd`, because strong attach is SSH, and `fsfreeze` from `util-linux`. The guest keeps rewriting `/data/churn` after writing `/data/known`. `omakase/backup.sh` freezes `/data` with `fsfreeze` through `hermetarium attach`, then Restic reads the host file. A restore to another directory passes `e2fsck -fn`, and `/data/known` is `known-v1`. A fake model key that exists only in the gate file, and a fake gate private key planted at `mitm/ca.key`, are absent from the snapshot listing and from the restored tree. A second backup, while the guest has changed the disk only a little, adds little data. The guest is still writing after the script returns.
 
 `tests/backup` `TestSecretRefusal`. Runs `omakase/backup.sh` with stand-in `restic`, `docker`, and `hermetarium` binaries. No Docker daemon and no KVM. The disk or the journal is `squid.conf`, a symlink to `squid.conf`, a `..` path that reaches `squid.conf`, `mitm/ca.key`, `var/<id>/`, or `var/<id>`. The script exits with the refusal and does not run `restic backup`.
 

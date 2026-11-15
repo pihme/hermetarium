@@ -4,6 +4,8 @@ A host script and a systemd user timer. They back up one running habitat with [R
 
 Restic reads a disk file over more than one write. A read of the live file is not one moment, so the script does not do that. The habitat image needs `fsfreeze` (util-linux). Debian images already have it. An Alpine image needs `apk add util-linux`.
 
+A strong-wall habitat also needs an SSH server at `/usr/sbin/sshd` so attach can freeze the disk. For example `apk add openssh util-linux` or `apt-get install openssh-server`.
+
 ## What is backed up
 
 - `var/<id>/io.jsonl`. The script runs `hermetarium logs` first, so this file matches the access log.

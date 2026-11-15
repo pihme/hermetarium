@@ -76,23 +76,10 @@ test -f /log/dns.ready || { echo "fc-helper: /log/dns.ready missing" >&2; exit 1
 
 cp /opt/firecracker /tmp/firecracker
 chmod +x /tmp/firecracker
-# The socket is created as root. 0666 lets the operator connect; the host
-# directory is 0700 and is not mounted into the gate.
 /tmp/firecracker \
   --no-api \
   --log-path /log/fc.log \
   --level Info \
   --config-file /log/vm.json &
 fc=$!
-i=0
-while [ "$i" -lt 50 ]; do
-  if [ -S /vsock/vsock.sock ]; then
-    break
-  fi
-  sleep 0.1
-  i=$((i + 1))
-done
-if [ -S /vsock/vsock.sock ]; then
-  chmod 666 /vsock/vsock.sock
-fi
 wait "$fc"

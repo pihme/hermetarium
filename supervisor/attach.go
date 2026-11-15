@@ -1,31 +1,27 @@
 package supervisor
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unsafe"
-)
-
-const (
-	vsockSessionPort = 10000
-	vsockResizePort  = 10001
-
-	// Guest session frames: type byte, big-endian length, payload.
-	// Exit status stays off the operator terminal.
-	sessData byte = 0
-	sessExit byte = 1
-	sessErr  byte = 2
 )
 
 type winsize struct {
@@ -33,9 +29,10 @@ type winsize struct {
 }
 
 type running struct {
-	Wall string `json:"wall"`
-	Box  string `json:"box"`
-	Dir  string `json:"dir"`
+	Wall   string `json:"wall"`
+	Box    string `json:"box"`
+	Helper string `json:"helper"`
+	Dir    string `json:"dir"`
 }
 
 // Attach opens a terminal in a running habitat. argv defaults to sh when empty.
@@ -52,9 +49,6 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 	if err != nil {
 		return 1, err
 	}
-	// Escape sequences from the habitat must reach the operator unchanged.
-	restore := ttyRaw(in)
-	defer restore()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGWINCH)
 	defer signal.Stop(sig)
@@ -66,9 +60,16 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 		if inst.Box == "" {
 			return 1, fmt.Errorf("attach: habitat %s has no container", id)
 		}
+		// Escape sequences from the habitat must reach the operator unchanged.
+		restore := ttyRaw(in)
+		defer restore()
 		return attachDocker(inst.Box, argv, in, out, errOut, sig, stop)
 	case "strong":
-		return attachVsock(vsockSockPath(root, id), argv, in, out, errOut, sig, stop)
+		helper := inst.Helper
+		if helper == "" {
+			helper = "htm-fc-" + id
+		}
+		return attachSSH(root, id, helper, argv, in, out, errOut, sig, stop)
 	default:
 		return 1, fmt.Errorf("attach: unknown wall %q", inst.Wall)
 	}
@@ -91,7 +92,8 @@ func loadRunning(root, id string) (running, error) {
 
 func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
 	args := []string{"exec", "-i"}
-	if isTTY(in) {
+	tty := isTTY(in)
+	if tty {
 		args = append(args, "-t")
 	}
 	args = append(args, box)
@@ -100,9 +102,131 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
+	if !tty {
+		return waitSignal(cmd, sig, stop, nil)
+	}
+	// docker exec -t copies the window once, at start. A later SIGWINCH
+	// on the CLI does not resize that session. ExecIDs already running,
+	// including the weak-wall route install, are not this session.
+	before, err := dockerExecIDs(box)
+	if err != nil {
+		return 1, err
+	}
+	var execID string
+	skip := false
+	return waitSignal(cmd, sig, stop, func() error {
+		if skip {
+			return nil
+		}
+		if execID == "" {
+			var err error
+			execID, err = oneNewExecID(box, before)
+			if errors.Is(err, errSkipResize) {
+				// Two TTY attaches in one window are not distinguishable
+				// from ExecIDs. Keep both sessions and skip the API resize.
+				skip = true
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return resizeDockerExec(execID, in)
+	})
+}
+
+// attachSSH runs ssh in a throwaway container that shares the helper network
+// namespace. Nothing publishes the guest port. The private key is mounted
+// only into that container, not into the guest.
+func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
+	if err := EnsureNetTools(root); err != nil {
+		return 1, err
+	}
+	// stty raw clears ISIG. Ctrl-C has to interrupt the image build above.
+	// Escape sequences from the habitat must reach the operator unchanged.
+	restore := ttyRaw(in)
+	defer restore()
+	key := attachKeyPath(root, id)
+	if _, err := os.Stat(key); err != nil {
+		return 1, fmt.Errorf("attach: %w", err)
+	}
+	// Without a pty the guest command's stderr is on the client's stderr.
+	// ssh -E keeps connect and auth failures in this file instead.
+	logFile, err := os.CreateTemp("", "hermetarium-ssh-")
+	if err != nil {
+		return 1, err
+	}
+	logPath := logFile.Name()
+	if err := logFile.Close(); err != nil {
+		_ = os.Remove(logPath)
+		return 1, err
+	}
+	defer os.Remove(logPath)
+	args := []string{"run", "--rm", "-i"}
+	tty := isTTY(in)
+	if tty {
+		args = append(args, "-t")
+	}
+	args = append(args,
+		"--network", "container:"+helper,
+		"-v", key+":/key:ro",
+		"-v", logPath+":/ssh.log",
+		"--entrypoint", "ssh",
+		NetToolsImage,
+	)
+	if tty {
+		args = append(args, "-tt")
+	}
+	args = append(args,
+		"-E", "/ssh.log",
+		"-i", "/key",
+		"-o", "IdentitiesOnly=yes",
+		"-o", "PreferredAuthentications=publickey",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "GlobalKnownHostsFile=/dev/null",
+		"-o", "UpdateHostKeys=no",
+		"-o", "BatchMode=yes",
+		"-o", "LogLevel=ERROR",
+		"-o", "ConnectTimeout=2",
+		"root@"+strongGuestIP,
+		"--",
+		sshRemoteCommand(argv),
+	)
+	cmd := exec.Command("docker", args...)
+	cmd.Stdin = in
+	cmd.Stdout = out
+	cmd.Stderr = errOut
+	code, err := waitSignal(cmd, sig, stop, nil)
+	if err != nil {
+		return 1, err
+	}
+	diag, err := os.ReadFile(logPath)
+	if err != nil {
+		return 1, err
+	}
+	if msg := strings.TrimSpace(string(diag)); msg != "" {
+		return 1, fmt.Errorf("attach: %s", msg)
+	}
+	return code, nil
+}
+
+func waitSignal(cmd *exec.Cmd, sig <-chan os.Signal, stop <-chan struct{}, resize func() error) (int, error) {
 	if err := cmd.Start(); err != nil {
 		return 1, err
 	}
+	if resize != nil {
+		if err := resize(); err != nil && !resizeGone(err) {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			_ = cmd.Wait()
+			return 1, err
+		}
+	}
+	// 404, or "cannot resize a stopped container", means this session
+	// has already exited. Keep Wait's code. Other resize errors do not.
+	resizeErr := make(chan error, 1)
 	go func() {
 		for {
 			select {
@@ -110,12 +234,32 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 				if cmd.Process != nil {
 					_ = cmd.Process.Signal(syscall.SIGWINCH)
 				}
+				if resize == nil {
+					continue
+				}
+				err := resize()
+				if err == nil {
+					continue
+				}
+				if resizeGone(err) {
+					return
+				}
+				resizeErr <- err
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				return
 			case <-stop:
 				return
 			}
 		}
 	}()
 	err := cmd.Wait()
+	select {
+	case rerr := <-resizeErr:
+		return 1, rerr
+	default:
+	}
 	if err == nil {
 		return 0, nil
 	}
@@ -125,200 +269,216 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 	return 1, err
 }
 
-func attachVsock(sock string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
-	_ = errOut
-	conn, err := dialVsock(sock, vsockSessionPort)
+func dockerExecIDs(box string) (map[string]struct{}, error) {
+	out, err := Docker(5*time.Second, "inspect", "-f", `{{range .ExecIDs}}{{.}}{{"\n"}}{{end}}`, box)
 	if err != nil {
-		return 1, err
+		return nil, err
 	}
-	defer conn.Close()
-	row, col := termSize(in)
-	if err := writeSession(conn, row, col, argv); err != nil {
-		return 1, err
+	ids := make(map[string]struct{})
+	for _, line := range strings.Fields(out) {
+		ids[line] = struct{}{}
 	}
-	_ = conn.SetDeadline(time.Time{})
-	// Stop using the terminal before returning. The caller's stop is closed
-	// only after this function returns, which is too late.
-	halt := make(chan struct{})
-	resizeDone := make(chan struct{})
-	var once sync.Once
-	shutdown := func() { once.Do(func() { close(halt) }) }
-	go func() {
-		defer close(resizeDone)
-		relayResize(sock, in, sig, halt)
-	}()
-	go func() {
-		select {
-		case <-stop:
-			shutdown()
-		case <-resizeDone:
-		}
-	}()
-	defer func() {
-		shutdown()
-		<-resizeDone
-	}()
-	go func() {
-		io.Copy(conn, in)
-		// The guest still has to send the exit status on this connection.
-		closeWrite(conn)
-	}()
-	return readSession(conn, out)
+	return ids, nil
 }
 
-func writeSession(w io.Writer, row, col uint16, argv []string) error {
-	if _, err := fmt.Fprintf(w, "%d %d\n%d\n", row, col, len(argv)); err != nil {
-		return err
-	}
-	for _, arg := range argv {
-		if _, err := fmt.Fprintf(w, "%d\n", len(arg)); err != nil {
-			return err
-		}
-		if err := writeFull(w, []byte(arg)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// errSkipResize means another exec started in the same window, so ExecIDs
+// cannot name this session. The attach still runs. The API resize is skipped.
+// A single new id is still resized.
+var errSkipResize = errors.New("attach: skip resize")
 
-func readSession(conn net.Conn, out *os.File) (int, error) {
-	hdr := make([]byte, 5)
+func oneNewExecID(box string, before map[string]struct{}) (string, error) {
+	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := io.ReadFull(conn, hdr); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				return 1, fmt.Errorf("attach: session closed")
-			}
-			return 1, err
-		}
-		n := binary.BigEndian.Uint32(hdr[1:])
-		if n > 1<<20 {
-			return 1, fmt.Errorf("attach: frame too large")
-		}
-		buf := make([]byte, n)
-		if _, err := io.ReadFull(conn, buf); err != nil {
-			return 1, err
-		}
-		switch hdr[0] {
-		case sessData:
-			if _, err := out.Write(buf); err != nil {
-				return 1, err
-			}
-		case sessExit:
-			if len(buf) != 1 {
-				return 1, fmt.Errorf("attach: bad status")
-			}
-			return int(buf[0]), nil
-		case sessErr:
-			return 1, fmt.Errorf("%s", buf)
-		default:
-			return 1, fmt.Errorf("attach: bad frame")
-		}
-	}
-}
-
-func writeFull(w io.Writer, b []byte) error {
-	for len(b) > 0 {
-		n, err := w.Write(b)
-		if n > 0 {
-			b = b[n:]
-		}
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-	}
-	return nil
-}
-
-func closeWrite(conn net.Conn) {
-	type closeWriter interface{ CloseWrite() error }
-	if c, ok := conn.(closeWriter); ok {
-		_ = c.CloseWrite()
-		return
-	}
-	_ = conn.Close()
-}
-
-// relayResize sends the current size once the session exists, and retries a
-// dial that fails because the guest is not listening yet. The header size can
-// already be stale by the time the pty is created.
-func relayResize(sock string, term *os.File, sig <-chan os.Signal, stop <-chan struct{}) {
-	var retry <-chan time.Time
-	pending := true
-	for {
-		if pending {
-			if resizeVsock(sock, term) == nil {
-				pending = false
-				retry = nil
-			} else if retry == nil {
-				retry = time.After(25 * time.Millisecond)
-			}
-		}
-		select {
-		case <-stop:
-			return
-		case <-sig:
-			pending = true
-			retry = nil
-		case <-retry:
-			retry = nil
-		}
-	}
-}
-
-func resizeVsock(sock string, term *os.File) error {
-	conn, err := dialVsock(sock, vsockResizePort)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	row, col := termSize(term)
-	_, err = fmt.Fprintf(conn, "%d %d\n", row, col)
-	return err
-}
-
-func dialVsock(sock string, port int) (net.Conn, error) {
-	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", port); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	line, err := readLine(conn)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	// Firecracker replies "OK <host-port>" and the host port is not the guest port.
-	if !strings.HasPrefix(line, "OK ") {
-		conn.Close()
-		return nil, fmt.Errorf("vsock handshake %q", line)
-	}
-	_ = conn.SetDeadline(time.Time{})
-	return conn, nil
-}
-
-func readLine(r io.Reader) (string, error) {
-	var b []byte
-	one := make([]byte, 1)
-	for len(b) < 4096 {
-		n, err := r.Read(one)
-		if n == 1 {
-			if one[0] == '\n' {
-				return string(b), nil
-			}
-			b = append(b, one[0])
-		}
+		ids, err := dockerExecIDs(box)
 		if err != nil {
 			return "", err
 		}
+		var fresh string
+		n := 0
+		for id := range ids {
+			if _, ok := before[id]; ok {
+				continue
+			}
+			fresh = id
+			n++
+		}
+		if n > 1 {
+			return "", errSkipResize
+		}
+		if n == 1 {
+			return fresh, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("attach: exec id not found")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	return "", fmt.Errorf("line too long")
+}
+
+func dockerSocket() (string, error) {
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		return "/var/run/docker.sock", nil
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Scheme != "unix" || u.Path == "" {
+		return "", fmt.Errorf("attach: DOCKER_HOST %q is not a unix socket", host)
+	}
+	return u.Path, nil
+}
+
+func resizeGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	// Docker 29 answers the first resize after the exec stops with 500
+	// and this text. A later call is 404. Any other 500 is still a failure.
+	return strings.Contains(s, " 404 ") || strings.Contains(s, "cannot resize a stopped container")
+}
+
+func resizeDockerExec(id string, in *os.File) error {
+	sock, err := dockerSocket()
+	if err != nil {
+		return err
+	}
+	row, col := termSize(in)
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return fmt.Errorf("attach: docker socket: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	req := fmt.Sprintf("POST /exec/%s/resize?h=%d&w=%d HTTP/1.0\r\nHost: docker\r\n\r\n", id, row, col)
+	if _, err := io.WriteString(conn, req); err != nil {
+		return fmt.Errorf("attach: resize: %w", err)
+	}
+	br := bufio.NewReader(conn)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("attach: resize: %w", err)
+	}
+	if strings.Contains(line, " 200 ") {
+		return nil
+	}
+	rest, _ := io.ReadAll(io.LimitReader(br, 1024))
+	return fmt.Errorf("attach: resize: %s", strings.TrimSpace(line+string(rest)))
+}
+
+// ssh joins its arguments and the guest shell parses that string. Quoting
+// keeps the operator's argv, including spaces and newlines.
+func sshRemoteCommand(argv []string) string {
+	var b strings.Builder
+	b.WriteString("exec")
+	for _, a := range argv {
+		b.WriteByte(' ')
+		b.WriteString(shellQuote(a))
+	}
+	return b.String()
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+// attachKeyDir is mode 0700 and outside the instance directory. runSquid
+// mounts that directory into the gate, and the private key must not be there.
+func attachKeyDir(root, id string) string {
+	return filepath.Join(VarDir(root), ".attach", id)
+}
+
+func attachKeyPath(root, id string) string {
+	return filepath.Join(attachKeyDir(root, id), "id_ed25519")
+}
+
+// writeAttachKey makes the habitat's key pair. The returned boot argument is
+// the public key only. The private key stays in attachKeyDir.
+func writeAttachKey(root, id string) (string, error) {
+	return generateAttachKey(attachKeyDir(root, id))
+}
+
+func generateAttachKey(dir string) (bootArg string, err error) {
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", err
+	}
+	pubBlob := append(marshalSSHString([]byte("ssh-ed25519")), marshalSSHString(pub)...)
+	var check [4]byte
+	if _, err = rand.Read(check[:]); err != nil {
+		return "", err
+	}
+	var sec bytes.Buffer
+	sec.Write(check[:])
+	sec.Write(check[:])
+	sec.Write(marshalSSHString([]byte("ssh-ed25519")))
+	sec.Write(marshalSSHString(pub))
+	sec.Write(marshalSSHString(priv))
+	sec.Write(marshalSSHString([]byte("hermetarium")))
+	for i := byte(1); sec.Len()%8 != 0; i++ {
+		sec.WriteByte(i)
+	}
+	var raw bytes.Buffer
+	raw.WriteString("openssh-key-v1\x00")
+	raw.Write(marshalSSHString([]byte("none")))
+	raw.Write(marshalSSHString([]byte("none")))
+	raw.Write(marshalSSHString(nil))
+	var nkeys [4]byte
+	binary.BigEndian.PutUint32(nkeys[:], 1)
+	raw.Write(nkeys[:])
+	raw.Write(marshalSSHString(pubBlob))
+	raw.Write(marshalSSHString(sec.Bytes()))
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "OPENSSH PRIVATE KEY", Bytes: raw.Bytes()})
+	if err = os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err = os.Chmod(filepath.Dir(dir), 0o700); err != nil {
+		return "", err
+	}
+	if err = os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
+	keyPath := filepath.Join(dir, "id_ed25519")
+	if err = os.WriteFile(keyPath, pemBytes, 0o600); err != nil {
+		return "", err
+	}
+	if err = os.Chmod(keyPath, 0o600); err != nil {
+		return "", err
+	}
+	pubLine := "ssh-ed25519 " + base64.StdEncoding.EncodeToString(pubBlob) + " hermetarium\n"
+	if err = os.WriteFile(keyPath+".pub", []byte(pubLine), 0o644); err != nil {
+		return "", err
+	}
+	b64 := base64.StdEncoding.EncodeToString(pubBlob)
+	if !sshKeyToken(b64) {
+		return "", fmt.Errorf("attach: public key")
+	}
+	return "hermetarium.pub=" + b64, nil
+}
+
+func marshalSSHString(b []byte) []byte {
+	out := make([]byte, 4+len(b))
+	binary.BigEndian.PutUint32(out, uint32(len(b)))
+	copy(out[4:], b)
+	return out
+}
+
+func sshKeyToken(s string) bool {
+	if s == "" || len(s) > 200 {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '+', c == '/', c == '=':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func termSize(f *os.File) (uint16, uint16) {
