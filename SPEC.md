@@ -102,6 +102,7 @@ How a credentialed destination is attached:
 | --- | --- |
 | Anthropic | `ANTHROPIC_BASE_URL` |
 | xAI | `GROK_XAI_API_BASE_URL` set to `http://grok.hermetarium.test/v1`. On Grok 1.0.77, `GROK_CLI_CHAT_PROXY_BASE_URL` does not move the sampler. The gate credential must be an xAI API key. A login session token gets 401 from `GET /v1/api-key`, and Grok stops. |
+| OpenAI-compatible | `http://model.hermetarium.test/v1`. The gate file names the upstream peer, the `Host` value, a path prefix, and the bearer key. Squid drops the box's `Authorization` and sets that key. |
 
 Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` files use `__VENDOR_KEY__` for the inject header; tests substitute a mock key or a live env var before `create`. The supervisor does not read vendor API keys from its environment.
 

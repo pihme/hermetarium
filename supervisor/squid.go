@@ -28,8 +28,32 @@ func InstallACL(dir, src string) error {
 	if err := os.Remove(filepath.Join(dir, "squid.pid")); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "squid.conf"), b, 0o644); err != nil {
+		return err
+	}
+	// Squid has no directive that inserts a path prefix. The gate file passes
+	// the prefix as the argument of this helper.
+	return os.WriteFile(filepath.Join(dir, "model-rewrite"), []byte(modelRewrite), 0o755)
 }
+
+// modelRewrite speaks Squid's url_rewrite protocol for model.hermetarium.test.
+const modelRewrite = `#!/bin/sh
+prefix=$1
+while IFS= read -r line; do
+  url=${line%% *}
+  case $url in
+    http://model.hermetarium.test*|https://model.hermetarium.test*)
+      scheme=${url%%://*}
+      rest=${url#*://}
+      rest=${rest#*/}
+      printf 'OK rewrite-url="%s://model.hermetarium.test%s/%s"\n' "$scheme" "$prefix" "$rest"
+      ;;
+    *)
+      printf 'ERR\n'
+      ;;
+  esac
+done
+`
 
 // EnsureSquid builds the OpenSSL gate image once. A later create reuses it
 // while squid/Dockerfile is unchanged.

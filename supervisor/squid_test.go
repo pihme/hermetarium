@@ -41,6 +41,10 @@ func TestInstallACL(t *testing.T) {
 	if !strings.Contains(string(b), "http_access deny all") {
 		t.Fatal(string(b))
 	}
+	st, err := os.Stat(filepath.Join(dir, "model-rewrite"))
+	if err != nil || st.Mode()&0o111 == 0 {
+		t.Fatalf("model-rewrite: %v", err)
+	}
 }
 
 func TestInstallACLRemovesStalePid(t *testing.T) {
