@@ -161,8 +161,12 @@ func Run(args []string) int {
 			return 2
 		}
 		id := rest[0]
-		_ = DestroyWeak(id)
+		weakErr := DestroyWeak(id)
 		endStrong(id, filepath.Join(VarDir(root), id))
+		if weakErr != nil {
+			fmt.Fprintln(os.Stderr, weakErr)
+			return 1
+		}
 		return 0
 	default:
 		usage()
