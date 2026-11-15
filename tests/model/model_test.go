@@ -47,6 +47,10 @@ func TestModelGate(t *testing.T) {
 			t.Fatalf("unfilled gate file:\n%s", conf)
 		}
 	}
+	// A Squid that appends instead of replacing would forward the box Authorization.
+	if !squidActiveLine(conf, "request_header_access Authorization deny modelhost") {
+		t.Fatal("gate file does not deny the box Authorization")
+	}
 	peerHost, peerPort, err := cachePeerHostPort(conf)
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +246,34 @@ func waitModel(t *testing.T, wall, id string) string {
 	}
 	t.Fatalf("missing MODEL_DONE\n%s", logs)
 	return ""
+}
+
+func TestModelGateDeniesBoxAuthorization(t *testing.T) {
+	root, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "examples", "model", "squid.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := strings.ReplaceAll(string(b), "__MODEL_PEER__", modelPeer)
+	conf = strings.ReplaceAll(conf, "__MODEL_PREFIX__", modelPrefix)
+	conf = strings.ReplaceAll(conf, "__MODEL_HOST__", modelHost)
+	conf = strings.ReplaceAll(conf, "__MODEL_KEY__", modelKey)
+	// A Squid that appends instead of replacing would forward the box Authorization.
+	if !squidActiveLine(conf, "request_header_access Authorization deny modelhost") {
+		t.Fatal("gate file does not deny the box Authorization")
+	}
+}
+
+func squidActiveLine(conf, want string) bool {
+	for _, line := range strings.Split(conf, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func cachePeerHostPort(conf string) (string, string, error) {
