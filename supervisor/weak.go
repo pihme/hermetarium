@@ -1,6 +1,8 @@
 package supervisor
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -304,9 +307,19 @@ fi
 // Exit 0 only when every backend that exists no longer has the rule.
 // A missing binary is skipped. -C exit 1 is "no match"; any other failure
 // still has to be retried, because the bridge name is all destroy kept.
-// OWNED=1 means hermetarium created table ip filter. The rule delete leaves
-// that table; remove it only when it has no rules afterwards.
-const dropOwnedFilterTableScript = `if [ "${OWNED:-}" = 1 ]; then
+// OWNED=1 means hermetarium created table ip filter. A chain with no rules
+// is removed. A set, map, counter, flowtable, or rule is host state: leave
+// the table. A delete that finds the table already gone is success; one that
+// finds new content is not, so the marker stays.
+const dropOwnedFilterTableScript = `filter_table_has_content() {
+  case "$1" in
+    *'"rule"'*|*'{"set":'*|*'{"map":'*|*'{"counter":'*|*'{"flowtable":'*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+if [ "${OWNED:-}" = 1 ]; then
   command -v nft >/dev/null 2>&1 || {
     printf 'nft: missing\n' >&2
     exit 1
@@ -325,13 +338,24 @@ const dropOwnedFilterTableScript = `if [ "${OWNED:-}" = 1 ]; then
     printf 'nft: %s\n' "$rules" >&2
     exit 1
   }
-  case "$rules" in
-    *'"rule"'*)
+  if filter_table_has_content "$rules"; then
+    exit 0
+  fi
+  if ! err=$(nft delete table ip filter 2>&1); then
+    again=$(nft -j list table ip filter 2>&1) || {
+      case "$again" in
+        *"No such file or directory"*)
+          printf 'dropped\n'
+          exit 0
+          ;;
+      esac
+      printf 'nft: %s\n' "$again" >&2
+      exit 1
+    }
+    if filter_table_has_content "$again"; then
       exit 0
-      ;;
-  esac
-  if ! nft delete table ip filter >/dev/null 2>&1; then
-    printf 'nft: delete table ip filter failed\n' >&2
+    fi
+    printf 'nft: %s\n' "$err" >&2
     exit 1
   fi
   printf 'dropped\n'
@@ -362,6 +386,15 @@ done
 ` + dropOwnedFilterTableScript
 
 func acceptSameBridge(network string) (string, error) {
+	unlock, err := lockIPFilter()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	return acceptSameBridgeLocked(network)
+}
+
+func acceptSameBridgeLocked(network string) (string, error) {
 	gw, err := networkIPv4Gateway(network)
 	if err != nil {
 		return "", err
@@ -376,7 +409,9 @@ func acceptSameBridge(network string) (string, error) {
 	}
 	if owned {
 		if err := rememberFilterTableOwned(); err != nil {
-			_ = forgetSameBridge(br)
+			// This insert created the table. The marker is what a later
+			// destroy would have trusted, so clean up with that same fact.
+			_ = forgetSameBridgeLocked(br, true)
 			return "", err
 		}
 	}
@@ -421,7 +456,13 @@ func rememberFilterTableOwned() error {
 	if err := os.MkdirAll(VarDir(root), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filterOwnedPath(root), []byte("1\n"), 0o644)
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return err
+	}
+	// The token is the ownership. An in-place rewrite keeps the inode, so a
+	// later destroy must not unlink a marker it did not write.
+	return os.WriteFile(filterOwnedPath(root), []byte(hex.EncodeToString(buf[:])+"\n"), 0o644)
 }
 
 func clearFilterTableOwned(root string) error {
@@ -430,6 +471,50 @@ func clearFilterTableOwned(root string) error {
 		return nil
 	}
 	return err
+}
+
+func readIPFilterMarker(root string) (string, error) {
+	fi, err := os.Stat(filterOwnedPath(root))
+	if err != nil {
+		return "", err
+	}
+	if fi.IsDir() {
+		return "", fmt.Errorf("filter table marker is a directory")
+	}
+	b, err := os.ReadFile(filterOwnedPath(root))
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", fmt.Errorf("empty filter table marker")
+	}
+	return token, nil
+}
+
+// lockIPFilter is the critical section for the FORWARD rules and the marker.
+// Two destroys must not both see an empty table, and a destroy must not
+// unlink a marker written for a table created after it listed.
+func lockIPFilter() (func(), error) {
+	root, err := Root()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(VarDir(root), 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(VarDir(root), ".ip-filter.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 func scriptDroppedFilterTable(out string) bool {
@@ -468,20 +553,45 @@ func forgetSavedBridge(id string) error {
 }
 
 func forgetSameBridge(bridge string) error {
+	unlock, err := lockIPFilter()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return forgetSameBridgeLocked(bridge, false)
+}
+
+func forgetSameBridgeLocked(bridge string, forceOwned bool) error {
 	env := []string{"BR=" + bridge}
 	root, rootErr := Root()
-	if rootErr == nil && filterTableOwned(root) {
+	var marker string
+	ownedFile := false
+	if rootErr == nil {
+		var idErr error
+		marker, idErr = readIPFilterMarker(root)
+		ownedFile = idErr == nil
+	}
+	if ownedFile || forceOwned {
 		env = append(env, "OWNED=1")
 	}
 	out, err := runOnHostNet(forgetSameBridgeScript, env...)
 	if err != nil {
 		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)
 	}
-	if !scriptDroppedFilterTable(out) {
+	// forceOwned cleans up an insert whose marker write failed. It must not
+	// unlink a marker this call did not see.
+	if !scriptDroppedFilterTable(out) || !ownedFile {
 		return nil
 	}
-	if rootErr != nil {
-		return rootErr
+	now, err := readIPFilterMarker(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)
+	}
+	if now != marker {
+		return nil
 	}
 	if err := clearFilterTableOwned(root); err != nil {
 		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)

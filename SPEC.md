@@ -61,7 +61,7 @@ The outside network reaches the inhabitant only through Squid. The operator also
 - Do not mount the operator’s home directory, SSH keys, or host Docker socket unless that is an explicit, logged choice.
 - Root inside the image is allowed. On the weak wall, a kernel exploit is a host exploit. On the strong wall, root is only guest root.
 
-The weak wall inserts `FORWARD -i br-<id> -o br-<id> -j ACCEPT` in both iptables-nft and iptables-legacy, through a privileged host-network container. Destroy removes nft `table ip filter` when that insert created it and no rules remain. A table the host already had, or one that still has rules, stays.
+The weak wall inserts `FORWARD -i br-<id> -o br-<id> -j ACCEPT` in both iptables-nft and iptables-legacy, through a privileged host-network container. Destroy removes nft `table ip filter` when that insert created it and nothing remains but chains. A table the host already had, or one that still has a rule, set, map, counter, or flowtable, stays.
 
 Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI image), `--wall weak|strong`, `--acl FILE` (Squid config mounted into the gate), and an optional `--id NAME`. Without `--id`, `create` prints a new id. The id may be a name.
 

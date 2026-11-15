@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -280,6 +281,10 @@ func TestNftFilterTableDrop(t *testing.T) {
 			{name: "empty", owned: true, mode: "empty", wantDelete: true, wantDrop: true},
 			{name: "preexisting", owned: false, mode: "empty", wantDelete: false, wantDrop: false},
 			{name: "rule", owned: true, mode: "rule", wantDelete: false, wantDrop: false},
+			{name: "set", owned: true, mode: "set", wantDelete: false, wantDrop: false},
+			{name: "map", owned: true, mode: "map", wantDelete: false, wantDrop: false},
+			{name: "counter", owned: true, mode: "counter", wantDelete: false, wantDrop: false},
+			{name: "flowtable", owned: true, mode: "flowtable", wantDelete: false, wantDrop: false},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -287,15 +292,19 @@ func TestNftFilterTableDrop(t *testing.T) {
 				bin := t.TempDir()
 				body := `#!/bin/sh
 printf '%s\n' "$*" >> "$LOG"
+json='{"nftables":[{"table":{"name":"filter"}},{"chain":{"name":"FORWARD","policy":"accept"}}]}'
 case "$MODE" in
-empty)
-  if [ "$1" = "-j" ]; then
-    printf '%s\n' '{"nftables":[{"table":{"name":"filter"}},{"chain":{"name":"FORWARD","policy":"accept"}}]}'
+rule) json='{"nftables":[{"rule":{"chain":"FORWARD"}}]}' ;;
+set) json='{"nftables":[{"chain":{"name":"FORWARD"}},{"set":{"name":"peers"}}]}' ;;
+map) json='{"nftables":[{"map":{"name":"peers"}}]}' ;;
+counter) json='{"nftables":[{"counter":{"name":"hits"}}]}' ;;
+flowtable) json='{"nftables":[{"flowtable":{"name":"ft"}}]}' ;;
+esac
+case "$MODE" in
+empty|rule|set|map|counter|flowtable)
+  if [ "$1" = "-j" ] || [ "$MODE" != "empty" ]; then
+    printf '%s\n' "$json"
   fi
-  exit 0
-  ;;
-rule)
-  printf '%s\n' '{"nftables":[{"rule":{"chain":"FORWARD"}}]}'
   exit 0
   ;;
 esac
@@ -524,6 +533,226 @@ exit 0
 			}
 		}
 	})
+
+	t.Run("delete already gone", func(t *testing.T) {
+		logPath := filepath.Join(t.TempDir(), "nft.log")
+		bin := t.TempDir()
+		// Existence list and the empty -j list succeed. Delete then loses
+		// the table; the next list is "No such file or directory".
+		writeExec(t, filepath.Join(bin, "nft"), `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+n=0
+if [ -f "$COUNT" ]; then
+  IFS= read -r n < "$COUNT" || n=0
+fi
+n=$((n + 1))
+printf '%s\n' "$n" > "$COUNT"
+if [ "$1" = "delete" ]; then
+  echo "Error: Could not process rule: No such file or directory" >&2
+  exit 1
+fi
+if [ "$1" = "-j" ] && [ "$n" -gt 2 ]; then
+  echo "Error: No such file or directory" >&2
+  exit 1
+fi
+if [ "$1" = "-j" ]; then
+  printf '%s\n' '{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}}]}'
+fi
+exit 0
+`)
+		stdout, err := runOwnedFilterScript(t, bin, logPath, "")
+		if err != nil {
+			t.Fatalf("script: %v\n%s", err, stdout)
+		}
+		if !scriptDroppedFilterTable(stdout) {
+			t.Fatalf("stdout:\n%s", stdout)
+		}
+		logb, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(string(logb), "delete table ip filter") != 1 {
+			t.Fatalf("log:\n%s", logb)
+		}
+	})
+
+	t.Run("delete loses to content", func(t *testing.T) {
+		for _, mode := range []string{"rule", "set"} {
+			t.Run(mode, func(t *testing.T) {
+				logPath := filepath.Join(t.TempDir(), "nft.log")
+				bin := t.TempDir()
+				body := `{"nftables":[{"rule":{"chain":"FORWARD"}}]}`
+				if mode == "set" {
+					body = `{"nftables":[{"set":{"name":"peers"}}]}`
+				}
+				writeExec(t, filepath.Join(bin, "nft"), `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+n=0
+if [ -f "$COUNT" ]; then
+  IFS= read -r n < "$COUNT" || n=0
+fi
+n=$((n + 1))
+printf '%s\n' "$n" > "$COUNT"
+if [ "$1" = "delete" ]; then
+  echo "Error: Device or resource busy" >&2
+  exit 1
+fi
+if [ "$1" = "-j" ] && [ "$n" -gt 2 ]; then
+  printf '%s\n' "$BODY"
+  exit 0
+fi
+if [ "$1" = "-j" ]; then
+  printf '%s\n' '{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}}]}'
+fi
+exit 0
+`)
+				stdout, err := runOwnedFilterScript(t, bin, logPath, "BODY="+body)
+				if err != nil {
+					t.Fatalf("script: %v\n%s", err, stdout)
+				}
+				if scriptDroppedFilterTable(stdout) {
+					t.Fatalf("dropped a table that gained %s\n%s", mode, stdout)
+				}
+			})
+		}
+	})
+
+	t.Run("overlap", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("HERMETARIUM_ROOT", root)
+		if err := rememberFilterTableOwned(); err != nil {
+			t.Fatal(err)
+		}
+		bin := t.TempDir()
+		// The table is already gone. Both destroys must succeed and the
+		// marker must not stay set. The flock keeps their scripts apart.
+		writeExec(t, filepath.Join(bin, "nft"), `#!/bin/sh
+echo "Error: No such file or directory" >&2
+exit 1
+`)
+		var mu sync.Mutex
+		inDocker := 0
+		maxIn := 0
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			if len(args) == 0 || args[0] != "run" {
+				return "", os.ErrInvalid
+			}
+			mu.Lock()
+			inDocker++
+			if inDocker > maxIn {
+				maxIn = inDocker
+			}
+			mu.Unlock()
+			time.Sleep(150 * time.Millisecond)
+			stdout, err := runFilterDocker(bin, args)
+			mu.Lock()
+			inDocker--
+			mu.Unlock()
+			return stdout, err
+		})
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i := range errs {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				errs[i] = forgetSameBridge("br-overlap")
+			}(i)
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("destroy %d: %v", i, err)
+			}
+		}
+		if maxIn != 1 {
+			t.Fatalf("overlapping nft runs = %d, want 1", maxIn)
+		}
+		if filterTableOwned(root) {
+			t.Fatal("marker remains after the table is gone")
+		}
+	})
+
+	t.Run("marker write fails", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("HERMETARIUM_ROOT", root)
+		if err := os.MkdirAll(filterOwnedPath(root), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		bin := t.TempDir()
+		logPath := filepath.Join(t.TempDir(), "nft.log")
+		writeExec(t, filepath.Join(bin, "nft"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+logPath+"'\nprintf '%s\\n' '{\"nftables\":[{\"rule\":{\"chain\":\"FORWARD\"}}]}'\nexit 0\n")
+		var owned bool
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			if len(args) == 0 {
+				return "", os.ErrInvalid
+			}
+			if args[0] == "network" {
+				return "10.9.0.1|10.9.0.0/24\n", nil
+			}
+			script := args[len(args)-1]
+			if script == acceptSameBridgeScript {
+				return "br-abc\nowned\n", nil
+			}
+			if script != forgetSameBridgeScript {
+				return "", os.ErrInvalid
+			}
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] == "-e" && args[i+1] == "OWNED=1" {
+					owned = true
+				}
+			}
+			return runFilterDocker(bin, args)
+		})
+		if _, err := acceptSameBridge("htm-x"); err == nil {
+			t.Fatal("expected marker write to fail")
+		}
+		if !owned {
+			t.Fatal("rollback did not pass OWNED=1")
+		}
+		logb, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(logb), "delete table") {
+			t.Fatalf("deleted a table that still has a rule:\n%s", logb)
+		}
+		fi, err := os.Stat(filterOwnedPath(root))
+		if err != nil || !fi.IsDir() {
+			t.Fatalf("marker path: %v", err)
+		}
+	})
+
+	t.Run("replaced marker stays", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("HERMETARIUM_ROOT", root)
+		if err := rememberFilterTableOwned(); err != nil {
+			t.Fatal(err)
+		}
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			if len(args) == 0 || args[0] != "run" {
+				return "", os.ErrInvalid
+			}
+			// Same inode if the file is replaced in place. The token still changes.
+			if err := os.WriteFile(filterOwnedPath(root), []byte("replaced\n"), 0o644); err != nil {
+				return "", err
+			}
+			return "dropped\n", nil
+		})
+		if err := forgetSameBridge("br-abc"); err != nil {
+			t.Fatal(err)
+		}
+		if !filterTableOwned(root) {
+			t.Fatal("replaced marker was removed")
+		}
+		now, err := readIPFilterMarker(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if now != "replaced" {
+			t.Fatalf("marker %q", now)
+		}
+	})
 }
 
 func TestNftFilterTableNetns(t *testing.T) {
@@ -570,6 +799,15 @@ if iptables-nft -w -C FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1; then
   exit 1
 fi
 nft delete table ip filter
+
+echo phase-set
+nft add table ip filter
+nft add chain ip filter FORWARD '{ type filter hook forward priority 0; policy accept; }'
+nft add set ip filter peers '{ type ipv4_addr; }'
+iptables-nft -w -I FORWARD 1 -i "$br" -o "$br" -j ACCEPT
+BR="$br" OWNED=1 sh -c "$FORGET"
+nft list set ip filter peers >/dev/null
+nft delete table ip filter
 `
 	out, err := Docker(2*time.Minute, "run", "--rm", "--cap-add", "NET_ADMIN",
 		"-e", "ACCEPT="+acceptSameBridgeScript,
@@ -585,4 +823,41 @@ func writeExec(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func runOwnedFilterScript(t *testing.T, bin, logPath, extra string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", dropOwnedFilterTableScript)
+	cmd.Env = []string{"PATH=" + bin, "LOG=" + logPath, "OWNED=1", "COUNT=" + logPath + ".n"}
+	if extra != "" {
+		cmd.Env = append(cmd.Env, extra)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return stderr.String() + stdout.String(), err
+	}
+	return stdout.String(), nil
+}
+
+func runFilterDocker(bin string, args []string) (string, error) {
+	script := args[len(args)-1]
+	cmd := exec.Command("sh", "-c", script)
+	// bin only: a host iptables would edit the real filter table.
+	cmd.Env = []string{"PATH=" + bin}
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "-e" {
+			cmd.Env = append(cmd.Env, args[i+1])
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return stdout.String() + stderr.String(), err
+	}
+	return stdout.String(), nil
 }
