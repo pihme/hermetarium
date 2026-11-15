@@ -170,6 +170,9 @@ func copySparse(src, dst string) (err error) {
 	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("stale %s; run hermetarium destroy <id> first: %w", filepath.Base(dst), err)
+		}
 		return err
 	}
 	defer func() {
