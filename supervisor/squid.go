@@ -84,20 +84,47 @@ func EnsureSquid(root string) error {
 	return nil
 }
 
+func netToolsDockerfile() string {
+	// iptables is nf_tables. iptables-legacy is the other filter hook: a drop
+	// there is invisible to nft list, and an accept in one does not cover it.
+	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2\n"
+}
+
 func EnsureNetTools(root string) error {
+	dir := filepath.Join(CacheDir(root), "nettools-build")
+	stamp := filepath.Join(dir, "Dockerfile")
+	df := netToolsDockerfile()
+	have := false
 	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err == nil {
+		have = true
+	}
+	old, readErr := os.ReadFile(stamp)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
+	}
+	if have && readErr == nil && string(old) == df {
 		return nil
 	}
-	dir := filepath.Join(CacheDir(root), "nettools-build")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iproute2\n"
-	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
+	// Docker needs the Dockerfile in the context. It is also the stamp, and it
+	// may match this Dockerfile only after the build succeeds: a failed rebuild
+	// would otherwise leave the new stamp on the previous image.
+	if err := os.WriteFile(stamp, []byte(df), 0o644); err != nil {
 		return err
 	}
-	_, err := Docker(3*time.Minute, "build", "-t", NetToolsImage, dir)
-	return err
+	if _, err := Docker(3*time.Minute, "build", "-t", NetToolsImage, dir); err != nil {
+		if os.IsNotExist(readErr) {
+			if rmErr := os.Remove(stamp); rmErr != nil && !os.IsNotExist(rmErr) {
+				return fmt.Errorf("%w\nremove Dockerfile: %v", err, rmErr)
+			}
+		} else if werr := os.WriteFile(stamp, old, 0o644); werr != nil {
+			return fmt.Errorf("%w\nrestore Dockerfile: %v", err, werr)
+		}
+		return err
+	}
+	return nil
 }
 
 // The gate image declares volumes. -v removes those anonymous ones; bind mounts stay.
