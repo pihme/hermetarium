@@ -35,6 +35,17 @@ func TestResolveCreate(t *testing.T) {
 	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--disk", "nope"}); err == nil {
 		t.Fatal("expected --disk to reject a non-integer")
 	}
+	withData, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"})
+	if err != nil || withData.DataPath != "/tmp/disk.ext4" || withData.DataMiB != 1024 {
+		t.Fatalf("data defaults %+v %v", withData, err)
+	}
+	sizedData, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4", "--data-size", "64"})
+	if err != nil || sizedData.DataMiB != 64 {
+		t.Fatalf("data size %+v %v", sizedData, err)
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data-size", "64"}); err == nil {
+		t.Fatal("expected --data-size to require --data")
+	}
 	if ex.CPUs != 0 {
 		t.Fatalf("default cpus %d", ex.CPUs)
 	}
@@ -74,6 +85,36 @@ func TestCreateRejectsSizeFlagsOnWeakWall(t *testing.T) {
 	code := Run([]string{"create", "--wall", "weak", "--image", "hermetarium/echo:dev", "--acl", "/tmp/acl.conf", "--mem", "2048"})
 	if code != 2 {
 		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestCreateRejectsDataOnWeakWall(t *testing.T) {
+	code := Run([]string{"create", "--wall", "weak", "--image", "hermetarium/echo:dev", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"})
+	if code != 2 {
+		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestCreateRejectsBadDataFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	cases := [][]string{
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "--mem"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "-disk.ext4"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "disk:ext4"},
+	}
+	for _, args := range cases {
+		if code := Run(args); code != 2 {
+			t.Fatalf("%v code=%d", args, code)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("created %v", entries)
 	}
 }
 

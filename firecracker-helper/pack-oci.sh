@@ -28,6 +28,25 @@ mount -t devpts devpts /dev/pts 2>/dev/null || true
 mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
 mount -t tmpfs tmpfs /run 2>/dev/null || true
 mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
+# hermetarium.data=1 means create --data. The node can lag devtmpfs.
+if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
+  i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -b /dev/vdb ]; then
+      break
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  mkdir -p /data
+  # destroy powers the machine off. sync makes a finished write durable.
+  # Do not start the inhabitant when the disk will not mount.
+  if ! mount -t ext4 -o sync,noatime /dev/vdb /data; then
+    echo DATA_MOUNT_FAIL
+    exit 1
+  fi
+  echo DATA_MOUNT_OK
+fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"
 $IP link set lo up 2>/dev/null || true
