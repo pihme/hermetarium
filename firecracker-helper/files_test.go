@@ -49,6 +49,9 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "echo DATA_MOUNT_OK") {
 		t.Fatal("pack-oci.sh missing DATA_MOUNT_OK")
 	}
+	if !strings.Contains(string(b), "nameserver 172.16.0.1") || !strings.Contains(string(b), "127.0.0.1 localhost") {
+		t.Fatal("pack-oci.sh missing gate resolver or localhost")
+	}
 
 	st1, err := os.Stat(ep)
 	if err != nil {

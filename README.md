@@ -145,7 +145,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 
 **Squid** is the logged path. Squid runs beside the supervisor. Its license stays with Squid. Hermetarium mounts the file you pass with `--acl`. Each example and each assistant ships its gate file next to its Dockerfile. Every setting is described in the [Squid 6 config guide](https://www.squid-cache.org/Versions/v6/cfgman/).
 
-**The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. Message bodies stay out of the log.
+**The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. DNS queries are in that log too: the name, the type, and the result. Message bodies stay out of the log.
 
 **Porter** (`porter/`) is a small program inside the assistant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code and Grok Build. You can skip porter and answer on 8080 yourself. The echo image does that.
 

@@ -36,6 +36,7 @@ const (
 var fcPin = fcSHA256
 
 const strongGuestIP = "172.16.0.2"
+const strongGateIP = "172.16.0.1"
 
 type StrongInstance struct {
 	ID         string `json:"id"`
@@ -347,6 +348,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		_ = DestroyStrong(id)
 		return nil, err
 	}
+	// Before WaitSquid returns, the helper has not started the guest yet.
+	if err := startGateDNS(root, id, helper, gate, strongGateIP, conf); err != nil {
+		_ = DestroyStrong(id)
+		return nil, err
+	}
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
@@ -546,6 +552,7 @@ func waitDataMounted(helper string) error {
 func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
+	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)
 	return nil
