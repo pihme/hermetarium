@@ -330,78 +330,167 @@ func TestForwardTCPAndTruncatedUDP(t *testing.T) {
 
 func TestUDPConcurrencyBound(t *testing.T) {
 	const slots = 2
-	const burst = 20
-	up, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := strconv.Itoa(up.LocalAddr().(*net.UDPAddr).Port)
-	var total atomic.Int32
-	var maxSeen atomic.Int32
-	var inflight atomic.Int32
-	release := make(chan struct{})
+	const burst = 8
+	upUDP, upTCP, port := listenBoth(t)
+	var udpN, tcpN, inflight, maxSeen atomic.Int32
+	hold := make(chan struct{})
 	var once sync.Once
-	letGo := func() { once.Do(func() { close(release) }) }
+	letGo := func() { once.Do(func() { close(hold) }) }
+	note := func(cur int32) {
+		for {
+			m := maxSeen.Load()
+			if cur <= m || maxSeen.CompareAndSwap(m, cur) {
+				return
+			}
+		}
+	}
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, addr, err := up.ReadFrom(buf)
+			n, addr, err := upUDP.ReadFrom(buf)
 			if err != nil {
 				return
 			}
 			q := append([]byte(nil), buf[:n]...)
-			total.Add(1)
-			cur := inflight.Add(1)
-			for {
-				m := maxSeen.Load()
-				if cur <= m || maxSeen.CompareAndSwap(m, cur) {
-					break
-				}
-			}
+			udpN.Add(1)
+			note(inflight.Add(1))
 			go func(addr net.Addr, q []byte) {
-				<-release
+				<-hold
 				inflight.Add(-1)
-				resp := respA(q, "192.0.2.1", false)
-				_, _ = up.WriteTo(resp, addr)
+				_, _ = upUDP.WriteTo(respA(q, "192.0.2.1", false), addr)
 			}(addr, q)
 		}
 	}()
+	go func() {
+		for {
+			c, err := upTCP.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+				var n uint16
+				if err := binary.Read(c, binary.BigEndian, &n); err != nil || n > 65535 {
+					return
+				}
+				q := make([]byte, n)
+				if _, err := io.ReadFull(c, q); err != nil {
+					return
+				}
+				tcpN.Add(1)
+				note(inflight.Add(1))
+				<-hold
+				inflight.Add(-1)
+				resp := respA(q, "192.0.2.2", false)
+				_ = binary.Write(c, binary.BigEndian, uint16(len(resp)))
+				_, _ = c.Write(resp)
+			}(c)
+		}
+	}()
 
-	gate, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
 	g := forwardGate(t, port)
 	g.slots = make(chan struct{}, slots)
-	go g.serveUDP(gate)
+	gateUDP, gateTCP := serveGate(t, g)
 	t.Cleanup(func() {
 		letGo()
-		gate.Close()
-		up.Close()
+		upUDP.Close()
+		upTCP.Close()
 	})
 
-	client, err := net.DialUDP("udp4", nil, gate.LocalAddr().(*net.UDPAddr))
+	client, err := net.DialUDP("udp4", nil, gateUDP.LocalAddr().(*net.UDPAddr))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
 	q := dnsQuery("example.com", 1)
-	for i := 0; i < burst; i++ {
+	for i := 0; i < slots; i++ {
 		if _, err := client.Write(q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for total.Load() < slots && time.Now().Before(deadline) {
+	for udpN.Load() < slots && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	time.Sleep(200 * time.Millisecond)
-	if got := total.Load(); got == 0 || got > slots {
-		t.Fatalf("forwarded %d, cap %d", got, slots)
+	if got := udpN.Load(); got != slots {
+		t.Fatalf("forwarded %d while held, cap %d", got, slots)
 	}
 	if got := maxSeen.Load(); got > slots {
 		t.Fatalf("inflight %d, cap %d", got, slots)
 	}
+	if _, err := tryTCP(gateTCP.Addr().String(), q); err == nil {
+		t.Fatal("tcp answered while the pool was full")
+	}
+	if got := tcpN.Load(); got != 0 {
+		t.Fatalf("upstream tcp %d while the pool was full", got)
+	}
+
+	letGo()
+	if !waitIdle(g.slots) {
+		t.Fatal("slots still held after the first burst")
+	}
+	resp := queryTCP(t, gateTCP.Addr().String(), q)
+	if resultOf(resp) != "A 192.0.2.2" {
+		t.Fatalf("tcp after release: %s", resultOf(resp))
+	}
+	if got := tcpN.Load(); got != 1 {
+		t.Fatalf("upstream tcp %d after a slot was released", got)
+	}
+	if !waitIdle(g.slots) {
+		t.Fatalf("tcp slot still held")
+	}
+
+	before := udpN.Load()
+	for i := 0; i < burst; i++ {
+		if _, err := client.Write(q); err != nil {
+			t.Fatal(err)
+		}
+		want := before + int32(i+1)
+		deadline = time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && (udpN.Load() < want || len(g.slots) != 0) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if got := udpN.Load() - before; got != want-before || len(g.slots) != 0 {
+			t.Fatalf("second burst forwarded %d, slots %d, want %d", got, len(g.slots), i+1)
+		}
+	}
+	if got := maxSeen.Load(); got > slots {
+		t.Fatalf("inflight %d, cap %d", got, slots)
+	}
+}
+
+func waitIdle(slots chan struct{}) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for len(slots) > 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	return len(slots) == 0
+}
+
+func tryTCP(addr string, q []byte) ([]byte, error) {
+	c, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	pkt := make([]byte, 2+len(q))
+	binary.BigEndian.PutUint16(pkt[:2], uint16(len(q)))
+	copy(pkt[2:], q)
+	if _, err := c.Write(pkt); err != nil {
+		return nil, err
+	}
+	var n uint16
+	if err := binary.Read(c, binary.BigEndian, &n); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(c, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 func TestDNSLogCap(t *testing.T) {
@@ -471,6 +560,7 @@ func forwardGate(t *testing.T, port string) *gateDNS {
 		names:  map[string]struct{}{},
 		up:     []string{"127.0.0.1"},
 		upPort: port,
+		slots:  make(chan struct{}, maxInflight),
 		log:    newLog(t),
 	}
 }

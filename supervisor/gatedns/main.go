@@ -105,9 +105,6 @@ func (g *gateDNS) serveUDP(udp net.PacketConn) {
 }
 
 func (g *gateDNS) acquire() bool {
-	if g.slots == nil {
-		return true
-	}
 	select {
 	case g.slots <- struct{}{}:
 		return true
@@ -117,9 +114,6 @@ func (g *gateDNS) acquire() bool {
 }
 
 func (g *gateDNS) release() {
-	if g.slots == nil {
-		return
-	}
 	<-g.slots
 }
 
@@ -381,9 +375,6 @@ func (g *gateDNS) writeLine(line []byte) {
 	if g.logN > 0 && g.logN+int64(len(line)) > g.limit() {
 		g.rotate()
 	}
-	if g.log == nil {
-		return
-	}
 	n, err := g.log.Write(line)
 	if err != nil {
 		return
@@ -392,37 +383,19 @@ func (g *gateDNS) writeLine(line []byte) {
 }
 
 func (g *gateDNS) rotate() {
+	// Rename replaces .1. On failure the open file and logN stay, so later
+	// lines still append instead of truncating or discarding the log.
 	name := g.log.Name()
-	_ = g.log.Close()
-	prev := name + ".1"
-	_ = os.Remove(prev)
-	if err := os.Rename(name, prev); err != nil {
-		f, oerr := os.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-		if oerr != nil {
-			g.log = devNull()
-			g.logN = 0
-			return
-		}
-		g.log = f
-		g.logN = 0
+	if err := os.Rename(name, name+".1"); err != nil {
 		return
 	}
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		g.log = devNull()
-		g.logN = 0
 		return
 	}
+	_ = g.log.Close()
 	g.log = f
 	g.logN = 0
-}
-
-func devNull() *os.File {
-	f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		return nil
-	}
-	return f
 }
 
 func localResp(q []byte, qend, rcode int, aa bool, rr []byte) []byte {
