@@ -290,6 +290,8 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 **The kernel.** The strong wall boots Linux 6.1.188, the file `vmlinux-6.1.188` from the Firecracker CI build `firecracker-ci/20261111-778a26c0594c-0`. Firecracker is v1.16.1. The supervisor checks the SHA-256 of that kernel and of the Firecracker release tarball after download and refuses a mismatch. The guest has entropy at boot. A base that needs a system call this kernel does not have can run on the Docker wall.
 
+CI builds this kernel from Firecracker's published config at commit `778a26c0594c80025ed798088a66c2511ba618de`, on Amazon Linux tag `microvm-kernel-6.1.188-56.393.amzn2023`, and rejects a hash that is not the pin.
+
 ## Porter in your image
 
 Porter listens on port 8080 and runs `claude` or `grok` for each POST. Claude and Grok get `--continue` after the first turn. Claude's `-p` is a switch, so `--continue` stays in front of it. Grok's `-p` is `--single` and takes the prompt, so `--continue` follows the prompt. Grok also gets `--always-approve`.

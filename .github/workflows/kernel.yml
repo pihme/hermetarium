@@ -1,0 +1,59 @@
+name: kernel
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/kernel.yml
+      - .github/scripts/build-strong-kernel.sh
+      - supervisor/strong.go
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/kernel.yml
+      - .github/scripts/build-strong-kernel.sh
+      - supervisor/strong.go
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vmlinux:
+    name: vmlinux-6.1.188
+    # x86_64, and the same Ubuntu gcc the published image records.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain recorded in the pinned kernel
+        # CONFIG_CC_VERSION_TEXT, CONFIG_LD_VERSION, and CONFIG_PAHOLE_VERSION
+        # are inside the image. gcc must be invoked as gcc, not gcc-13, or the
+        # version text changes.
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bc bison flex make patch curl ca-certificates git python3 \
+            libelf-dev libssl-dev \
+            gcc-13=13.3.0-6ubuntu2~24.04.1 \
+            binutils=2.42-4ubuntu2.10 \
+            dwarves=1.25-0ubuntu3
+          if [[ ! -e /usr/bin/gcc || "$(readlink -f /usr/bin/gcc)" != "$(readlink -f /usr/bin/gcc-13)" ]]; then
+            sudo ln -sfn gcc-13 /usr/bin/gcc
+          fi
+
+      - name: Build vmlinux-6.1.188
+        run: bash .github/scripts/build-strong-kernel.sh "${RUNNER_TEMP}/vmlinux-6.1.188"
+
+      - name: Reject a hash that is not the pin
+        run: |
+          want=$(sed -n 's/^[[:space:]]*kernelSHA256[[:space:]]*=[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p' supervisor/strong.go)
+          test -n "$want"
+          got=$(sha256sum "${RUNNER_TEMP}/vmlinux-6.1.188" | awk '{print $1}')
+          echo "got  ${got}"
+          echo "want ${want}"
+          test "$got" = "$want"
