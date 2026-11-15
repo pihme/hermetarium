@@ -43,7 +43,7 @@ func TestFreezeReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeExe(t, filepath.Join(bin, "restic"), "#!/bin/sh\nexit 0\n")
-	writeExe(t, filepath.Join(bin, "docker"), "#!/bin/sh\nprintf '%s\\n' \"$DISK_PATH\"\n")
+	writeDockerStub(t, filepath.Join(bin, "docker"))
 	herm := filepath.Join(root, "hermetarium")
 	writeExe(t, herm, `#!/bin/sh
 if [ "$1" = logs ]; then
@@ -52,8 +52,12 @@ fi
 if [ "$1" != attach ]; then
   exit 0
 fi
+# The freeze script also contains the guest backstop (fsfreeze -u).
+# An attach that runs fsfreeze -f is the freeze. A thaw is -u without -f.
 case " $* " in
-  *" fsfreeze -u "*)
+  *"fsfreeze -f"*)
+    ;;
+  *"fsfreeze -u"*)
     echo "thaw failed" >&2
     exit 1
     ;;
@@ -103,6 +107,7 @@ exit 1
 			"RESTIC_PASSWORD=test-password",
 			"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
 			"DISK_PATH=" + disk,
+			"LOG_PATH=" + inst,
 			"ATTACH_MODE=" + mode,
 		}, backupEnv(t, nil)...)
 		out, err := cmd.CombinedOutput()
