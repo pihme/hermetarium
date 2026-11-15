@@ -261,6 +261,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		"--entrypoint", "sh",
 	}
 	helperArgs = append(helperArgs, inboundPublish(opts.NoInbound)...)
+	// The helper entrypoint accepts tcp/18081 from the bridge gateway unless
+	// this is set. The gate file is copied unchanged and may still listen there.
+	if opts.NoInbound {
+		helperArgs = append(helperArgs, "-e", "NO_INBOUND=1")
+	}
 	helperArgs = append(helperArgs,
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",

@@ -127,7 +127,7 @@ hermetarium version
 hermetarium exec YOUR_ID -- <cmd>
 ```
 
-`create` starts a habitat and prints an id. `--image` is the container. Something inside must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for one. `url` then prints `this habitat has no inbound address`. `--acl FILE` is the gate file. Hermetarium copies it as you wrote it.
+`create` starts a habitat and prints an id. `--image` is the container. Something inside must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for one. Nothing on the host can reach port 18081, even when the gate file still listens there. `url` then prints `this habitat has no inbound address`. `--acl FILE` is the gate file. Hermetarium copies it as you wrote it.
 
 `--id NAME` chooses the id. Leave it off and `create` prints a new one. A name such as `claude` is fine. Use letters, digits, `.`, `_`, and `-`, start with a letter or a digit, and stay within 63 characters. Later commands use that same id.
 
