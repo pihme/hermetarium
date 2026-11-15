@@ -1,0 +1,7 @@
+[Unit]
+Description=Restic backup of a Hermetarium habitat
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/hermetarium/backup.env
+ExecStart=/bin/sh -c 'if [ -z "${HERMETARIUM_BACKUP_SCRIPT:-}" ]; then echo "set HERMETARIUM_BACKUP_SCRIPT in backup.env" >&2; exit 1; fi; exec "$HERMETARIUM_BACKUP_SCRIPT"'
