@@ -30,6 +30,10 @@ func main() {
 	call(client, http.MethodPost, "https://api.github.com/graphql")
 	call(client, http.MethodPatch, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/hello/git/refs")
+	// ".." is still ".." when Squid matches urlpath_regex. "%25" is still "%".
+	// "%2F" is not: Squid unescapes it to a slash first, and the catch-all denies it.
+	call(client, http.MethodPost, "https://api.github.com/repos/octo/../pulls")
+	call(client, http.MethodPost, "https://api.github.com/repos/octo/a%25b/pulls")
 	call(client, http.MethodDelete, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
 	call(client, http.MethodGet, "http://api.github.com/user")
@@ -72,6 +76,15 @@ func call(client *http.Client, method, rawURL string) {
 			fmt.Println("HTTP_FAIL", method, rawURL, err)
 			return
 		}
+		// Go can clean ".." or re-encode "%". The request target Squid sees
+		// has to keep the marker, or a later 403 is from some other rule.
+		if !markerKept(req, rawURL) {
+			req.URL.Opaque = requestTarget(rawURL)
+		}
+		if !markerKept(req, rawURL) {
+			fmt.Println("HTTP_FAIL", method, rawURL, "request dropped the marker", req.URL.RequestURI())
+			return
+		}
 		req.Header.Set("Authorization", "Bearer box-token")
 		req.Header.Add("Authorization", "bearer box-token")
 		resp, err := client.Do(req)
@@ -89,4 +102,26 @@ func call(client *http.Client, method, rawURL string) {
 		return
 	}
 	fmt.Println("HTTP_FAIL", method, rawURL, last)
+}
+
+func markerKept(req *http.Request, rawURL string) bool {
+	uri := req.URL.RequestURI()
+	if strings.Contains(rawURL, "..") && !strings.Contains(uri, "..") {
+		return false
+	}
+	if strings.Contains(rawURL, "%") && !strings.Contains(uri, "%") {
+		return false
+	}
+	return true
+}
+
+func requestTarget(rawURL string) string {
+	rest := rawURL
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return rest[i:]
+	}
+	return "/"
 }

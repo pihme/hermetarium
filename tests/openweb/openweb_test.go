@@ -129,6 +129,8 @@ func TestOpenWeb(t *testing.T) {
 				"HTTP POST https://api.github.com/graphql 403",
 				"HTTP PATCH https://api.github.com/repos/octo/hello 403",
 				"HTTP POST https://api.github.com/repos/octo/hello/git/refs 403",
+				"HTTP POST https://api.github.com/repos/octo/../pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/a%25b/pulls 403",
 				"HTTP DELETE https://api.github.com/repos/octo/hello 403",
 				"HTTP PUT https://api.github.com/repos/octo/hello/contents/README.md 403",
 				"HTTP GET http://api.github.com/user 403",
@@ -161,6 +163,8 @@ func TestOpenWeb(t *testing.T) {
 				{"POST", "/graphql"},
 				{"PATCH", "/repos/octo/hello"},
 				{"POST", "/git/refs"},
+				{"POST", ".."},
+				{"POST", "%"},
 				{"GET", "/user"},
 			} {
 				rec, found := findRec(recs, deny.method, deny.path)
@@ -192,7 +196,7 @@ func TestOpenWeb(t *testing.T) {
 					t.Fatalf("gate token on the wrong request\n%s", text)
 				}
 			}
-			if strings.Contains(text, "method=DELETE") || strings.Contains(text, "/contents/") || strings.Contains(text, "path=/graphql") || strings.Contains(text, "method=PATCH") || strings.Contains(text, "/git/refs") || strings.Contains(text, "path=/user host") {
+			if strings.Contains(text, "method=DELETE") || strings.Contains(text, "/contents/") || strings.Contains(text, "path=/graphql") || strings.Contains(text, "method=PATCH") || strings.Contains(text, "/git/refs") || strings.Contains(text, "path=/user host") || strings.Contains(text, "..") || strings.Contains(text, "%") {
 				t.Fatalf("denied request reached the mock\n%s", text)
 			}
 			if wall == "weak" {
