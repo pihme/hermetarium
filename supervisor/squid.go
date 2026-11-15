@@ -196,6 +196,7 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 	pid := filepath.Join(logDir, "squid.pid")
 	deadline := time.Now().Add(timeout)
 	var last string
+	var chmodErr error
 	for time.Now().Before(deadline) {
 		out, err := Docker(5*time.Second, "inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", container)
 		if err == nil && !strings.Contains(out, "true") {
@@ -203,19 +204,35 @@ func WaitSquid(logDir, container string, timeout time.Duration) error {
 			return errWait("squid container exited: " + out + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 		}
 		if _, err := os.Stat(pid); err == nil {
-			// cache.log may not exist yet. Readiness is the pid, not the chmod.
-			_ = chmodLogs(logDir)
-			return nil
+			// The pid lands before access.log and cache.log. Keep trying for
+			// the same deadline; an error that outlives it fails create.
+			chmodErr = chmodLogs(container, logDir)
+			if chmodErr == nil {
+				return nil
+			}
+			last = chmodErr.Error()
+			time.Sleep(200 * time.Millisecond)
+			continue
 		}
 		last = "waiting for " + pid
 		time.Sleep(200 * time.Millisecond)
+	}
+	if chmodErr != nil {
+		return fmt.Errorf("chmod gate logs: %w", chmodErr)
 	}
 	logs, _ := Docker(5*time.Second, "logs", container)
 	return errWait("squid not ready: " + last + "\n" + logs + "\n" + tailHostFile(filepath.Join(logDir, "cache.log")))
 }
 
-func chmodLogs(logDir string) error {
-	_, err := Docker(30*time.Second, "run", "--rm", "-v", logDir+":/log", NetToolsImage,
+func chmodLogs(container, logDir string) error {
+	for _, name := range []string{"access.log", "cache.log"} {
+		if _, err := os.Stat(filepath.Join(logDir, name)); err != nil {
+			return err
+		}
+	}
+	// Root in the running gate can chmod the proxy-owned logs. The unit job
+	// has no nettools image; spawning one here used to fail and get discarded.
+	_, err := Docker(5*time.Second, "exec", "-u", "root", container,
 		"chmod", "a+r", "/log/access.log", "/log/cache.log")
 	return err
 }
