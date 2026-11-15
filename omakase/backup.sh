@@ -255,14 +255,10 @@ thaw() {
 cleanup() {
   rc=${1:-$?}
   trap - EXIT INT TERM
-  if [ "$frozen" = 1 ]; then
-    if [ "$freeze_ok" = 1 ]; then
-      thaw || echo "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data" >&2
-    elif "$bin" attach "$HERMETARIUM_ID" -- sh -c "$release_script" sh "$thaw_token" <&3 >/dev/null 2>&1; then
-      # The freeze command failed after the guest may already have frozen.
-      # One thaw is enough. Do not claim the disk stayed frozen.
-      frozen=0
-    fi
+  # Thaw only when the guest reported that fsfreeze -f succeeded.
+  # A matching token is not that report.
+  if [ "$frozen" = 1 ] && [ "$freeze_ok" = 1 ]; then
+    thaw || echo "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data" >&2
   fi
   exec 3>&- 2>/dev/null || true
   rm -rf "$hold_dir"
@@ -296,72 +292,68 @@ ssh_never_ran() {
 }
 
 # Armed only after fsfreeze -f returns, so a slow freeze cannot eat the cushion.
-# The token is written under the same lock as fsfreeze -f. A crash before
-# setsid still leaves that token so the host can thaw. If the freeze fails,
-# the previous token is restored before this script exits, and only when it
-# is still ours, so a freeze this run did not take is left alone.
+# setsid -f is proved first: busybox setsid has no -f, and freezing before that
+# leaves /data frozen with no sleeper. The token is published under the same
+# lock, only after fsfreeze -f returns 0, by rename so a crash cannot truncate
+# the previous owner. A failed freeze does not touch that file.
 # The spliced quotes are one script: sleep, then re-read the token under the
 # lock and thaw. setsid -f returns at once; the child survives a host SIGKILL.
+# Guest status: 1 freeze did not stick, 2 froze and the sleeper did not arm,
+# 3 froze and the thaw under this lock failed.
 freeze_script=$(cat <<'END'
 sync
 command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }
 command -v flock >/dev/null 2>&1 || { echo "flock is not installed in this habitat" >&2; exit 1; }
 command -v setsid >/dev/null 2>&1 || { echo "setsid is not installed in this habitat" >&2; exit 1; }
+setsid -f true </dev/null >/dev/null 2>&1 || {
+  echo "could not arm the thaw timer" >&2
+  exit 1
+}
 token=$1
 seconds=$2
 mkdir -p /tmp
 thaw_file=/tmp/hermetarium-thaw.current
 lock=/tmp/hermetarium-thaw.lock
-# Exit 2 is a freeze that did not happen. The token is ours only after -f.
 rc=0
 flock -x "$lock" sh -c '
-had=0
-prev=
-if [ -f "$2" ]; then
-  had=1
-  prev=$(cat "$2" 2>/dev/null || true)
-fi
-# The redirect truncates before the write. Put the owner back if it fails.
-if ! printf "%s\n" "$1" > "$2"; then
-  if [ "$had" = 1 ]; then
-    printf "%s\n" "$prev" > "$2" || exit 1
-  else
-    rm -f "$2" || exit 1
-  fi
+if ! fsfreeze -f /data; then
   exit 1
 fi
-if fsfreeze -f /data; then
+# Same directory: mv is rename(2). The previous owner stays if this crashes.
+tmp="$2.$$"
+if printf "%s\n" "$1" > "$tmp" && mv -f "$tmp" "$2"; then
   exit 0
 fi
-cur=$(cat "$2" 2>/dev/null || true)
-if [ "$cur" = "$1" ]; then
-  if [ "$had" = 1 ]; then
-    printf "%s\n" "$prev" > "$2" || exit 1
-  else
-    rm -f "$2" || exit 1
-  fi
-fi
-exit 2
-' sh "$token" "$thaw_file" || rc=$?
-if [ "$rc" -eq 2 ]; then
+rm -f "$tmp"
+if fsfreeze -u /data; then
+  echo "could not arm the thaw timer" >&2
   exit 1
+fi
+echo "data disk stayed frozen" >&2
+exit 3
+' sh "$token" "$thaw_file" || rc=$?
+if [ "$rc" -eq 1 ]; then
+  exit 1
+fi
+if [ "$rc" -eq 3 ]; then
+  exit 3
 fi
 if [ "$rc" -ne 0 ]; then
   echo "could not arm the thaw timer" >&2
   exit 1
 fi
-setsid -f sh -c 'sleep "$1"; flock -x "$2" sh -c '"'"'cur=$(cat "$2" 2>/dev/null || true); if [ "$cur" = "$1" ]; then fsfreeze -u /data && printf "done\n" > "$2"; fi'"'"' sh "$3" "$4"' sh "$seconds" "$lock" "$token" "$thaw_file" </dev/null >/dev/null 2>&1 || {
-  echo "could not arm the thaw timer" >&2
-  exit 1
-}
+setsid -f sh -c 'sleep "$1"; flock -x "$2" sh -c '"'"'cur=$(cat "$2" 2>/dev/null || true); if [ "$cur" = "$1" ]; then fsfreeze -u /data && printf "done\n" > "$2"; fi'"'"' sh "$3" "$4"' sh "$seconds" "$lock" "$token" "$thaw_file" </dev/null >/dev/null 2>&1 || exit 2
 END
 )
 
 # The guest can freeze /data and still have attach return an error.
-# Only a failure after fsfreeze may have run keeps frozen=1.
+# frozen stays 1 only when this run may have frozen. freeze_ok is the
+# guest's report that fsfreeze -f succeeded; a token match is not.
 frozen=1
 freeze_log=$hold_dir/freeze.err
-if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c "$freeze_script" sh "$thaw_token" "$guest_seconds" <&3 >"$freeze_log" 2>&1; then
+rc=0
+"$bin" attach "$HERMETARIUM_ID" -- sh -c "$freeze_script" sh "$thaw_token" "$guest_seconds" <&3 >"$freeze_log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
   cat "$freeze_log" >&2
   if ssh_never_ran "$freeze_log"; then
     frozen=0
@@ -373,6 +365,21 @@ if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c "$freeze_script" sh "$thaw_token" 
   if grep -q "fsfreeze is not installed" "$freeze_log"; then
     frozen=0
     die "could not freeze /data (fsfreeze is not installed in this habitat)"
+  fi
+  # 2: fsfreeze -f succeeded, setsid did not. The text is the thaw timer.
+  if [ "$rc" -eq 2 ]; then
+    freeze_ok=1
+    die "could not arm the thaw timer"
+  fi
+  # 3: froze, could not publish the token, and could not thaw under the lock.
+  if [ "$rc" -eq 3 ] || grep -q "data disk stayed frozen" "$freeze_log"; then
+    frozen=0
+    die "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data"
+  fi
+  # setsid -f failed before the freeze. Nothing was frozen.
+  if grep -q "could not arm the thaw timer" "$freeze_log"; then
+    frozen=0
+    exit 1
   fi
   die "could not freeze /data (the habitat image needs fsfreeze from util-linux)"
 fi

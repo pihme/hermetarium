@@ -310,9 +310,12 @@ func scriptEnv(t *testing.T, root, bin, herm, id, disk, journal string, extra []
 func thawLines(log string) int {
 	n := 0
 	for _, line := range strings.Split(log, "\n") {
-		// The freeze script's sleeper text also contains "fsfreeze -u",
-		// on the setsid line. A thaw is its own attach.
-		if strings.Contains(line, "fsfreeze -u /data") && !strings.Contains(line, "setsid") {
+		// The freeze script mentions fsfreeze -u in the sleeper and when a
+		// publish fails. A thaw is its own attach: the release script names
+		// the lock and does not mention setsid.
+		if strings.Contains(line, "fsfreeze -u /data") &&
+			strings.Contains(line, "hermetarium-thaw.lock") &&
+			!strings.Contains(line, "setsid") {
 			n++
 		}
 	}
@@ -356,7 +359,8 @@ func TestHelperNotThisRoot(t *testing.T) {
 	}
 }
 
-// A failed freeze used to retry fsfreeze -u and say the disk stayed frozen.
+// Attach failed before the guest could report a freeze. Do not thaw:
+// a token match is not that report, and the disk must not be called frozen.
 func TestFreezeFailureIsNotStayedFrozen(t *testing.T) {
 	checkout, err := supervisor.Root()
 	if err != nil {
@@ -392,8 +396,8 @@ func TestFreezeFailureIsNotStayedFrozen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := thawLines(string(calls)); n != 1 {
-		t.Fatalf("thaw attempts %d, want 1\n%s", n, calls)
+	if n := thawLines(string(calls)); n != 0 {
+		t.Fatalf("thaw attempts %d, want 0\n%s", n, calls)
 	}
 }
 
@@ -708,9 +712,10 @@ exec "$@"
 	}
 }
 
-// A failed freeze must put the previous thaw token back. The old order wrote
-// this run's token, dropped the lock, and left it there when fsfreeze -f
-// failed, so cleanup thawed a freeze it did not take.
+// The thaw token is published only after fsfreeze -f returns 0. A failed
+// freeze leaves the previous token and does not thaw. setsid -f is proved
+// before the freeze; if it fails afterward, a failed thaw says the disk
+// stayed frozen and does not claim fsfreeze is missing.
 func TestGuestFreezeToken(t *testing.T) {
 	checkout, err := supervisor.Root()
 	if err != nil {
@@ -724,6 +729,10 @@ func TestGuestFreezeToken(t *testing.T) {
 			killMatching(leaked)
 		}
 	})
+	setsidBin, err := exec.LookPath("setsid")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	root := t.TempDir()
 	id := "hab1"
@@ -735,6 +744,9 @@ func TestGuestFreezeToken(t *testing.T) {
 	// Ahead of the real fsfreeze, so this test cannot freeze the host.
 	writeExe(t, filepath.Join(bin, "fsfreeze"), `#!/bin/sh
 printf '%s\n' "$*" >> "$FSFREEZE_LOG"
+if [ "$1" = -u ] && [ "$FAIL_THAW" = 1 ]; then
+  exit 1
+fi
 if [ "$1" = -f ]; then
   cp /tmp/hermetarium-thaw.current "$FREEZE_TOKEN" 2>/dev/null || true
   if [ "$FAIL_FREEZE" = newer ]; then
@@ -747,6 +759,14 @@ if [ "$1" = -f ]; then
 fi
 exit 0
 `)
+	// Real setsid unless a subtest asks the probe or the sleeper to fail.
+	writeExe(t, filepath.Join(bin, "setsid"), "#!/bin/sh\n"+
+		"if [ \"$SETSID_MODE\" = early ]; then exit 1; fi\n"+
+		"if [ \"$SETSID_MODE\" = late ]; then\n"+
+		"  if [ \"$1\" = -f ] && [ \"$2\" = true ]; then exit 0; fi\n"+
+		"  exit 1\n"+
+		"fi\n"+
+		"exec "+setsidBin+" \"$@\"\n")
 	writeExe(t, filepath.Join(bin, "restic"), `#!/bin/sh
 if [ "$1" = backup ]; then
   cp /tmp/hermetarium-thaw.current "$TOKEN_STAMP" || exit 1
@@ -789,7 +809,13 @@ exec "$@"
 			"BACKUP_STAMP=" + backupStamp,
 			"HERMETARIUM_FREEZE_SECONDS=1",
 		}
-		if mode != "" {
+		switch mode {
+		case "setsid-early":
+			extra = append(extra, "SETSID_MODE=early")
+		case "setsid-late":
+			extra = append(extra, "SETSID_MODE=late", "FAIL_THAW=1")
+		case "":
+		default:
 			extra = append(extra, "FAIL_FREEZE="+mode)
 		}
 		cmd := exec.Command(filepath.Join(checkout, "omakase", "backup.sh"))
@@ -798,7 +824,13 @@ exec "$@"
 		out = string(raw)
 		tokenAtFreeze = mustRead(freezeToken)
 		tokenAtBackup = mustRead(tokenStamp)
-		leaked = strings.TrimSpace(tokenAtFreeze)
+		leaked = strings.TrimSpace(tokenAtBackup)
+		if !validThawStamp(leaked) {
+			leaked = strings.TrimSpace(tokenAtFreeze)
+		}
+		if !validThawStamp(leaked) {
+			leaked = strings.TrimSpace(mustRead(thawFile))
+		}
 		if validThawStamp(leaked) {
 			killMatching(leaked)
 		}
@@ -828,11 +860,40 @@ exec "$@"
 		if strings.Contains(log, "-u /data") {
 			t.Fatalf("failed freeze thawed\n%s", log)
 		}
-		if strings.TrimSpace(atFreeze) == "previous-owner" {
-			t.Fatalf("freeze ran without publishing this run's token\n%s", atFreeze)
+		if strings.TrimSpace(atFreeze) != "previous-owner" {
+			t.Fatalf("failed freeze published a token before fsfreeze -f returned\n%s", atFreeze)
 		}
 		if got := mustRead(thawFile); got != previous {
 			t.Fatalf("thaw token %q, want previous owner", got)
+		}
+	})
+
+	t.Run("setsid-early", func(t *testing.T) {
+		out, log, _, _ := run(t, "setsid-early")
+		if strings.Contains(log, "-f") || strings.Contains(log, "-u") {
+			t.Fatalf("setsid probe failure still froze\n%s", log)
+		}
+		if got := mustRead(thawFile); got != previous {
+			t.Fatalf("thaw token %q, want previous owner", got)
+		}
+		if strings.Contains(out, "needs fsfreeze") || strings.Contains(out, "stayed frozen") {
+			t.Fatalf("setsid probe failure misreported\n%s", out)
+		}
+	})
+
+	t.Run("setsid-late", func(t *testing.T) {
+		out, log, _, _ := run(t, "setsid-late")
+		if !strings.Contains(log, "-f /data") {
+			t.Fatalf("freeze did not happen\n%s", log)
+		}
+		if !strings.Contains(out, "stayed frozen") {
+			t.Fatalf("thaw failure missing\n%s", out)
+		}
+		if strings.Contains(out, "needs fsfreeze") {
+			t.Fatalf("fsfreeze claimed\n%s", out)
+		}
+		if !strings.Contains(out, "could not arm the thaw timer") {
+			t.Fatalf("thaw timer failure missing\n%s", out)
 		}
 	})
 
@@ -854,12 +915,12 @@ exec "$@"
 		if !strings.Contains(log, "-f /data") {
 			t.Fatalf("disk was not frozen\n%s", log)
 		}
+		if strings.TrimSpace(atFreeze) != "previous-owner" {
+			t.Fatalf("token published before fsfreeze -f returned\n%s", atFreeze)
+		}
 		got := strings.TrimSpace(atBackup)
 		if !validThawStamp(got) {
 			t.Fatalf("successful freeze left %q", atBackup)
-		}
-		if got == strings.TrimSpace(previous) || got != strings.TrimSpace(atFreeze) {
-			t.Fatalf("token changed around the freeze\nfreeze %q\nbackup %q", atFreeze, atBackup)
 		}
 	})
 }
