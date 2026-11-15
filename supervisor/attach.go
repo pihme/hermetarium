@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -18,6 +20,12 @@ import (
 const (
 	vsockSessionPort = 10000
 	vsockResizePort  = 10001
+
+	// Guest session frames: type byte, big-endian length, payload.
+	// Exit status stays off the operator terminal.
+	sessData byte = 0
+	sessExit byte = 1
+	sessErr  byte = 2
 )
 
 type winsize struct {
@@ -60,7 +68,7 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 		}
 		return attachDocker(inst.Box, argv, in, out, errOut, sig, stop)
 	case "strong":
-		return attachVsock(filepath.Join(inst.Dir, "vsock.sock"), argv, in, out, errOut, sig, stop)
+		return attachVsock(vsockSockPath(root, id), argv, in, out, errOut, sig, stop)
 	default:
 		return 1, fmt.Errorf("attach: unknown wall %q", inst.Wall)
 	}
@@ -125,26 +133,139 @@ func attachVsock(sock string, argv []string, in, out, errOut *os.File, sig <-cha
 	}
 	defer conn.Close()
 	row, col := termSize(in)
-	if _, err := fmt.Fprintf(conn, "%d %d\n%s\n", row, col, strings.Join(argv, "\x1f")); err != nil {
+	if err := writeSession(conn, row, col, argv); err != nil {
 		return 1, err
 	}
 	_ = conn.SetDeadline(time.Time{})
+	// Stop using the terminal before returning. The caller's stop is closed
+	// only after this function returns, which is too late.
+	halt := make(chan struct{})
+	resizeDone := make(chan struct{})
+	var once sync.Once
+	shutdown := func() { once.Do(func() { close(halt) }) }
 	go func() {
-		for {
-			select {
-			case <-sig:
-				_ = resizeVsock(sock, in)
-			case <-stop:
-				return
-			}
+		defer close(resizeDone)
+		relayResize(sock, in, sig, halt)
+	}()
+	go func() {
+		select {
+		case <-stop:
+			shutdown()
+		case <-resizeDone:
 		}
+	}()
+	defer func() {
+		shutdown()
+		<-resizeDone
 	}()
 	go func() {
 		io.Copy(conn, in)
-		conn.Close()
+		// The guest still has to send the exit status on this connection.
+		closeWrite(conn)
 	}()
-	io.Copy(out, conn)
-	return 0, nil
+	return readSession(conn, out)
+}
+
+func writeSession(w io.Writer, row, col uint16, argv []string) error {
+	if _, err := fmt.Fprintf(w, "%d %d\n%d\n", row, col, len(argv)); err != nil {
+		return err
+	}
+	for _, arg := range argv {
+		if _, err := fmt.Fprintf(w, "%d\n", len(arg)); err != nil {
+			return err
+		}
+		if err := writeFull(w, []byte(arg)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readSession(conn net.Conn, out *os.File) (int, error) {
+	hdr := make([]byte, 5)
+	for {
+		if _, err := io.ReadFull(conn, hdr); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				return 1, fmt.Errorf("attach: session closed")
+			}
+			return 1, err
+		}
+		n := binary.BigEndian.Uint32(hdr[1:])
+		if n > 1<<20 {
+			return 1, fmt.Errorf("attach: frame too large")
+		}
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			return 1, err
+		}
+		switch hdr[0] {
+		case sessData:
+			if _, err := out.Write(buf); err != nil {
+				return 1, err
+			}
+		case sessExit:
+			if len(buf) != 1 {
+				return 1, fmt.Errorf("attach: bad status")
+			}
+			return int(buf[0]), nil
+		case sessErr:
+			return 1, fmt.Errorf("%s", buf)
+		default:
+			return 1, fmt.Errorf("attach: bad frame")
+		}
+	}
+}
+
+func writeFull(w io.Writer, b []byte) error {
+	for len(b) > 0 {
+		n, err := w.Write(b)
+		if n > 0 {
+			b = b[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
+func closeWrite(conn net.Conn) {
+	type closeWriter interface{ CloseWrite() error }
+	if c, ok := conn.(closeWriter); ok {
+		_ = c.CloseWrite()
+		return
+	}
+	_ = conn.Close()
+}
+
+// relayResize sends the current size once the session exists, and retries a
+// dial that fails because the guest is not listening yet. The header size can
+// already be stale by the time the pty is created.
+func relayResize(sock string, term *os.File, sig <-chan os.Signal, stop <-chan struct{}) {
+	var retry <-chan time.Time
+	pending := true
+	for {
+		if pending {
+			if resizeVsock(sock, term) == nil {
+				pending = false
+				retry = nil
+			} else if retry == nil {
+				retry = time.After(25 * time.Millisecond)
+			}
+		}
+		select {
+		case <-stop:
+			return
+		case <-sig:
+			pending = true
+			retry = nil
+		case <-retry:
+			retry = nil
+		}
+	}
 }
 
 func resizeVsock(sock string, term *os.File) error {

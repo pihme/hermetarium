@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -268,6 +270,238 @@ func openTestPTY(row, col uint16) (*os.File, *os.File, error) {
 func setWinsize(f *os.File, row, col uint16) {
 	ws := winsize{Row: row, Col: col}
 	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
+}
+
+func TestWriteSessionKeepsNewline(t *testing.T) {
+	arg := "echo hi\necho there"
+	var b bytes.Buffer
+	if err := writeSession(&b, 24, 80, []string{"sh", "-c", arg}); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("24 80\n3\n2\nsh2\n-c%d\n%s", len(arg), arg)
+	if b.String() != want {
+		t.Fatalf("header %q", b.String())
+	}
+}
+
+func TestAttachNewlineAndStatus(t *testing.T) {
+	arg := "echo hi\necho there"
+	got := make(chan []string, 1)
+	sock := listenFakeVsock(t, func(c net.Conn) {
+		argv, err := readWireArgs(c)
+		if err != nil {
+			return
+		}
+		got <- argv
+		payload := []byte("ready\n")
+		_, _ = c.Write([]byte{sessData, 0, 0, 0, byte(len(payload))})
+		_, _ = c.Write(payload)
+		_, _ = c.Write([]byte{sessExit, 0, 0, 0, 1, 9})
+	})
+	in, out, text := attachPipes(t)
+	stop := make(chan struct{})
+	defer close(stop)
+	code, err := attachVsock(sock, []string{"sh", "-c", arg}, in, out, out, make(chan os.Signal, 1), stop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 9 {
+		t.Fatalf("status %d", code)
+	}
+	if gotText := text(); gotText != "ready\n" {
+		t.Fatalf("terminal %q", gotText)
+	}
+	select {
+	case argv := <-got:
+		if len(argv) != 3 || argv[2] != arg {
+			t.Fatalf("argv %#v", argv)
+		}
+	default:
+		t.Fatal("guest did not see argv")
+	}
+}
+
+func TestAttachErrStatus(t *testing.T) {
+	msg := []byte("ATTACH_ERR open pty")
+	if len(msg) > 255 {
+		t.Fatal("message")
+	}
+	sock := listenFakeVsock(t, func(c net.Conn) {
+		if _, err := readWireArgs(c); err != nil {
+			return
+		}
+		_, _ = c.Write(append([]byte{sessErr, 0, 0, 0, byte(len(msg))}, msg...))
+	})
+	in, out, text := attachPipes(t)
+	stop := make(chan struct{})
+	defer close(stop)
+	code, err := attachVsock(sock, []string{"sh"}, in, out, out, make(chan os.Signal, 1), stop)
+	if code == 0 || err == nil || err.Error() != string(msg) {
+		t.Fatalf("code %d err %v", code, err)
+	}
+	if gotText := text(); strings.Contains(gotText, "ATTACH_ERR") {
+		t.Fatalf("error was written to the terminal: %q", gotText)
+	}
+}
+
+func TestRelayResizeRetries(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "vsock.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var mu sync.Mutex
+	attempts, oks := 0, 0
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				if _, err := readLine(c); err != nil {
+					return
+				}
+				mu.Lock()
+				attempts++
+				drop := attempts == 1
+				mu.Unlock()
+				if drop {
+					return
+				}
+				if _, err := io.WriteString(c, "OK 1\n"); err != nil {
+					return
+				}
+				mu.Lock()
+				oks++
+				mu.Unlock()
+				_, _ = readLine(c)
+			}(c)
+		}
+	}()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inW.Close()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		relayResize(sock, inR, make(chan os.Signal, 1), stop)
+	}()
+	defer func() {
+		close(stop)
+		<-done
+		inR.Close()
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := oks
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if oks == 0 || attempts < 2 {
+		t.Fatalf("attempts %d oks %d", attempts, oks)
+	}
+}
+
+func listenFakeVsock(t *testing.T, session func(net.Conn)) string {
+	t.Helper()
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "vsock.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				line, err := readLine(c)
+				if err != nil || !strings.HasPrefix(line, "CONNECT ") {
+					return
+				}
+				if _, err := io.WriteString(c, "OK 1\n"); err != nil {
+					return
+				}
+				if strings.TrimSpace(strings.TrimPrefix(line, "CONNECT ")) != strconv.Itoa(vsockSessionPort) {
+					_, _ = readLine(c)
+					return
+				}
+				session(c)
+			}(c)
+		}
+	}()
+	return sock
+}
+
+func readWireArgs(r io.Reader) ([]string, error) {
+	if _, err := readLine(r); err != nil {
+		return nil, err
+	}
+	line, err := readLine(r)
+	if err != nil {
+		return nil, err
+	}
+	n, err := strconv.Atoi(line)
+	if err != nil || n < 0 || n > 4096 {
+		return nil, err
+	}
+	argv := make([]string, n)
+	for i := 0; i < n; i++ {
+		line, err = readLine(r)
+		if err != nil {
+			return nil, err
+		}
+		sz, err := strconv.Atoi(line)
+		if err != nil || sz < 0 || sz > 1<<20 {
+			return nil, err
+		}
+		buf := make([]byte, sz)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, err
+		}
+		argv[i] = string(buf)
+	}
+	return argv, nil
+}
+
+func attachPipes(t *testing.T) (in, out *os.File, text func() string) {
+	t.Helper()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// inR stays open. Closing it races the stdin copy blocked in Read.
+		inW.Close()
+		outR.Close()
+		outW.Close()
+	})
+	return inR, outW, func() string {
+		outW.Close()
+		b, _ := io.ReadAll(outR)
+		return string(b)
+	}
 }
 
 func habitatLogs(wall, id, dir string) string {

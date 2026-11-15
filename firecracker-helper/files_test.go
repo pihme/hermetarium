@@ -36,8 +36,8 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "--no-seccomp") {
 		t.Fatal("entrypoint.sh disables Firecracker seccomp")
 	}
-	if !strings.Contains(string(b), "vsock.sock") {
-		t.Fatal("entrypoint.sh does not publish the vsock socket")
+	if !strings.Contains(string(b), "/vsock/vsock.sock") || strings.Contains(string(b), "/log/vsock.sock") {
+		t.Fatal("entrypoint.sh does not keep the vsock socket off the gate mount")
 	}
 	b, err = os.ReadFile(pack)
 	if err != nil {
@@ -57,6 +57,21 @@ func TestExtract(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "/dev/pts") || !strings.Contains(string(b), "/fc-attach") {
 		t.Fatal("pack-oci.sh does not start the attach terminal")
+	}
+	init := fcInitScript(t, string(b))
+	mount := strings.Index(init, "echo DATA_MOUNT_OK")
+	env := strings.Index(init, ". /fc-env")
+	start := strings.Index(init, "/fc-attach >/dev/null")
+	netw := strings.Index(init, "$IP link set lo up")
+	execAt := strings.LastIndex(init, "\nexec $cmd")
+	if mount < 0 || env < 0 || start < 0 || netw < 0 || execAt < 0 || !(mount < env && env < start && start < netw && netw < execAt) {
+		t.Fatal("fc-attach must inherit /fc-env after the data mount and before the network wait")
+	}
+	if strings.Count(init, ". /fc-env") != 1 {
+		t.Fatal("/fc-env sourced more than once")
+	}
+	if strings.Contains(init[:env], "/fc-attach >/dev/null") {
+		t.Fatal("fc-attach starts before /fc-env")
 	}
 	if strings.Contains(string(b), "|| echo DATA_MOUNT_FAIL") || !strings.Contains(string(b), "echo DATA_MOUNT_FAIL\n    exit 1") {
 		t.Fatal("data mount failure must stop before the inhabitant")
@@ -217,6 +232,21 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 			t.Fatalf("installed CA without a fetch: %v", err)
 		}
 	})
+}
+
+func fcInitScript(t *testing.T, pack string) string {
+	t.Helper()
+	const start = "cat > /rootfs/fc-init << 'EOF'\n"
+	i := strings.Index(pack, start)
+	if i < 0 {
+		t.Fatal("pack-oci.sh has no fc-init heredoc")
+	}
+	rest := pack[i+len(start):]
+	j := strings.Index(rest, "\nEOF\n")
+	if j < 0 {
+		t.Fatal("pack-oci.sh fc-init heredoc is not closed")
+	}
+	return rest[:j]
 }
 
 func gateCASnippet(t *testing.T, pack string) string {

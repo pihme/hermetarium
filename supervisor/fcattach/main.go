@@ -3,12 +3,12 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +21,11 @@ const (
 	sessionPort   = 10000
 	resizePort    = 10001
 	sockaddrVMLen = 16
+
+	// One type byte on the session connection. Exit status is not pty data.
+	sessData byte = 0
+	sessExit byte = 1
+	sessErr  byte = 2
 )
 
 type winsize struct {
@@ -29,7 +34,11 @@ type winsize struct {
 
 var (
 	activeMu sync.Mutex
-	activeFD int = -1
+	activeFD = -1
+	// Latest size that arrived before a pty was published.
+	haveSize bool
+	sizeRow  uint16
+	sizeCol  uint16
 )
 
 func main() {
@@ -135,19 +144,39 @@ func serveResize(fd int) {
 
 func resizeActive(row, col uint16) {
 	activeMu.Lock()
-	fd := activeFD
-	activeMu.Unlock()
-	if fd < 0 {
+	defer activeMu.Unlock()
+	if activeFD < 0 {
+		sizeRow, sizeCol = row, col
+		haveSize = true
 		return
 	}
-	ws := winsize{Row: row, Col: col}
-	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
+	applyWinsize(activeFD, row, col)
 }
 
-func setActive(fd int) {
+func publishActive(fd int) {
 	activeMu.Lock()
+	defer activeMu.Unlock()
 	activeFD = fd
-	activeMu.Unlock()
+	if haveSize {
+		applyWinsize(fd, sizeRow, sizeCol)
+		haveSize = false
+	}
+}
+
+// dropActive forgets fd only when it is still this session's, and closes it
+// before any later resize can ioctl a descriptor the kernel has reused.
+func dropActive(fd int) {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	if activeFD == fd {
+		activeFD = -1
+	}
+	syscall.Close(fd)
+}
+
+func applyWinsize(fd int, row, col uint16) {
+	ws := winsize{Row: row, Col: col}
+	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
 }
 
 func handle(conn *os.File) {
@@ -156,7 +185,7 @@ func handle(conn *os.File) {
 	if err != nil {
 		return
 	}
-	argLine, err := readLine(conn)
+	argv, err := readArgs(conn)
 	if err != nil {
 		return
 	}
@@ -164,38 +193,45 @@ func handle(conn *os.File) {
 	if !ok {
 		row, col = 24, 80
 	}
-	argv := strings.Split(argLine, "\x1f")
 	if len(argv) == 0 || argv[0] == "" {
 		argv = []string{"sh"}
 	}
 	master, raw, slave, err := openPTY(row, col)
 	if err != nil {
-		fmt.Fprintf(conn, "ATTACH_ERR %v\n", err)
-		fmt.Fprintln(os.Stderr, "fc-attach:", err)
+		writeErr(conn, err)
 		return
 	}
-	defer master.Close()
-	defer syscall.Close(raw)
+	ptyClosed := false
+	closePTY := func() {
+		if ptyClosed {
+			return
+		}
+		ptyClosed = true
+		dropActive(raw)
+		master.Close()
+	}
+	defer closePTY()
+	defer slave.Close()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
-	setActive(raw)
-	defer setActive(-1)
+	publishActive(raw)
 	if err := cmd.Start(); err != nil {
-		slave.Close()
-		fmt.Fprintf(conn, "ATTACH_ERR %v\n", err)
-		fmt.Fprintln(os.Stderr, "fc-attach:", err)
+		writeErr(conn, err)
 		return
 	}
 	slave.Close()
-	go func() { _ = cmd.Wait() }()
+	waitCh := make(chan int, 1)
+	go func() {
+		waitCh <- exitStatus(cmd.Wait())
+	}()
 	// tmux keeps the slave after the client exits. Close does not wake a
 	// blocked pty read, so this session would never free the accept loop.
 	var wake [2]int
 	if err := syscall.Pipe2(wake[:], syscall.O_CLOEXEC|syscall.O_NONBLOCK); err != nil {
-		fmt.Fprintf(conn, "ATTACH_ERR %v\n", err)
+		writeErr(conn, err)
 		return
 	}
 	defer syscall.Close(wake[0])
@@ -204,6 +240,9 @@ func handle(conn *os.File) {
 		syscall.Close(wake[1])
 	}()
 	copyPTY(conn, raw, wake[0])
+	// Closing the master sends SIGHUP so a command blocked on input exits.
+	closePTY()
+	_ = writeFrame(conn, sessExit, []byte{byte(<-waitCh)})
 }
 
 func openPTY(row, col uint16) (master *os.File, raw int, slave *os.File, err error) {
@@ -269,7 +308,7 @@ func copyPTY(conn *os.File, raw, wake int) {
 		}
 		nr, err := syscall.Read(raw, buf)
 		if nr > 0 {
-			if _, werr := conn.Write(buf[:nr]); werr != nil {
+			if werr := writeFrame(conn, sessData, buf[:nr]); werr != nil {
 				return
 			}
 		}
@@ -293,6 +332,85 @@ func parseSize(line string) (uint16, uint16, bool) {
 		return 0, 0, false
 	}
 	return row, col, true
+}
+
+func readArgs(r io.Reader) ([]string, error) {
+	line, err := readLine(r)
+	if err != nil {
+		return nil, err
+	}
+	n, err := strconv.Atoi(line)
+	if err != nil || n < 0 || n > 4096 {
+		return nil, fmt.Errorf("argv count")
+	}
+	argv := make([]string, n)
+	for i := 0; i < n; i++ {
+		line, err = readLine(r)
+		if err != nil {
+			return nil, err
+		}
+		sz, err := strconv.Atoi(line)
+		if err != nil || sz < 0 || sz > 1<<20 {
+			return nil, fmt.Errorf("argv length")
+		}
+		buf := make([]byte, sz)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, err
+		}
+		argv[i] = string(buf)
+	}
+	return argv, nil
+}
+
+func writeErr(w io.Writer, err error) {
+	fmt.Fprintln(os.Stderr, "fc-attach:", err)
+	_ = writeFrame(w, sessErr, []byte("ATTACH_ERR "+err.Error()))
+}
+
+func exitStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	ee, ok := err.(*exec.ExitError)
+	if !ok {
+		return 1
+	}
+	if code := ee.ExitCode(); code >= 0 && code <= 255 {
+		return code
+	}
+	if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		sig := int(ws.Signal())
+		if sig > 0 && 128+sig <= 255 {
+			return 128 + sig
+		}
+	}
+	return 1
+}
+
+func writeFrame(w io.Writer, typ byte, payload []byte) error {
+	var hdr [5]byte
+	hdr[0] = typ
+	binary.BigEndian.PutUint32(hdr[1:], uint32(len(payload)))
+	if err := writeFull(w, hdr[:]); err != nil {
+		return err
+	}
+	return writeFull(w, payload)
+}
+
+func writeFull(w io.Writer, b []byte) error {
+	for len(b) > 0 {
+		n, err := w.Write(b)
+		if n > 0 {
+			b = b[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }
 
 func readLine(r io.Reader) (string, error) {

@@ -90,7 +90,14 @@ if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   fi
   echo DATA_MOUNT_OK
 fi
-# Before the network wait, so attach is up when the habitat is created.
+# Same shell, after a successful data mount, so the daemon inherits the image
+# environment. Before the network wait and before the inhabitant.
+if [ -f /fc-env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /fc-env
+  set +a
+fi
 if [ -x /fc-attach ]; then
   /fc-attach >/dev/null 2>/dev/ttyS0 &
 fi
@@ -116,12 +123,6 @@ elif command -v ping >/dev/null 2>&1 && ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; 
   echo LEAK_OK
 else
   echo LEAK_FAIL
-fi
-if [ -f /fc-env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . /fc-env
-  set +a
 fi
 # Port 3131 serves the gate CA only when HTTPS is open. busybox wget
 # speaks plain HTTP. Linux 6.1 has entropy at boot, so curl is safe, and
