@@ -269,8 +269,17 @@ br=$(ip -o -4 addr show | awk -v ip="$GW/" 'index($4, ip) == 1 { print $2; exit 
 test -n "$br"
 ok=0
 msg=""
+owned=0
 for ipt in iptables-legacy iptables-nft; do
   command -v "$ipt" >/dev/null 2>&1 || continue
+  # -C does not create the table. A missing table here means the insert will.
+  if [ "$ipt" = iptables-nft ] && command -v nft >/dev/null 2>&1; then
+    err=$(nft list table ip filter 2>&1 >/dev/null) || {
+      case "$err" in
+        *"No such file or directory"*) owned=1 ;;
+      esac
+    }
+  fi
   if "$ipt" -w -C FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1; then
     ok=1
     continue
@@ -287,11 +296,49 @@ if [ "$ok" != 1 ]; then
   exit 1
 fi
 printf '%s\n' "$br"
+if [ "$owned" = 1 ] && nft list table ip filter >/dev/null 2>&1; then
+  printf 'owned\n'
+fi
 `
 
 // Exit 0 only when every backend that exists no longer has the rule.
 // A missing binary is skipped. -C exit 1 is "no match"; any other failure
 // still has to be retried, because the bridge name is all destroy kept.
+// OWNED=1 means hermetarium created table ip filter. The rule delete leaves
+// that table; remove it only when it has no rules afterwards.
+const dropOwnedFilterTableScript = `if [ "${OWNED:-}" = 1 ]; then
+  command -v nft >/dev/null 2>&1 || {
+    printf 'nft: missing\n' >&2
+    exit 1
+  }
+  err=$(nft list table ip filter 2>&1 >/dev/null) || {
+    case "$err" in
+      *"No such file or directory"*)
+        printf 'dropped\n'
+        exit 0
+        ;;
+    esac
+    printf 'nft: %s\n' "$err" >&2
+    exit 1
+  }
+  rules=$(nft -j list table ip filter 2>&1) || {
+    printf 'nft: %s\n' "$rules" >&2
+    exit 1
+  }
+  case "$rules" in
+    *'"rule"'*)
+      exit 0
+      ;;
+  esac
+  if ! nft delete table ip filter >/dev/null 2>&1; then
+    printf 'nft: delete table ip filter failed\n' >&2
+    exit 1
+  fi
+  printf 'dropped\n'
+fi
+exit 0
+`
+
 const forgetSameBridgeScript = `set -u
 test -n "$BR" || exit 1
 for ipt in iptables-legacy iptables-nft; do
@@ -312,8 +359,7 @@ for ipt in iptables-legacy iptables-nft; do
     fi
   done
 done
-exit 0
-`
+` + dropOwnedFilterTableScript
 
 func acceptSameBridge(network string) (string, error) {
 	gw, err := networkIPv4Gateway(network)
@@ -324,11 +370,75 @@ func acceptSameBridge(network string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("accept forwarded traffic on %s: %w", network, err)
 	}
-	br := strings.TrimSpace(out)
-	if br == "" || strings.ContainsAny(br, " \t\n") {
-		return "", fmt.Errorf("accept forwarded traffic on %s: bridge name %q", network, out)
+	br, owned, err := parseBridgeOwner(out)
+	if err != nil {
+		return "", fmt.Errorf("accept forwarded traffic on %s: %w", network, err)
+	}
+	if owned {
+		if err := rememberFilterTableOwned(); err != nil {
+			_ = forgetSameBridge(br)
+			return "", err
+		}
 	}
 	return br, nil
+}
+
+func parseBridgeOwner(out string) (string, bool, error) {
+	text := strings.TrimSpace(out)
+	lines := strings.Split(text, "\n")
+	if text == "" || len(lines) > 2 {
+		return "", false, fmt.Errorf("bridge name %q", out)
+	}
+	br := strings.TrimSpace(lines[0])
+	if br == "" || strings.ContainsAny(br, " \t") {
+		return "", false, fmt.Errorf("bridge name %q", out)
+	}
+	if len(lines) == 1 {
+		return br, false, nil
+	}
+	if strings.TrimSpace(lines[1]) != "owned" {
+		return "", false, fmt.Errorf("bridge name %q", out)
+	}
+	return br, true, nil
+}
+
+// The creator may be destroyed while another habitat still has a rule, so the
+// flag lives beside the instance dirs until a later destroy finds the table empty.
+func filterOwnedPath(root string) string {
+	return filepath.Join(VarDir(root), ".ip-filter-owned")
+}
+
+func filterTableOwned(root string) bool {
+	fi, err := os.Stat(filterOwnedPath(root))
+	return err == nil && !fi.IsDir()
+}
+
+func rememberFilterTableOwned() error {
+	root, err := Root()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(VarDir(root), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filterOwnedPath(root), []byte("1\n"), 0o644)
+}
+
+func clearFilterTableOwned(root string) error {
+	err := os.Remove(filterOwnedPath(root))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func scriptDroppedFilterTable(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "dropped" {
+			return true
+		}
+	}
+	return false
 }
 
 func forgetSavedBridge(id string) error {
@@ -358,7 +468,22 @@ func forgetSavedBridge(id string) error {
 }
 
 func forgetSameBridge(bridge string) error {
-	if _, err := runOnHostNet(forgetSameBridgeScript, "BR="+bridge); err != nil {
+	env := []string{"BR=" + bridge}
+	root, rootErr := Root()
+	if rootErr == nil && filterTableOwned(root) {
+		env = append(env, "OWNED=1")
+	}
+	out, err := runOnHostNet(forgetSameBridgeScript, env...)
+	if err != nil {
+		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)
+	}
+	if !scriptDroppedFilterTable(out) {
+		return nil
+	}
+	if rootErr != nil {
+		return rootErr
+	}
+	if err := clearFilterTableOwned(root); err != nil {
 		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)
 	}
 	return nil

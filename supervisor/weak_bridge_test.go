@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -265,4 +266,323 @@ command -v "$IPT" >/dev/null 2>&1 || exit 2
 		NetToolsImage, "-c", script,
 	)
 	return err == nil
+}
+
+func TestNftFilterTableDrop(t *testing.T) {
+	t.Run("commands", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			owned      bool
+			mode       string
+			wantDelete bool
+			wantDrop   bool
+		}{
+			{name: "empty", owned: true, mode: "empty", wantDelete: true, wantDrop: true},
+			{name: "preexisting", owned: false, mode: "empty", wantDelete: false, wantDrop: false},
+			{name: "rule", owned: true, mode: "rule", wantDelete: false, wantDrop: false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				logPath := filepath.Join(t.TempDir(), "nft.log")
+				bin := t.TempDir()
+				body := `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+case "$MODE" in
+empty)
+  if [ "$1" = "-j" ]; then
+    printf '%s\n' '{"nftables":[{"table":{"name":"filter"}},{"chain":{"name":"FORWARD","policy":"accept"}}]}'
+  fi
+  exit 0
+  ;;
+rule)
+  printf '%s\n' '{"nftables":[{"rule":{"chain":"FORWARD"}}]}'
+  exit 0
+  ;;
+esac
+printf '%s\n' 'Error: No such file or directory' >&2
+exit 1
+`
+				if err := os.WriteFile(filepath.Join(bin, "nft"), []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command("sh", "-c", dropOwnedFilterTableScript)
+				cmd.Env = []string{"PATH=" + bin, "LOG=" + logPath, "MODE=" + tc.mode}
+				if tc.owned {
+					cmd.Env = append(cmd.Env, "OWNED=1")
+				}
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("script: %v\n%s%s", err, stderr.String(), stdout.String())
+				}
+				logb, err := os.ReadFile(logPath)
+				if err != nil && tc.owned {
+					t.Fatal(err)
+				}
+				log := string(logb)
+				deleted := false
+				for _, line := range strings.Split(log, "\n") {
+					if strings.TrimSpace(line) == "" {
+						continue
+					}
+					if strings.Contains(line, "delete") {
+						if strings.TrimSpace(line) != "delete table ip filter" {
+							t.Fatalf("delete command %q\nlog:\n%s", line, log)
+						}
+						deleted = true
+					}
+				}
+				if deleted != tc.wantDelete {
+					t.Fatalf("delete=%v, want %v\nlog:\n%s", deleted, tc.wantDelete, log)
+				}
+				if got := scriptDroppedFilterTable(stdout.String()); got != tc.wantDrop {
+					t.Fatalf("dropped=%v, want %v\nstdout:\n%s", got, tc.wantDrop, stdout.String())
+				}
+				if !tc.owned && strings.TrimSpace(log) != "" {
+					t.Fatalf("nft ran for a pre-existing table:\n%s", log)
+				}
+			})
+		}
+	})
+
+	t.Run("owner", func(t *testing.T) {
+		for _, mode := range []string{"absent", "present"} {
+			t.Run(mode, func(t *testing.T) {
+				dir := t.TempDir()
+				logPath := filepath.Join(dir, "cmd.log")
+				countPath := filepath.Join(dir, "count")
+				writeExec(t, filepath.Join(dir, "ip"), `#!/bin/sh
+echo "2: br-test    inet 10.9.0.1/24 brd 10.9.0.255 scope global br-test"
+`)
+				ipt := `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+if [ "$2" = "-C" ]; then
+  exit 1
+fi
+exit 0
+`
+				writeExec(t, filepath.Join(dir, "iptables-legacy"), ipt)
+				writeExec(t, filepath.Join(dir, "iptables-nft"), ipt)
+				writeExec(t, filepath.Join(dir, "nft"), `#!/bin/sh
+printf '%s\n' "$*" >> "$LOG"
+n=0
+if [ -f "$COUNT" ]; then
+  n=$(cat "$COUNT")
+fi
+n=$((n + 1))
+printf '%s\n' "$n" > "$COUNT"
+if [ "$MODE" = "present" ]; then
+  exit 0
+fi
+if [ "$n" -eq 1 ]; then
+  echo "Error: No such file or directory" >&2
+  exit 1
+fi
+exit 0
+`)
+				cmd := exec.Command("sh", "-c", acceptSameBridgeScript)
+				// awk is the host one. The fakes in dir have to win over real nft and iptables.
+				cmd.Env = []string{
+					"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+					"GW=10.9.0.1",
+					"LOG=" + logPath,
+					"COUNT=" + countPath,
+					"MODE=" + mode,
+				}
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("script: %v\n%s%s", err, stderr.String(), stdout.String())
+				}
+				br, owned, err := parseBridgeOwner(stdout.String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if br != "br-test" {
+					t.Fatalf("bridge %q", br)
+				}
+				if owned != (mode == "absent") {
+					t.Fatalf("owned=%v, mode=%s\nstdout:\n%s", owned, mode, stdout.String())
+				}
+				logb, err := os.ReadFile(logPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(logb), "-I FORWARD 1 -i br-test -o br-test -j ACCEPT") {
+					t.Fatalf("insert was not recorded:\n%s", logb)
+				}
+				if strings.Contains(string(logb), "delete table") {
+					t.Fatalf("accept deleted the table:\n%s", logb)
+				}
+			})
+		}
+	})
+
+	t.Run("marker", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("HERMETARIUM_ROOT", root)
+		if br, owned, err := parseBridgeOwner("br-abc\nowned\n"); err != nil || br != "br-abc" || !owned {
+			t.Fatalf("parse owned: %q %v %v", br, owned, err)
+		}
+		if br, owned, err := parseBridgeOwner("br-abc\n"); err != nil || br != "br-abc" || owned {
+			t.Fatalf("parse plain: %q %v %v", br, owned, err)
+		}
+		if _, _, err := parseBridgeOwner("br abc\n"); err == nil {
+			t.Fatal("accepted a bridge name with a space")
+		}
+
+		var runs [][]string
+		forgets := 0
+		stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+			runs = append(runs, append([]string(nil), args...))
+			if len(args) == 0 {
+				return "", os.ErrInvalid
+			}
+			if args[0] == "network" {
+				return "10.9.0.1|10.9.0.0/24\n", nil
+			}
+			script := args[len(args)-1]
+			switch script {
+			case acceptSameBridgeScript:
+				return "br-abc\nowned\n", nil
+			case forgetSameBridgeScript:
+				forgets++
+				// First destroy sees an empty table. The next still has a rule.
+				if forgets == 1 {
+					return "dropped\n", nil
+				}
+				return "", nil
+			default:
+				return "", os.ErrInvalid
+			}
+		})
+		br, err := acceptSameBridge("htm-x")
+		if err != nil || br != "br-abc" {
+			t.Fatalf("accept: %v %q", err, br)
+		}
+		if !filterTableOwned(root) {
+			t.Fatal("owned marker was not written")
+		}
+		if err := forgetSameBridge("br-abc"); err != nil {
+			t.Fatal(err)
+		}
+		if filterTableOwned(root) {
+			t.Fatal("marker remains after dropped")
+		}
+		if err := rememberFilterTableOwned(); err != nil {
+			t.Fatal(err)
+		}
+		if err := forgetSameBridge("br-abc"); err != nil {
+			t.Fatal(err)
+		}
+		if !filterTableOwned(root) {
+			t.Fatal("marker cleared while a rule remained")
+		}
+		ownedRuns := 0
+		plainRuns := 0
+		for _, args := range runs {
+			if len(args) == 0 || args[0] != "run" {
+				continue
+			}
+			script := args[len(args)-1]
+			if script != forgetSameBridgeScript {
+				continue
+			}
+			if !strings.Contains(script, "nft delete table ip filter") {
+				t.Fatal("forget script does not delete table ip filter")
+			}
+			owned := false
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] == "-e" && args[i+1] == "OWNED=1" {
+					owned = true
+				}
+			}
+			if owned {
+				ownedRuns++
+			} else {
+				plainRuns++
+			}
+		}
+		if ownedRuns != 2 || plainRuns != 0 {
+			t.Fatalf("owned forget runs=%d plain=%d", ownedRuns, plainRuns)
+		}
+
+		runs = nil
+		if err := clearFilterTableOwned(root); err != nil {
+			t.Fatal(err)
+		}
+		if err := forgetSameBridge("br-abc"); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range runs {
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] == "-e" && args[i+1] == "OWNED=1" {
+					t.Fatal("pre-existing table passed OWNED=1")
+				}
+			}
+		}
+	})
+}
+
+func TestNftFilterTableNetns(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureNetTools(root); err != nil {
+		t.Fatal(err)
+	}
+	script := `set -eu
+echo phase-empty
+gw=$(ip -o -4 addr show scope global | awk 'NR==1 { print $4 }')
+gw=${gw%%/*}
+test -n "$gw"
+out=$(GW="$gw" sh -c "$ACCEPT")
+br=$(printf '%s\n' "$out" | head -n 1)
+test -n "$br"
+printf '%s\n' "$out" | grep -qx owned
+BR="$br" OWNED=1 sh -c "$FORGET"
+if nft list table ip filter >/dev/null 2>&1; then
+  echo "empty table remains" >&2
+  exit 1
+fi
+
+echo phase-preexisting
+nft add table ip filter
+out=$(GW="$gw" sh -c "$ACCEPT")
+printf '%s\n' "$out" | grep -qx owned && { echo "pre-existing table marked owned" >&2; exit 1; }
+BR="$br" sh -c "$FORGET"
+nft list table ip filter >/dev/null
+
+echo phase-rule
+nft add rule ip filter FORWARD ip saddr 192.0.2.1 accept
+iptables-nft -w -C FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1 || iptables-nft -w -I FORWARD 1 -i "$br" -o "$br" -j ACCEPT
+BR="$br" OWNED=1 sh -c "$FORGET"
+nft list table ip filter >/dev/null
+nft -j list table ip filter | grep -q '"rule"'
+if iptables-nft -w -C FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1; then
+  echo "bridge rule remains" >&2
+  exit 1
+fi
+nft delete table ip filter
+`
+	out, err := Docker(2*time.Minute, "run", "--rm", "--cap-add", "NET_ADMIN",
+		"-e", "ACCEPT="+acceptSameBridgeScript,
+		"-e", "FORGET="+forgetSameBridgeScript,
+		"--entrypoint", "sh", NetToolsImage, "-c", script)
+	if err != nil {
+		t.Fatalf("netns: %v\n%s", err, out)
+	}
+}
+
+func writeExec(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
