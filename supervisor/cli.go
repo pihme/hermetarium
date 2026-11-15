@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
+
+// Firecracker rejects vcpu_count above 32. Past that, create used to report a
+// missing public port, or exit 0 with a dead VM when no port was published.
+const maxStrongCPUs = 32
 
 func Run(args []string) int {
 	if len(args) == 0 {
@@ -36,6 +41,10 @@ func Run(args []string) int {
 		}
 		if wall != "strong" && (flagPresent(rest, "--mem") || flagPresent(rest, "--disk")) {
 			fmt.Fprintln(os.Stderr, "--mem and --disk apply only to --wall strong")
+			return 2
+		}
+		if err := limitCPUs(wall, ex.CPUs); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
 		id, err := ChooseID(rest)
@@ -197,6 +206,27 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus, NoInbound: flagPresent(args, "--no-inbound")}, nil
 }
 
+// limitCPUs rejects a count the wall cannot apply. Zero is an omitted --cpus
+// and stays the wall default (one guest CPU, no Docker quota). Docker's own
+// error is not used: a quota above the host CPU count is refused here.
+func limitCPUs(wall string, cpus int) error {
+	if cpus < 1 {
+		return nil
+	}
+	switch wall {
+	case "strong":
+		if cpus > maxStrongCPUs {
+			return fmt.Errorf("--cpus %d is above the strong-wall limit of %d", cpus, maxStrongCPUs)
+		}
+	case "weak":
+		n := runtime.NumCPU()
+		if cpus > n {
+			return fmt.Errorf("--cpus %d is above this host's CPU count of %d", cpus, n)
+		}
+	}
+	return nil
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--cpus N] [--id NAME] [--no-inbound]
        hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--id NAME] [--no-inbound]
@@ -206,6 +236,6 @@ func usage() {
        hermetarium destroy <id>
        hermetarium version
 
---cpus N works on both walls: that many processors in the virtual machine, or that CPU quota on Docker. The default is one processor, and no Docker quota.
+--cpus N works on both walls: that many processors in the virtual machine (1 to 32), or that CPU quota on Docker (1 to the host CPU count). The default is one processor, and no Docker quota.
 `)
 }

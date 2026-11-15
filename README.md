@@ -131,7 +131,7 @@ hermetarium exec YOUR_ID -- <cmd>
 
 `--id NAME` chooses the id. Leave it off and `create` prints a new one. A name such as `claude` is fine. Use letters, digits, `.`, `_`, and `-`, start with a letter or a digit, and stay within 63 characters. Later commands use that same id.
 
-`--wall strong` is the virtual machine. `--mem` and `--disk` set its size in MiB. The defaults are 512 and 1024. Those two flags belong to the strong wall. The root disk is sparse. `--cpus N` works on both walls: that many processors in the virtual machine, or that CPU quota on Docker. The default is one processor, and no Docker quota.
+`--wall strong` is the virtual machine. `--mem` and `--disk` set its size in MiB. The defaults are 512 and 1024. Those two flags belong to the strong wall. The root disk is sparse. `--cpus N` works on both walls: that many processors in the virtual machine (1 to 32), or that CPU quota on Docker (1 to the host CPU count). A larger value is rejected. The default is one processor, and no Docker quota.
 
 `url` prints the address, or `this habitat has no inbound address` when the habitat was created with `--no-inbound`. `logs` prints what passed the gate. `destroy` stops the habitat.
 
