@@ -381,50 +381,6 @@ function parse_skip(    c, depth, instr, esc) {
   }
   badparse = 1
 }
-function parse_number(    c, start, tok) {
-  if (badparse) return ""
-  start = i
-  c = substr(s, i, 1)
-  if (c == "-") {
-    i++
-    c = substr(s, i, 1)
-  }
-  if (c < "0" || c > "9") { badparse = 1; return "" }
-  while (i <= n) {
-    c = substr(s, i, 1)
-    if (c < "0" || c > "9") break
-    i++
-  }
-  if (i <= n && substr(s, i, 1) == ".") {
-    i++
-    c = substr(s, i, 1)
-    if (c < "0" || c > "9") { badparse = 1; return "" }
-    while (i <= n) {
-      c = substr(s, i, 1)
-      if (c < "0" || c > "9") break
-      i++
-    }
-  }
-  if (i <= n) {
-    c = substr(s, i, 1)
-    if (c == "e" || c == "E") {
-      i++
-      c = substr(s, i, 1)
-      if (c == "+" || c == "-") {
-        i++
-        c = substr(s, i, 1)
-      }
-      if (c < "0" || c > "9") { badparse = 1; return "" }
-      while (i <= n) {
-        c = substr(s, i, 1)
-        if (c < "0" || c > "9") break
-        i++
-      }
-    }
-  }
-  tok = substr(s, start, i - start)
-  return tok
-}
 function parse_table_body(    key, c) {
   if (badparse) return
   skip_ws()
@@ -441,7 +397,7 @@ function parse_table_body(    key, c) {
     i++
     skip_ws()
     if (key == "family" || key == "name") parse_string()
-    else if (key == "handle") parse_number()
+    else if (key == "handle") parse_skip()
     else { keep = 1; parse_skip() }
     if (badparse) return
     skip_ws()
@@ -452,7 +408,7 @@ function parse_table_body(    key, c) {
     return
   }
 }
-function parse_chain_body(    key, name, policy, typ, hook, prio, c, seen_name, seen_policy, seen_type, seen_hook, seen_prio) {
+function parse_chain_body(    key, name, policy, typ, hook, prio, c, seen_name, seen_policy, seen_type, seen_hook, seen_prio, at) {
   if (badparse) return
   skip_ws()
   if (substr(s, i, 1) != "{") { badparse = 1; return }
@@ -490,10 +446,12 @@ function parse_chain_body(    key, name, policy, typ, hook, prio, c, seen_name, 
       hook = parse_string()
       seen_hook = 1
     } else if (key == "prio") {
-      prio = parse_number()
+      at = i
+      parse_skip()
+      prio = substr(s, at, i - at)
       seen_prio = 1
     } else if (key == "handle") {
-      parse_number()
+      parse_skip()
     } else if (key == "family" || key == "table") {
       parse_string()
     } else {
