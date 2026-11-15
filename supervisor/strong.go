@@ -371,8 +371,22 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		endStrong(id, dir)
 		return nil, err
 	}
-	// Before WaitSquid returns, the helper has not started the guest yet.
+	// squid.pid starts Firecracker before WaitSquid returns. Joining a
+	// helper that has already exited hides the boot error.
+	inboundTimeout := 40 * time.Second
+	if !helperRunning(helper) {
+		err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
+			return helperLogs(helper), helperRunning(helper)
+		})
+		_ = DestroyStrong(id)
+		return nil, err
+	}
 	if err := startGateDNS(root, id, helper, gate, strongGateIP, conf); err != nil {
+		if !helperRunning(helper) {
+			err = waitGuestUname(dir, inboundTimeout, func() (string, bool) {
+				return helperLogs(helper), helperRunning(helper)
+			})
+		}
 		_ = DestroyStrong(id)
 		return nil, err
 	}
@@ -389,7 +403,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 
 	// No inbound port, so the serial line is the signal the guest reached
 	// user space. It is printed only after a data disk has mounted.
-	inboundTimeout := 40 * time.Second
 	if opts.NoInbound {
 		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 			return helperLogs(helper), helperRunning(helper)
