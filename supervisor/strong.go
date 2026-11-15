@@ -172,12 +172,14 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 
-	if _, err := Docker(30*time.Second,
+	helperArgs := []string{
 		"run", "-d", "--name", helper,
 		"--privileged",
 		"--device", "/dev/kvm",
 		"--entrypoint", "sh",
-		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
+	}
+	helperArgs = append(helperArgs, inboundPublish(opts.NoInbound)...)
+	helperArgs = append(helperArgs,
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", rootfs+":/opt/rootfs.ext4",
@@ -185,7 +187,8 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		"-v", dir+":/log",
 		NetToolsImage,
 		"/fc-helper.sh",
-	); err != nil {
+	)
+	if _, err := Docker(30*time.Second, helperArgs...); err != nil {
 		return nil, err
 	}
 
@@ -203,12 +206,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 
-	hostPort, err := containerHostPort(helper, InboundPort)
+	url, err := finishInbound(helper, opts.NoInbound, 40*time.Second)
 	if err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	url := inboundURL(hostPort)
 	inst := &StrongInstance{
 		ID: id, Wall: "strong", Helper: helper, InboundURL: url,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
@@ -219,10 +221,6 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
-		_ = DestroyStrong(id)
-		return nil, err
-	}
-	if err := waitInbound(url, 40*time.Second); err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
 	}

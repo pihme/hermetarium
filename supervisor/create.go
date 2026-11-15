@@ -16,6 +16,9 @@ type CreateOpts struct {
 
 	MemMiB int
 	DiskMB int
+
+	// NoInbound publishes no host port and does not wait for port 8080.
+	NoInbound bool
 }
 
 func VendorHosts() []string {
