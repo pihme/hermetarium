@@ -70,7 +70,7 @@ Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI ima
 - No default route except Squid. Setting `HTTP_PROXY` inside the image is not the wall.
 - Fail closed: if the route, firewall, or Squid cannot be applied, do not start.
 - The supervisor **installs an operator-supplied Squid ACL** (`create --acl FILE`, copied to `var/<id>/squid.conf`) and starts Squid against it. Squid stays a **sibling process** (GPLv2). The supervisor does not link Squid. Each example and inhabitant ships its wall config next to its Dockerfile.
-- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, port, method, path, bytes, allowed or denied. Packet bodies are not captured.
+- I/O log: append-only, keyed by Hermetarium id. The supervisor maps Squid `access.log` into that log. Default fields: time, direction (`in` or `out`), protocol, destination, port, method, path, bytes, allowed or denied, and `tls` (`decrypted` or `passthrough`) when the gate file logs the bump mode. Packet bodies are not captured.
 - Inbound (operator, APIs, UI) and outbound (inhabitant to the network) use that same path. Fail closed on inbound the same as outbound: if the path cannot be applied, do not start.
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
 - Secrets: see §8.
@@ -96,6 +96,8 @@ Secrets must not live in the inhabitant image, filesystem, or process environmen
 Secrets-in-image is decided: no. The model path stays plain HTTP inside the container. Squid opens HTTPS to the vendor and adds the key. The container does not encrypt that call.
 
 Ordinary HTTPS from the container is closed unless the gate file's `OPEN-HTTPS` lines are on. Those lines make Squid decrypt that traffic (package downloads, curl, and the like). The I/O log then records the site and the path. Message bodies stay out of the log. The private key stays on the gate. `create` installs the public certificate into the container, so the assistant sets no proxy. The gate image is OpenSSL Squid for every habitat (`supervisor/squid/Dockerfile`, tag `hermetarium-squid:local`). A client that pins its own certificate list and ignores the container trust store still rejects the gate certificate.
+
+`examples/openweb/squid.conf` decrypts HTTPS except a short pass-through list, which keeps the site's certificate. For `api.github.com` it drops the box `Authorization` and sets the gate token from that file. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Other writes on that host are denied, including contents, Git data, deletes, and repository settings. `tls` in the I/O log is `decrypted` or `passthrough`.
 
 How a credentialed destination is attached:
 
