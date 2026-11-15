@@ -87,7 +87,9 @@ func EnsureSquid(root string) error {
 func netToolsDockerfile() string {
 	// iptables is nf_tables. iptables-legacy is the other filter hook: a drop
 	// there is invisible to nft list, and an accept in one does not cover it.
-	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2\n"
+	// busybox-extras supplies /usr/sbin/httpd. Alpine busybox has no httpd
+	// applet, and the strong helper serves the gate CA with it.
+	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2 busybox-extras\n"
 }
 
 func EnsureNetTools(root string) error {
