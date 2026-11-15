@@ -17,10 +17,16 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", record)
+	mux.HandleFunc("/", ok)
+	// ServeMux answers ".." with 307 and never calls the route. Record the
+	// request target first, or that POST is missing from the report.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		mux.ServeHTTP(w, r)
+	})
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- http.ListenAndServe(getenv("HTTP_ADDR", ":18083"), mux)
+		errCh <- http.ListenAndServe(getenv("HTTP_ADDR", ":18083"), handler)
 	}()
 	if dir := os.Getenv("CERT_DIR"); dir != "" {
 		cfg, err := certConfig(dir)
@@ -32,7 +38,7 @@ func main() {
 			log.Fatal(err)
 		}
 		go func() {
-			errCh <- http.Serve(ln, mux)
+			errCh <- http.Serve(ln, handler)
 		}()
 	}
 	log.Fatal(<-errCh)
@@ -91,16 +97,21 @@ func getenv(k, d string) string {
 	return d
 }
 
-func record(w http.ResponseWriter, r *http.Request) {
-	path := os.Getenv("MOCK_REPORT")
-	if path != "" {
-		line := fmt.Sprintf("method=%s path=%s host=%s auth=%s\n", r.Method, r.URL.Path, r.Host, strings.Join(r.Header.Values("Authorization"), ", "))
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err == nil {
-			_, _ = f.WriteString(line)
-			_ = f.Close()
-		}
-	}
+func ok(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
+}
+
+func record(r *http.Request) {
+	path := os.Getenv("MOCK_REPORT")
+	if path == "" {
+		return
+	}
+	line := fmt.Sprintf("method=%s path=%s host=%s auth=%s\n", r.Method, r.RequestURI, r.Host, strings.Join(r.Header.Values("Authorization"), ", "))
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteString(line)
+	_ = f.Close()
 }

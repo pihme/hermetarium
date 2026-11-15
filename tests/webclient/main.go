@@ -76,15 +76,6 @@ func call(client *http.Client, method, rawURL string) {
 			fmt.Println("HTTP_FAIL", method, rawURL, err)
 			return
 		}
-		// Go can clean ".." or re-encode "%". The request target Squid sees
-		// has to keep the marker, or a later 403 is from some other rule.
-		if !markerKept(req, rawURL) {
-			req.URL.Opaque = requestTarget(rawURL)
-		}
-		if !markerKept(req, rawURL) {
-			fmt.Println("HTTP_FAIL", method, rawURL, "request dropped the marker", req.URL.RequestURI())
-			return
-		}
 		req.Header.Set("Authorization", "Bearer box-token")
 		req.Header.Add("Authorization", "bearer box-token")
 		resp, err := client.Do(req)
@@ -102,26 +93,4 @@ func call(client *http.Client, method, rawURL string) {
 		return
 	}
 	fmt.Println("HTTP_FAIL", method, rawURL, last)
-}
-
-func markerKept(req *http.Request, rawURL string) bool {
-	uri := req.URL.RequestURI()
-	if strings.Contains(rawURL, "..") && !strings.Contains(uri, "..") {
-		return false
-	}
-	if strings.Contains(rawURL, "%") && !strings.Contains(uri, "%") {
-		return false
-	}
-	return true
-}
-
-func requestTarget(rawURL string) string {
-	rest := rawURL
-	if i := strings.Index(rest, "://"); i >= 0 {
-		rest = rest[i+3:]
-	}
-	if i := strings.Index(rest, "/"); i >= 0 {
-		return rest[i:]
-	}
-	return "/"
 }
