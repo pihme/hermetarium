@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -81,6 +82,13 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 			_ = DestroyWeak(id)
 		}
 	}()
+
+	// nftables accepts ICC and stops only its own chain. An iptables FORWARD
+	// drop still discards the bridged packet, so the gate cannot reach the box.
+	// ARP does not traverse that chain. The rule is this bridge only.
+	if err := acceptSameBridge(network); err != nil {
+		return nil, err
+	}
 
 	if err := runSquid(root, gate, dir, append([]string{
 		"--network", "bridge",
@@ -164,12 +172,94 @@ func ExecWeak(inst *WeakInstance, argv []string) (stdout, stderr string, code in
 
 func DestroyWeak(id string) error {
 	// Inhabitant images may declare VOLUME. -v removes those anonymous volumes.
+	_ = forgetSameBridge("htm-" + id)
 	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	removeGate(id)
 	DockerIgnore("network", "rm", "htm-"+id)
 	return nil
+}
+
+func networkIPv4Gateway(network string) (string, error) {
+	out, err := Docker(15*time.Second, "network", "inspect", "-f", "{{range .IPAM.Config}}{{println .Gateway}}{{end}}", network)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, ".") {
+			return line, nil
+		}
+	}
+	return "", fmt.Errorf("network %s: no IPv4 gateway", network)
+}
+
+func runOnHostNet(script, gw string) error {
+	_, err := Docker(30*time.Second, "run", "--rm",
+		"--network", "host",
+		"--cap-add", "NET_ADMIN",
+		"-e", "GW="+gw,
+		"--entrypoint", "sh",
+		NetToolsImage, "-c", script,
+	)
+	return err
+}
+
+const acceptSameBridgeScript = `set -eu
+br=$(ip -o -4 addr show | awk -v ip="$GW/" 'index($4, ip) == 1 { print $2; exit }')
+test -n "$br"
+ok=0
+msg=""
+for ipt in iptables-legacy iptables-nft; do
+  command -v "$ipt" >/dev/null 2>&1 || continue
+  if "$ipt" -C FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1; then
+    ok=1
+    continue
+  fi
+  if err=$("$ipt" -I FORWARD 1 -i "$br" -o "$br" -j ACCEPT 2>&1); then
+    ok=1
+  else
+    msg="$msg$ipt: $err
+"
+  fi
+done
+if [ "$ok" != 1 ]; then
+  printf '%s' "$msg" >&2
+  exit 1
+fi
+`
+
+const forgetSameBridgeScript = `br=$(ip -o -4 addr show | awk -v ip="$GW/" 'index($4, ip) == 1 { print $2; exit }')
+if [ -z "$br" ]; then
+  exit 0
+fi
+for ipt in iptables-legacy iptables-nft; do
+  command -v "$ipt" >/dev/null 2>&1 || continue
+  while "$ipt" -D FORWARD -i "$br" -o "$br" -j ACCEPT >/dev/null 2>&1; do
+    :
+  done
+done
+exit 0
+`
+
+func acceptSameBridge(network string) error {
+	gw, err := networkIPv4Gateway(network)
+	if err != nil {
+		return err
+	}
+	if err := runOnHostNet(acceptSameBridgeScript, gw); err != nil {
+		return fmt.Errorf("accept forwarded traffic on %s: %w", network, err)
+	}
+	return nil
+}
+
+func forgetSameBridge(network string) error {
+	gw, err := networkIPv4Gateway(network)
+	if err != nil {
+		return err
+	}
+	return runOnHostNet(forgetSameBridgeScript, gw)
 }
 
 func LoadWeak(root, id string) (*WeakInstance, error) {
