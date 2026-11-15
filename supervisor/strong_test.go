@@ -68,6 +68,37 @@ func TestWaitGuestUname(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	t.Run("late mount", func(t *testing.T) {
+		n := 0
+		err := waitGuestUname(t.TempDir(), time.Minute, func() (string, bool) {
+			n++
+			if n == 1 {
+				return "[    0.000000] Linux version\n", false
+			}
+			return "mount: mounting /dev/vdb on /data failed\nDATA_MOUNT_FAIL\n", false
+		})
+		if err == nil || !strings.Contains(err.Error(), "did not mount") {
+			t.Fatal(err)
+		}
+		if strings.Contains(err.Error(), "guest did not boot") {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("late uname", func(t *testing.T) {
+		n := 0
+		err := waitGuestUname(t.TempDir(), time.Minute, func() (string, bool) {
+			n++
+			if n == 1 {
+				return "", false
+			}
+			return "GUEST_UNAME=6.1.188", false
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestFcHelperDirExtractsWithoutTree(t *testing.T) {
