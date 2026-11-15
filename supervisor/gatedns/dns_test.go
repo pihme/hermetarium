@@ -493,6 +493,86 @@ func tryTCP(addr string, q []byte) ([]byte, error) {
 	return buf, nil
 }
 
+func TestTCPConnDeadline(t *testing.T) {
+	if tcpDeadline != 5*time.Second {
+		t.Fatalf("tcp deadline %s", tcpDeadline)
+	}
+	g := forwardGate(t, "9")
+	g.tcpWait = 150 * time.Millisecond
+	_, ln := serveGate(t, g)
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	start := time.Now()
+	buf := make([]byte, 1)
+	if _, err := c.Read(buf); err == nil {
+		t.Fatal("idle tcp connection stayed open")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("idle connection closed after %s", time.Since(start))
+	}
+}
+
+func TestRotateReopenRestoresName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.jsonl")
+	if err := os.WriteFile(path, []byte("line-one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := &gateDNS{
+		open:   false,
+		gate:   net.ParseIP("172.16.0.1").To4(),
+		names:  map[string]struct{}{},
+		logCap: 1000,
+	}
+	if err := g.openLog(path); err != nil {
+		t.Fatal(err)
+	}
+	defer g.log.Close()
+	old := reopenLog
+	reopenLog = func(string) (*os.File, error) {
+		return nil, fmt.Errorf("disk full")
+	}
+	t.Cleanup(func() { reopenLog = old })
+	g.logCap = 1
+	g.answer(dnsQuery("fresh.example", 1), false)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("dns.jsonl missing after failed reopen: %v", err)
+	}
+	if !bytes.Contains(b, []byte("line-one")) || !bytes.Contains(b, []byte("fresh.example")) {
+		t.Fatalf("log %q", b)
+	}
+	if _, err := os.Stat(path + ".1"); !os.IsNotExist(err) {
+		t.Fatalf("dns.jsonl.1 still present: %v", err)
+	}
+}
+
+func TestInflightCapIs32(t *testing.T) {
+	if maxInflight != 32 {
+		t.Fatalf("maxInflight %d", maxInflight)
+	}
+	if got := cap(forwardGate(t, "9").slots); got != 32 {
+		t.Fatalf("forwardGate slots %d", got)
+	}
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "dns.conf")
+	if err := os.WriteFile(conf, []byte("open 0\ngate 172.16.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := loadGateDNS(conf, filepath.Join(dir, "dns.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.log.Close()
+	if got := cap(g.slots); got != 32 {
+		t.Fatalf("loadGateDNS slots %d", got)
+	}
+}
+
 func TestDNSLogCap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dns.jsonl")
@@ -514,7 +594,11 @@ func TestDNSLogCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	if st.Size() != 0 {
-		t.Fatalf("over-cap log size %d", st.Size())
+		t.Fatalf("over-cap log was not rotated, size %d", st.Size())
+	}
+	moved, err := os.ReadFile(path + ".1")
+	if err != nil || !bytes.Equal(moved, bytes.Repeat([]byte("x"), 2000)) {
+		t.Fatalf("over-cap bytes not kept in dns.jsonl.1: %v %q", err, moved)
 	}
 	var last string
 	for i := 0; i < 40; i++ {

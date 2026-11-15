@@ -26,7 +26,14 @@ const (
 	dnsLogCap = 1 << 20
 	// A UDP client retries on TCP when the message does not fit in 512 octets.
 	udpAnswerMax = 512
+	// One habitat TCP read. Past this the connection is closed.
+	tcpDeadline = 5 * time.Second
 )
+
+// reopenLog is the open of a fresh dns.jsonl after rotation. Tests fail it.
+var reopenLog = func(name string) (*os.File, error) {
+	return os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+}
 
 type dnsRec struct {
 	Time        string `json:"time"`
@@ -40,16 +47,17 @@ type dnsRec struct {
 }
 
 type gateDNS struct {
-	open   bool
-	gate   net.IP
-	names  map[string]struct{}
-	up     []string
-	upPort string // set by tests; production uses 53
-	slots  chan struct{}
-	logCap int64
-	mu     sync.Mutex
-	log    *os.File
-	logN   int64
+	open    bool
+	gate    net.IP
+	names   map[string]struct{}
+	up      []string
+	upPort  string        // set by tests; production uses 53
+	tcpWait time.Duration // set by tests; production uses tcpDeadline
+	slots   chan struct{}
+	logCap  int64
+	mu      sync.Mutex
+	log     *os.File
+	logN    int64
 }
 
 func main() {
@@ -180,11 +188,9 @@ func (g *gateDNS) openLog(path string) error {
 	g.log = f
 	g.logN = st.Size()
 	if g.logN > g.limit() {
-		if err := f.Truncate(0); err != nil {
-			f.Close()
-			return err
-		}
-		g.logN = 0
+		// Rotating keeps the bytes for the I/O log. Truncating would drop
+		// queries that have not been copied yet.
+		g.rotate()
 	}
 	return nil
 }
@@ -205,7 +211,11 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 		go func(c net.Conn) {
 			defer g.release()
 			defer c.Close()
-			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+			wait := g.tcpWait
+			if wait == 0 {
+				wait = tcpDeadline
+			}
+			_ = c.SetDeadline(time.Now().Add(wait))
 			var n uint16
 			if err := binary.Read(c, binary.BigEndian, &n); err != nil || n > 4096 {
 				return
@@ -389,7 +399,7 @@ func (g *gateDNS) rotate() {
 	if err := os.Rename(name, name+".1"); err != nil {
 		return
 	}
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := reopenLog(name)
 	if err != nil {
 		_ = os.Rename(name+".1", name)
 		return

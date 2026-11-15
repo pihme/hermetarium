@@ -207,12 +207,14 @@ The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test
 ./bin/hermetarium logs YOUR_ID
 ```
 
-That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI. A DNS query is the same file with `protocol` `dns`, the name in `destination`, the type in `method`, and the answer in `result`. Message bodies stay out of the log.
+That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI. A DNS query is the same file with `protocol` `dns`, the name in `destination`, the type in `method`, and the answer in `result`. A query that arrives on TCP is forwarded on TCP. A truncated UDP answer is fetched again on TCP, and a UDP client keeps that truncated answer when the TCP message is larger than 512 octets. At most 32 DNS queries are in flight. Gate DNS writes them to `dns.jsonl`, capped at 1 MiB, and keeps the previous file as `dns.jsonl.1`. A file that is already over that cap when gate DNS starts is rotated, not discarded. `logs` copies `dns.jsonl.1` and then `dns.jsonl` into `io.jsonl`. Message bodies stay out of the log.
 
 The same directory holds:
 
 ```
 io.jsonl       the log the command prints
+dns.jsonl      gate DNS queries, capped at 1 MiB
+dns.jsonl.1    the previous DNS log, after a rotation
 access.log     Squid's own log
 cache.log      Squid's internals
 squid.conf     the gate file that is running
