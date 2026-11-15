@@ -7,9 +7,6 @@ test -c /dev/net/tun || { echo "fc-helper: no /dev/net/tun" >&2; exit 1; }
 ip tuntap add tap0 mode tap
 ip addr add 172.16.0.1/24 dev tap0
 ip link set tap0 up
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
-sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null
-sysctl -w net.ipv4.conf.tap0.rp_filter=0 >/dev/null
 iptables -P FORWARD DROP
 # Squid shares this namespace and listens on 0.0.0.0. This container is also on
 # Docker's default bridge, so without these rules a neighbor container could send
@@ -49,7 +46,6 @@ cp /opt/firecracker /tmp/firecracker
 chmod +x /tmp/firecracker
 exec /tmp/firecracker \
   --no-api \
-  --no-seccomp \
   --log-path /log/fc.log \
   --level Info \
   --config-file /log/vm.json
