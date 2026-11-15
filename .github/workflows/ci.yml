@@ -28,6 +28,8 @@ jobs:
             pkgs: ./tests/inhabitants
           - name: guest-docker
             pkgs: ./tests/guest-docker
+          - name: openweb
+            pkgs: ./tests/openweb
           - name: unit
             pkgs: ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/echo ./tests/harness ./tests/vendormock
     # x86_64: Firecracker binary and kernel in the strong-wall test are x86_64.
