@@ -87,7 +87,9 @@ func EnsureSquid(root string) error {
 func netToolsDockerfile() string {
 	// iptables is nf_tables. iptables-legacy is the other filter hook: a drop
 	// there is invisible to nft list, and an accept in one does not cover it.
-	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2\n"
+	// openssh-client is the strong-wall attach program. It runs in a throwaway
+	// container that shares the helper network namespace.
+	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2 openssh-client\n"
 }
 
 func EnsureNetTools(root string) error {

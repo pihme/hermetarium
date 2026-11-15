@@ -1,8 +1,6 @@
 package supervisor
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -38,9 +36,7 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 		return "", err
 	}
 	script := filepath.Join(helpers, "pack-oci.sh")
-	// A new attach program has to land in a rootfs the pack script did not touch.
-	sum := sha256.Sum256(fcAttachBin)
-	if rootfsFresh(dest, script, sizeMB, sum[:]) {
+	if rootfsFresh(dest, script, sizeMB) {
 		return dest, nil
 	}
 	cmd, err := Docker(15*time.Second, "inspect", "-f",
@@ -77,9 +73,6 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	if err := os.WriteFile(filepath.Join(work, "fc-env"), []byte(env), 0o644); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(work, "fc-attach"), fcAttachBin, 0o755); err != nil {
-		return "", err
-	}
 	// Size in the directory so two --disk packs do not share one temp file.
 	stage := filepath.Join(work, fmt.Sprintf("rootfs-%d.ext4.d", sizeMB))
 	if err := os.MkdirAll(stage, 0o755); err != nil {
@@ -101,13 +94,10 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	if err := os.Rename(packed, dest); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(dest+".attachsha", sum[:], 0o644); err != nil {
-		return "", err
-	}
 	return dest, nil
 }
 
-func rootfsFresh(dest, script string, sizeMB int, sum []byte) bool {
+func rootfsFresh(dest, script string, sizeMB int) bool {
 	st, err := os.Stat(dest)
 	if err != nil || st.Size() != int64(sizeMB)<<20 {
 		return false
@@ -116,8 +106,7 @@ func rootfsFresh(dest, script string, sizeMB int, sum []byte) bool {
 	if err != nil || st.ModTime().Before(sc.ModTime()) {
 		return false
 	}
-	old, err := os.ReadFile(dest + ".attachsha")
-	return err == nil && bytes.Equal(old, sum)
+	return true
 }
 
 const (

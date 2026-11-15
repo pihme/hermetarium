@@ -36,8 +36,8 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "--no-seccomp") {
 		t.Fatal("entrypoint.sh disables Firecracker seccomp")
 	}
-	if !strings.Contains(string(b), "/vsock/vsock.sock") || strings.Contains(string(b), "/log/vsock.sock") {
-		t.Fatal("entrypoint.sh does not keep the vsock socket off the gate mount")
+	if strings.Contains(string(b), "vsock") {
+		t.Fatal("entrypoint.sh still builds a vsock terminal")
 	}
 	b, err = os.ReadFile(pack)
 	if err != nil {
@@ -55,23 +55,20 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
 		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
 	}
-	if !strings.Contains(string(b), "/dev/pts") || !strings.Contains(string(b), "/fc-attach") {
-		t.Fatal("pack-oci.sh does not start the attach terminal")
+	if strings.Contains(string(b), "vsock") || strings.Contains(string(b), "fc-attach") {
+		t.Fatal("pack-oci.sh still builds a vsock terminal")
 	}
 	init := fcInitScript(t, string(b))
-	mount := strings.Index(init, "echo DATA_MOUNT_OK")
-	env := strings.Index(init, ". /fc-env")
-	start := strings.Index(init, "/fc-attach >/dev/null")
-	netw := strings.Index(init, "$IP link set lo up")
+	pts := strings.Index(init, "/dev/pts")
+	ip := strings.Index(init, "172.16.0.2/24")
+	start := strings.Index(init, "/usr/sbin/sshd -f /fc-sshd.conf")
+	uname := strings.Index(init, "GUEST_UNAME=")
 	execAt := strings.LastIndex(init, "\nexec $cmd")
-	if mount < 0 || env < 0 || start < 0 || netw < 0 || execAt < 0 || !(mount < env && env < start && start < netw && netw < execAt) {
-		t.Fatal("fc-attach must inherit /fc-env after the data mount and before the network wait")
+	if pts < 0 || ip < 0 || start < 0 || uname < 0 || execAt < 0 || !(pts < ip && ip < start && start < uname && uname < execAt) {
+		t.Fatal("sshd must start after the guest address is set and before the inhabitant")
 	}
 	if strings.Count(init, ". /fc-env") != 1 {
 		t.Fatal("/fc-env sourced more than once")
-	}
-	if strings.Contains(init[:env], "/fc-attach >/dev/null") {
-		t.Fatal("fc-attach starts before /fc-env")
 	}
 	if strings.Contains(string(b), "|| echo DATA_MOUNT_FAIL") || !strings.Contains(string(b), "echo DATA_MOUNT_FAIL\n    exit 1") {
 		t.Fatal("data mount failure must stop before the inhabitant")

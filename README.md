@@ -136,7 +136,7 @@ hermetarium attach YOUR_ID [-- <cmd>]
 
 `url` prints the address, or `this habitat has no inbound address` when the habitat was created with `--no-inbound`. `logs` prints what passed the gate. `destroy` stops the habitat.
 
-Ask the assistant over HTTP. `exec` runs a command on the Docker wall. `attach` opens a terminal on either wall. With no command it runs `sh`. Bytes on that terminal stay out of the I/O log. Escape sequences from the habitat reach the operator's terminal as they are.
+Ask the assistant over HTTP. `exec` runs a command on the Docker wall. `attach` opens a terminal on either wall. With no command it runs `sh`. The Docker wall uses `docker exec`. The strong wall uses SSH, so an image that wants that terminal includes an SSH server. The habitat's private key stays on the host. Bytes on that terminal stay out of the I/O log. Escape sequences from the habitat reach the operator's terminal as they are.
 
 Walls, the lines a gate file must contain, and an image of your own are in the [usage guide](USAGE.md).
 

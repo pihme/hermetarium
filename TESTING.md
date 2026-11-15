@@ -49,8 +49,9 @@ In-process. No Docker habitat.
 | `TestNoInboundRejectedMachineConfig` | Needs Docker and KVM. `AfterGate` sets `vcpu_count` to 0, which Firecracker rejects. Strong-wall `create --no-inbound` returns an error that includes the `fc.log` tail, and no container for that id remains. |
 | `TestACLOpensWeb` | An `http_access allow` for inbound, vendor, or probe does not open the web. `container_out` and `container_tls` do. |
 | `TestGateDNS` | Needs Docker and KVM. On both walls, with a closed gate file, `example.com` does not resolve and the log says `NXDOMAIN`, while `probe.hermetarium.test` resolves to the gate and is logged. With the web open, `example.com` resolves and the log has the address. A query to `1.1.1.1` gets no answer, and on the weak wall `127.0.0.11` cannot resolve an outside name. `localhost` is `127.0.0.1`. |
-| `TestAttachProgramEmbedded` | The release binary embeds an ELF `fc-attach` for the strong-wall guest. |
-| `TestAttachTTY` | Needs Docker and KVM. `attach` on both walls gives a command a pty and the window size set on the operator terminal, follows a resize, and a later attach still sees a detached tmux session. The I/O log stays empty. |
+| `TestAttachKeyOutsideGate` | Each habitat gets its own key pair. The private key is mode `0600` under `var/.attach/<id>/`, outside the instance directory the gate mounts. The boot argument is `hermetarium.pub=` plus that public key. The strong-wall helper does not mount the private key, and `attach` does not publish a port. |
+| `TestSSHRemoteCommand` | The strong-wall command is one quoted `exec` of the operator's argv, including a newline and a single quote. |
+| `TestAttachTTY` | Needs Docker and KVM. `attach` on both walls gives a command a pty and the window size set on the operator terminal, follows a resize, and a later attach still sees a detached tmux session. The I/O log stays empty. The strong wall uses SSH. The private key is absent from `vm.json`, the gate file, and the root disk, and neither the helper nor the gate publishes a port. |
 | `TestChooseID` | With no `--id`, `create` still makes a 12-character id. `--id claude` is kept. A blank, a space, a slash, a leading `-` or `.`, and a name longer than 63 characters are rejected. `claude` and `grok` do not share a subnet. |
 | `TestCreateRejectsSizeFlagsOnWeakWall` | `create --wall weak` with `--mem` exits 2. |
 | `TestCreateRejectsCPUsAboveWallLimit` | `--cpus` above 32 on the strong wall, or above `runtime.NumCPU` on the weak wall, exits 2 and names the limit. No habitat is started. The check still allows 32, the host CPU count, and an omitted `--cpus`. |
@@ -115,7 +116,7 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 
 ### Terminal
 
-`TestAttachTTY`. Image `hermetarium-attach:local` (Alpine with tmux, command `sleep`). `--no-inbound` on both walls.
+`TestAttachTTY`. Image `hermetarium-attach:local` (Alpine with `openssh` and tmux, command `sleep`). `--no-inbound` on both walls. The strong wall connects with SSH. The private key stays on the host.
 
 A command run through `attach` prints a pty name under `/dev/pts` and `stty size` of 40 rows by 100 columns, the size set on the operator's pty before the call. The operator pty is then resized to 24 by 80 and the process receives `SIGWINCH`. A later `stty size` in that same command prints 24 by 80.
 

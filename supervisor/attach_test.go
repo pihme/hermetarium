@@ -2,11 +2,13 @@ package supervisor
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,18 +19,129 @@ import (
 	"unsafe"
 )
 
-func TestAttachProgramEmbedded(t *testing.T) {
-	if len(fcAttachBin) < 100 || string(fcAttachBin[:4]) != "\x7fELF" {
-		t.Fatalf("fcattach.bin is not an ELF (%d bytes)", len(fcAttachBin))
-	}
-}
-
 func TestAttachUsage(t *testing.T) {
 	if code := Run([]string{"attach"}); code != 2 {
 		t.Fatalf("code=%d", code)
 	}
 	if code := Run([]string{"attach", "missing-habitat-zz"}); code != 1 {
 		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestSSHRemoteCommand(t *testing.T) {
+	got := sshRemoteCommand([]string{"sh", "-c", "echo hi\necho 'there'"})
+	want := "exec 'sh' '-c' 'echo hi\necho '\"'\"'there'\"'\"''"
+	if got != want {
+		t.Fatalf("command %q", got)
+	}
+}
+
+func TestAttachKeyOutsideGate(t *testing.T) {
+	root := t.TempDir()
+	id := "hab"
+	dir, err := InstanceDir(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	arg, err := writeAttachKey(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := writeAttachKey(root, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if arg == other || !strings.HasPrefix(arg, "hermetarium.pub=") || strings.Contains(arg, " ") {
+		t.Fatalf("boot args %q %q", arg, other)
+	}
+	key := attachKeyPath(root, id)
+	rel, err := filepath.Rel(dir, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// runSquid bind-mounts the instance directory. A path inside it is on the gate.
+	if rel == "." || !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("private key %s is inside the gate mount %s", key, dir)
+	}
+	for _, p := range []string{filepath.Dir(key), filepath.Dir(filepath.Dir(key))} {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o700 {
+			t.Fatalf("%s mode %o, want 0700", p, st.Mode().Perm())
+		}
+	}
+	st, err := os.Stat(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("private key mode %o", st.Mode().Perm())
+	}
+	priv, err := os.ReadFile(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := openSSHSeed(priv)
+	if len(seed) != 32 {
+		t.Fatalf("seed %d", len(seed))
+	}
+	pub, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains([]byte(arg), bytes.Fields(pub)[1]) {
+		t.Fatalf("boot arg is not the public key")
+	}
+	if bytes.Contains(pub, seed) || bytes.Contains([]byte(arg), seed) {
+		t.Fatal("public key holds the private seed")
+	}
+	if _, err := exec.LookPath("ssh-keygen"); err == nil {
+		out, err := exec.Command("ssh-keygen", "-y", "-f", key).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(out) != string(pub) {
+			t.Fatalf("ssh-keygen -y\n%s\nwant\n%s", out, pub)
+		}
+	}
+	for _, name := range []string{"strong.go", "attach.go", "oci.go"} {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "vsock") || strings.Contains(string(b), "fc-attach") || strings.Contains(string(b), "fcattach") {
+			t.Fatalf("%s still has the vsock terminal", name)
+		}
+	}
+	ep, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "entrypoint.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "pack-oci.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ep), "vsock") || strings.Contains(string(pack), "vsock") || strings.Contains(string(pack), "fc-attach") {
+		t.Fatal("helper scripts still build the vsock terminal")
+	}
+	src, err := os.ReadFile("strong.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), `attachKeyDir(root, id)+":`) {
+		t.Fatal("private key is mounted into the helper")
+	}
+	att, err := os.ReadFile("attach.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(att), `"-p"`) || !strings.Contains(string(att), `--network", "container:"`) || !strings.Contains(string(att), `":/key:ro"`) {
+		t.Fatal("attach publishes a port or does not keep the key on the client mount")
 	}
 }
 
@@ -42,7 +155,7 @@ func TestAttachTTY(t *testing.T) {
 	}
 	image := "hermetarium-attach:local"
 	ctx := t.TempDir()
-	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache tmux\nCMD [\"sleep\", \"3600\"]\n"
+	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache openssh tmux\nCMD [\"sleep\", \"3600\"]\n"
 	if err := os.WriteFile(filepath.Join(ctx, "Dockerfile"), []byte(df), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +188,7 @@ func TestAttachTTY(t *testing.T) {
 			id := newTestID(t)
 			t.Cleanup(func() {
 				_ = DestroyWeak(id)
-				_ = DestroyStrong(id)
+				endStrong(id, filepath.Join(VarDir(root), id))
 			})
 			var dir, logPath string
 			switch wall {
@@ -91,6 +204,7 @@ func TestAttachTTY(t *testing.T) {
 					t.Fatal(err)
 				}
 				dir, logPath = inst.Dir, inst.LogPath
+				assertStrongAttachSealed(t, root, id, dir)
 			}
 			logs := func() string { return habitatLogs(wall, id, dir) }
 			out := mustDrive(t, logs, root, id, sizeCmd, 40, 100, "SIZE1=40 100", "ATTACH_DONE", func(master *os.File) {
@@ -115,6 +229,99 @@ func TestAttachTTY(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertStrongAttachSealed(t *testing.T, root, id, dir string) {
+	t.Helper()
+	vm, err := os.ReadFile(filepath.Join(dir, "vm.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(vm, []byte("vsock")) {
+		t.Fatal("vm.json has a vsock device")
+	}
+	if !bytes.Contains(vm, []byte("hermetarium.pub=")) {
+		t.Fatal("vm.json has no public key")
+	}
+	priv, err := os.ReadFile(attachKeyPath(root, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := openSSHSeed(priv)
+	if len(seed) != 32 {
+		t.Fatalf("seed %d", len(seed))
+	}
+	enc := []byte(base64.StdEncoding.EncodeToString(seed))
+	acl, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disk, err := os.ReadFile(filepath.Join(dir, "rootfs.ext4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []struct {
+		label string
+		b     []byte
+	}{
+		{"vm.json", vm},
+		{"squid.conf", acl},
+		{"rootfs", disk},
+	} {
+		if bytes.Contains(name.b, seed) || bytes.Contains(name.b, enc) || bytes.Contains(name.b, priv) {
+			t.Fatalf("private key is in %s", name.label)
+		}
+	}
+	assertNoPublishedPorts(t, "htm-fc-"+id, "htm-gate-"+id)
+}
+
+func openSSHSeed(pemBytes []byte) []byte {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || !bytes.HasPrefix(block.Bytes, []byte("openssh-key-v1\x00")) {
+		return nil
+	}
+	rest := block.Bytes[len("openssh-key-v1\x00"):]
+	var err error
+	for i := 0; i < 3; i++ {
+		_, rest, err = takeSSHString(rest)
+		if err != nil {
+			return nil
+		}
+	}
+	if len(rest) < 4 {
+		return nil
+	}
+	rest = rest[4:]
+	if _, rest, err = takeSSHString(rest); err != nil {
+		return nil
+	}
+	priv, _, err := takeSSHString(rest)
+	if err != nil || len(priv) < 8 {
+		return nil
+	}
+	body := priv[8:]
+	if _, body, err = takeSSHString(body); err != nil {
+		return nil
+	}
+	if _, body, err = takeSSHString(body); err != nil {
+		return nil
+	}
+	sec, _, err := takeSSHString(body)
+	if err != nil || len(sec) != 64 {
+		return nil
+	}
+	return sec[:32]
+}
+
+func takeSSHString(b []byte) ([]byte, []byte, error) {
+	if len(b) < 4 {
+		return nil, nil, errors.New("short")
+	}
+	n := int(binary.BigEndian.Uint32(b[:4]))
+	if n < 0 || len(b) < 4+n {
+		return nil, nil, errors.New("short")
+	}
+	return b[4 : 4+n], b[4+n:], nil
 }
 
 func mustDrive(t *testing.T, logs func() string, root, id string, argv []string, row, col uint16, saw, until string, on func(*os.File)) string {
@@ -285,238 +492,6 @@ func openTestPTY(row, col uint16) (*os.File, *os.File, error) {
 func setWinsize(f *os.File, row, col uint16) {
 	ws := winsize{Row: row, Col: col}
 	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
-}
-
-func TestWriteSessionKeepsNewline(t *testing.T) {
-	arg := "echo hi\necho there"
-	var b bytes.Buffer
-	if err := writeSession(&b, 24, 80, []string{"sh", "-c", arg}); err != nil {
-		t.Fatal(err)
-	}
-	want := fmt.Sprintf("24 80\n3\n2\nsh2\n-c%d\n%s", len(arg), arg)
-	if b.String() != want {
-		t.Fatalf("header %q", b.String())
-	}
-}
-
-func TestAttachNewlineAndStatus(t *testing.T) {
-	arg := "echo hi\necho there"
-	got := make(chan []string, 1)
-	sock := listenFakeVsock(t, func(c net.Conn) {
-		argv, err := readWireArgs(c)
-		if err != nil {
-			return
-		}
-		got <- argv
-		payload := []byte("ready\n")
-		_, _ = c.Write([]byte{sessData, 0, 0, 0, byte(len(payload))})
-		_, _ = c.Write(payload)
-		_, _ = c.Write([]byte{sessExit, 0, 0, 0, 1, 9})
-	})
-	in, out, text := attachPipes(t)
-	stop := make(chan struct{})
-	defer close(stop)
-	code, err := attachVsock(sock, []string{"sh", "-c", arg}, in, out, out, make(chan os.Signal, 1), stop)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != 9 {
-		t.Fatalf("status %d", code)
-	}
-	if gotText := text(); gotText != "ready\n" {
-		t.Fatalf("terminal %q", gotText)
-	}
-	select {
-	case argv := <-got:
-		if len(argv) != 3 || argv[2] != arg {
-			t.Fatalf("argv %#v", argv)
-		}
-	default:
-		t.Fatal("guest did not see argv")
-	}
-}
-
-func TestAttachErrStatus(t *testing.T) {
-	msg := []byte("ATTACH_ERR open pty")
-	if len(msg) > 255 {
-		t.Fatal("message")
-	}
-	sock := listenFakeVsock(t, func(c net.Conn) {
-		if _, err := readWireArgs(c); err != nil {
-			return
-		}
-		_, _ = c.Write(append([]byte{sessErr, 0, 0, 0, byte(len(msg))}, msg...))
-	})
-	in, out, text := attachPipes(t)
-	stop := make(chan struct{})
-	defer close(stop)
-	code, err := attachVsock(sock, []string{"sh"}, in, out, out, make(chan os.Signal, 1), stop)
-	if code == 0 || err == nil || err.Error() != string(msg) {
-		t.Fatalf("code %d err %v", code, err)
-	}
-	if gotText := text(); strings.Contains(gotText, "ATTACH_ERR") {
-		t.Fatalf("error was written to the terminal: %q", gotText)
-	}
-}
-
-func TestRelayResizeRetries(t *testing.T) {
-	dir := t.TempDir()
-	sock := filepath.Join(dir, "vsock.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	var mu sync.Mutex
-	attempts, oks := 0, 0
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				if _, err := readLine(c); err != nil {
-					return
-				}
-				mu.Lock()
-				attempts++
-				drop := attempts == 1
-				mu.Unlock()
-				if drop {
-					return
-				}
-				if _, err := io.WriteString(c, "OK 1\n"); err != nil {
-					return
-				}
-				mu.Lock()
-				oks++
-				mu.Unlock()
-				_, _ = readLine(c)
-			}(c)
-		}
-	}()
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer inW.Close()
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		relayResize(sock, inR, make(chan os.Signal, 1), stop)
-	}()
-	defer func() {
-		close(stop)
-		<-done
-		inR.Close()
-	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		n := oks
-		mu.Unlock()
-		if n > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if oks == 0 || attempts < 2 {
-		t.Fatalf("attempts %d oks %d", attempts, oks)
-	}
-}
-
-func listenFakeVsock(t *testing.T, session func(net.Conn)) string {
-	t.Helper()
-	dir := t.TempDir()
-	sock := filepath.Join(dir, "vsock.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				line, err := readLine(c)
-				if err != nil || !strings.HasPrefix(line, "CONNECT ") {
-					return
-				}
-				if _, err := io.WriteString(c, "OK 1\n"); err != nil {
-					return
-				}
-				if strings.TrimSpace(strings.TrimPrefix(line, "CONNECT ")) != strconv.Itoa(vsockSessionPort) {
-					_, _ = readLine(c)
-					return
-				}
-				session(c)
-			}(c)
-		}
-	}()
-	return sock
-}
-
-func readWireArgs(r io.Reader) ([]string, error) {
-	if _, err := readLine(r); err != nil {
-		return nil, err
-	}
-	line, err := readLine(r)
-	if err != nil {
-		return nil, err
-	}
-	n, err := strconv.Atoi(line)
-	if err != nil || n < 0 || n > 4096 {
-		return nil, err
-	}
-	argv := make([]string, n)
-	for i := 0; i < n; i++ {
-		line, err = readLine(r)
-		if err != nil {
-			return nil, err
-		}
-		sz, err := strconv.Atoi(line)
-		if err != nil || sz < 0 || sz > 1<<20 {
-			return nil, err
-		}
-		buf := make([]byte, sz)
-		if _, err := io.ReadFull(r, buf); err != nil {
-			return nil, err
-		}
-		argv[i] = string(buf)
-	}
-	return argv, nil
-}
-
-func attachPipes(t *testing.T) (in, out *os.File, text func() string) {
-	t.Helper()
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		// inR stays open. Closing it races the stdin copy blocked in Read.
-		inW.Close()
-		outR.Close()
-		outW.Close()
-	})
-	return inR, outW, func() string {
-		outW.Close()
-		b, _ := io.ReadAll(outR)
-		return string(b)
-	}
 }
 
 func habitatLogs(wall, id, dir string) string {
