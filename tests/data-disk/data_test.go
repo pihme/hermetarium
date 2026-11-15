@@ -113,10 +113,7 @@ func TestDataDiskMountFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("create succeeded")
 	}
-	if !strings.Contains(err.Error(), "did not mount") || !strings.Contains(err.Error(), "DATA_MOUNT_FAIL") {
-		t.Fatal(err)
-	}
-	if !strings.Contains(err.Error(), "mount:") && !strings.Contains(err.Error(), "/dev/vdb") {
+	if !strings.Contains(err.Error(), "did not mount") || !strings.Contains(err.Error(), "DATA_MOUNT_FAIL") || !strings.Contains(err.Error(), "/dev/vdb") {
 		t.Fatalf("mount failure hid the guest mount error: %v", err)
 	}
 	left, err := supervisor.Docker(15*time.Second, "ps", "-a", "--filter", "name="+id, "--format", "{{.Names}}")
