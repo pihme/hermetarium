@@ -129,6 +129,9 @@ func testStrong(t *testing.T, root string) {
 	if m[1] == hostRelease {
 		t.Fatalf("strong wall: guest kernel %s equals host %s", m[1], hostRelease)
 	}
+	if !strings.HasPrefix(m[1], "6.1.188") {
+		t.Fatalf("strong wall: guest kernel %s is not the pinned 6.1.188", m[1])
+	}
 	t.Logf("strong wall: guest kernel %s ≠ host %s", m[1], hostRelease)
 	if !strings.Contains(serial, "LEAK_FAIL") {
 		t.Fatalf("strong wall: leak did not fail\n%s", tail(serial, 2000))
