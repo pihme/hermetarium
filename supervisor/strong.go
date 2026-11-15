@@ -24,10 +24,10 @@ const (
 	// Extract stamp: pinned tarball checksum, then the binary's SHA-256.
 	// A missing or different stamp is not a cache hit.
 	fcStampName = "firecracker.stamp"
-	// Firecracker publishes no checksum for CI kernels.
-	kernelURL    = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20261111-778a26c0594c-0/x86_64/vmlinux-6.1.188"
+	// Release asset kernel/6.1.188, the build from Actions run 43712585538.
+	kernelURL    = "https://github.com/pihme/hermetarium/releases/download/kernel/6.1.188/vmlinux-6.1.188"
 	kernelFile   = "vmlinux-6.1.188"
-	kernelSHA256 = "f5735774e2570d9df451fc5665f3525d3baf723fa6a8a413a03591d5742b39a5"
+	kernelSHA256 = "b5f8e93cad94f04ccda9870b9959dd39b91551684c78760a17ef9eb4376475ba"
 )
 
 // fcPin is the tarball checksum EnsureStrongAssets accepts. Production
