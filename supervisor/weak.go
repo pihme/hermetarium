@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -107,6 +108,9 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	}
 	for _, h := range VendorHosts() {
 		boxArgs = append(boxArgs, "--add-host", h+":"+sub.Gate)
+	}
+	if opts.CPUs > 0 {
+		boxArgs = append(boxArgs, "--cpus", strconv.Itoa(opts.CPUs))
 	}
 	if https {
 		boxArgs = append(boxArgs, mitmBoxDockerArgs(dir)...)

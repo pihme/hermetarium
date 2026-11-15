@@ -157,7 +157,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 			"is_root_device": true,
 			"is_read_only":   false,
 		}},
-		"machine-config": map[string]any{"vcpu_count": 1, "mem_size_mib": memMiB(opts)},
+		"machine-config": map[string]any{"vcpu_count": cpuCount(opts), "mem_size_mib": memMiB(opts)},
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",
 			"guest_mac":     "AA:FC:00:00:00:01",

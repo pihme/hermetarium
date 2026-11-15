@@ -190,16 +190,22 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	if err != nil {
 		return CreateOpts{}, err
 	}
-	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, NoInbound: flagPresent(args, "--no-inbound")}, nil
+	cpus, err := sizeFlag(args, "--cpus", 0)
+	if err != nil {
+		return CreateOpts{}, err
+	}
+	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus, NoInbound: flagPresent(args, "--no-inbound")}, nil
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--id NAME] [--no-inbound]
-       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--id NAME] [--no-inbound]
+	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--cpus N] [--id NAME] [--no-inbound]
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--id NAME] [--no-inbound]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>
        hermetarium destroy <id>
        hermetarium version
+
+--cpus N works on both walls: that many processors in the virtual machine, or that CPU quota on Docker. The default is one processor, and no Docker quota.
 `)
 }
