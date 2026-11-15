@@ -82,6 +82,11 @@ func TestSquidStartupQuiet(t *testing.T) {
 	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
+	// squid.pid can appear before cache.log, so WaitSquid's chmod misses the
+	// file Squid then creates as the proxy user.
+	if err := chmodLogs(dir); err != nil {
+		t.Fatal(err)
+	}
 	logb, err := os.ReadFile(filepath.Join(dir, "cache.log"))
 	if err != nil {
 		t.Fatal(err)
