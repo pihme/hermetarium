@@ -306,6 +306,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		"--entrypoint", "sh",
 	}
 	helperArgs = append(helperArgs, inboundPublish(opts.NoInbound)...)
+	// The helper entrypoint accepts tcp/18081 from the bridge gateway unless
+	// this is set. The gate file is copied unchanged and may still listen there.
+	if opts.NoInbound {
+		helperArgs = append(helperArgs, "-e", "NO_INBOUND=1")
+	}
 	helperArgs = append(helperArgs,
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
@@ -550,32 +555,24 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 			return nil
 		}
 		if !running || !time.Now().Before(deadline) {
-			return fmt.Errorf("guest did not boot: %s", guestBootTail(dir, text))
+			parts := make([]string, 0, 2)
+			if fc := strings.TrimSpace(tailHostFile(filepath.Join(dir, "fc.log"))); fc != "" {
+				parts = append(parts, fc)
+			}
+			serial := strings.TrimSpace(tailHostFile(filepath.Join(dir, "serial.log")))
+			if serial == "" {
+				if len(text) > 4000 {
+					text = text[len(text)-4000:]
+				}
+				serial = strings.TrimSpace(text)
+			}
+			if serial != "" {
+				parts = append(parts, serial)
+			}
+			return fmt.Errorf("guest did not boot: %s", strings.Join(parts, "\n"))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-}
-
-func guestBootTail(dir, console string) string {
-	parts := make([]string, 0, 2)
-	if fc := strings.TrimSpace(tailHostFile(filepath.Join(dir, "fc.log"))); fc != "" {
-		parts = append(parts, fc)
-	}
-	serial := strings.TrimSpace(tailHostFile(filepath.Join(dir, "serial.log")))
-	if serial == "" {
-		serial = strings.TrimSpace(tailText(console))
-	}
-	if serial != "" {
-		parts = append(parts, serial)
-	}
-	return strings.Join(parts, "\n")
-}
-
-func tailText(s string) string {
-	if len(s) > 4000 {
-		return s[len(s)-4000:]
-	}
-	return s
 }
 
 // The guest prints one of these after it tries /dev/vdb. Create does not

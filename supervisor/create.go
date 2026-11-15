@@ -23,8 +23,9 @@ type CreateOpts struct {
 	DataPath string
 	DataMiB  int
 
-	// NoInbound publishes no host port and does not wait for port 8080.
-	// The strong wall still waits until the guest prints GUEST_UNAME=.
+	// NoInbound publishes no host port, does not wait for port 8080, and
+	// does not accept the inbound port from the bridge gateway. The strong
+	// wall still waits until the guest prints GUEST_UNAME=.
 	NoInbound bool
 }
 

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +114,120 @@ func TestNoInbound(t *testing.T) {
 	})
 }
 
+// The gate file still listens on the inbound port. --no-inbound must drop the
+// bridge gateway anyway; without the flag that port stays published.
+func TestNoInboundGatePort(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := "hermetarium-inbound-port:local"
+	ctx := t.TempDir()
+	df := "FROM " + BusyboxImage + "\n" +
+		"RUN mkdir -p /www && echo ok > /www/index.html\n" +
+		"CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n"
+	if err := os.WriteFile(filepath.Join(ctx, "Dockerfile"), []byte(df), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Docker(3*time.Minute, "build", "-t", image, ctx); err != nil {
+		t.Fatal(err)
+	}
+	acl := filepath.Join(t.TempDir(), "squid.conf")
+	conf := "" +
+		"http_port 127.0.0.1:3129\n" +
+		"http_port 0.0.0.0:18081 accel defaultsite=inhabitant vhost name=inbound\n" +
+		"http_port 0.0.0.0:3128 intercept\n" +
+		"visible_hostname hermetarium\n" +
+		"pid_filename /log/squid.pid\n" +
+		"coredump_dir /tmp\n" +
+		"cache_log /log/cache.log\n" +
+		"access_log stdio:/log/access.log\n" +
+		"logfile_rotate 0\n" +
+		"shutdown_lifetime 1 seconds\n" +
+		"cache_effective_user proxy\n" +
+		"cache deny all\n" +
+		"acl inbound myportname inbound\n" +
+		"cache_peer inhabitant parent 8080 0 no-query no-digest originserver name=inhabitant\n" +
+		"cache_peer_access inhabitant allow inbound\n" +
+		"cache_peer_access inhabitant deny all\n" +
+		"always_direct deny all\n" +
+		"never_direct allow all\n" +
+		"http_access allow inbound\n" +
+		"http_access deny all\n"
+	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	closed := CreateOpts{Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128}
+	open := CreateOpts{Image: image, ACL: acl, MemMiB: 128, DiskMB: 128}
+
+	t.Run("weak", func(t *testing.T) {
+		t.Run("closed", func(t *testing.T) {
+			id := newTestID(t)
+			t.Cleanup(func() { _ = DestroyWeak(id) })
+			inst, err := CreateWeak(root, id, closed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.InboundURL != "" {
+				t.Fatalf("inbound url %q", inst.InboundURL)
+			}
+			gate := "htm-gate-" + id
+			assertNoPublishedPorts(t, gate)
+			assertSquidListensOnInbound(t, gate)
+			assertGatewayInbound(t, gate, false)
+		})
+		t.Run("published", func(t *testing.T) {
+			id := newTestID(t)
+			t.Cleanup(func() { _ = DestroyWeak(id) })
+			inst, err := CreateWeak(root, id, open)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.InboundURL == "" {
+				t.Fatal("inbound url empty")
+			}
+			gate := "htm-gate-" + id
+			assertInboundPublished(t, gate)
+			assertGatewayInbound(t, gate, true)
+		})
+	})
+
+	t.Run("strong", func(t *testing.T) {
+		t.Run("closed", func(t *testing.T) {
+			id := newTestID(t)
+			t.Cleanup(func() { _ = DestroyStrong(id) })
+			inst, err := CreateStrong(root, id, closed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.InboundURL != "" {
+				t.Fatalf("inbound url %q", inst.InboundURL)
+			}
+			helper := "htm-fc-" + id
+			assertNoPublishedPorts(t, helper, "htm-gate-"+id)
+			assertSquidListensOnInbound(t, helper)
+			assertGatewayInbound(t, helper, false)
+		})
+		t.Run("published", func(t *testing.T) {
+			id := newTestID(t)
+			t.Cleanup(func() { _ = DestroyStrong(id) })
+			inst, err := CreateStrong(root, id, open)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.InboundURL == "" {
+				t.Fatal("inbound url empty")
+			}
+			helper := "htm-fc-" + id
+			assertInboundPublished(t, helper)
+			assertGatewayInbound(t, helper, true)
+		})
+	})
+}
+
 func TestNoInboundRejectedMachineConfig(t *testing.T) {
 	if _, err := Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
@@ -202,6 +318,53 @@ func newTestID(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func assertSquidListensOnInbound(t *testing.T, netns string) {
+	t.Helper()
+	if err := EnsureImageExists(BusyboxImage); err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(InboundPort)
+	if _, err := Docker(20*time.Second, "run", "--rm", "--network", "container:"+netns,
+		BusyboxImage, "nc", "-z", "-w", "2", "127.0.0.1", port); err != nil {
+		t.Fatalf("127.0.0.1:%s is not accepting in %s: %v", port, netns, err)
+	}
+}
+
+func assertGatewayInbound(t *testing.T, container string, reachable bool) {
+	t.Helper()
+	ip, err := Docker(15*time.Second, "inspect", "-f", "{{.NetworkSettings.Networks.bridge.IPAddress}}", container)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		t.Fatalf("%s has no address on the default bridge", container)
+	}
+	addr := net.JoinHostPort(ip, strconv.Itoa(InboundPort))
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err == nil {
+		_ = conn.Close()
+	}
+	if reachable && err != nil {
+		t.Fatalf("bridge gateway did not reach %s: %v", addr, err)
+	}
+	if !reachable && err == nil {
+		t.Fatalf("bridge gateway reached %s", addr)
+	}
+}
+
+func assertInboundPublished(t *testing.T, container string) {
+	t.Helper()
+	out, err := Docker(10*time.Second, "inspect", "-f", "{{json .HostConfig.PortBindings}}", container)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strconv.Itoa(InboundPort) + "/tcp"
+	if !strings.Contains(out, want) {
+		t.Fatalf("%s did not publish %s: %s", container, want, strings.TrimSpace(out))
+	}
 }
 
 func assertNoPublishedPorts(t *testing.T, containers ...string) {
