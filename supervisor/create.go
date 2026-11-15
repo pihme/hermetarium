@@ -17,6 +17,9 @@ type CreateOpts struct {
 	MemMiB int
 	DiskMB int
 	CPUs   int // 0 means the wall default: one guest CPU, no Docker quota
+
+	// NoInbound publishes no host port and does not wait for port 8080.
+	NoInbound bool
 }
 
 func VendorHosts() []string {

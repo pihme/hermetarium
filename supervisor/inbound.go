@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"time"
 )
+
+// errNoInbound is the url answer when create was passed --no-inbound.
+var errNoInbound = errors.New("this habitat has no inbound address")
 
 func InboundURLFromDir(dir string) (string, error) {
 	b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
@@ -25,7 +29,7 @@ func InboundURLFromDir(dir string) (string, error) {
 		return "", err
 	}
 	if meta.InboundURL == "" {
-		return "", fmt.Errorf("no inboundUrl in %s", dir)
+		return "", errNoInbound
 	}
 	return meta.InboundURL, nil
 }
@@ -36,6 +40,28 @@ func LoadInboundURL(root, id string) (string, error) {
 
 func inboundURL(hostPort int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/", hostPort)
+}
+
+func inboundPublish(noInbound bool) []string {
+	if noInbound {
+		return nil
+	}
+	return []string{"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort)}
+}
+
+func finishInbound(container string, noInbound bool, timeout time.Duration) (string, error) {
+	if noInbound {
+		return "", nil
+	}
+	hostPort, err := containerHostPort(container, InboundPort)
+	if err != nil {
+		return "", err
+	}
+	url := inboundURL(hostPort)
+	if err := waitInbound(url, timeout); err != nil {
+		return "", err
+	}
+	return url, nil
 }
 
 func containerHostPort(container string, inner int) (int, error) {

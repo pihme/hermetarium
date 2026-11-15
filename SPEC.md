@@ -113,7 +113,7 @@ The operator does not name a host argv to run inside.
 
 ### 9a. Operator HTTP
 
-The supervisor publishes a host URL that reaches the inhabitant through Squid. Both walls. CLI `hermetarium url <id>` prints `http://127.0.0.1:<port>/`. `create --image NAME` boots any local or pullable OCI image.
+The supervisor publishes a host URL that reaches the inhabitant through Squid. Both walls. CLI `hermetarium url <id>` prints `http://127.0.0.1:<port>/`. `create --image NAME` boots any local or pullable OCI image. `create --no-inbound` publishes no host port and does not wait for port 8080. The gate file may then omit the inhabitant peer and the inbound port. `url` prints `this habitat has no inbound address`. Without the flag, create still publishes the port and waits for port 8080.
 
 Two uses of that one server:
 

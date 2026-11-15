@@ -63,7 +63,7 @@ To choose the size, pass MiB. The disk size is in MiB too.
 ./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --cpus 4 --image hermetarium/echo:dev --acl examples/echo/squid.conf
 ```
 
-`--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
+`--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for port 8080. The gate file can then omit the `inhabitant` peer and port 18081. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
 
 `--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out.
 
@@ -75,7 +75,7 @@ Ask where it is listening:
 ./bin/hermetarium url YOUR_ID
 ```
 
-That prints an address like `http://127.0.0.1:12345/`. Send a line there:
+That prints an address like `http://127.0.0.1:12345/`. With `--no-inbound` it prints `this habitat has no inbound address`. Send a line there:
 
 ```bash
 curl -d 'hello' http://127.0.0.1:12345/
