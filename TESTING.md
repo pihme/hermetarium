@@ -35,8 +35,14 @@ In-process. No Docker habitat.
 | `TestResolveCreate` | `create` requires `--image` and `--acl`. Both flags parse into the exec struct. Defaults are 512 MiB and 1024 MB. `--mem 2048 --disk 4096` parses. `--mem 0` and a non-integer `--disk` fail. `--cpus` is unset unless the flag is set. `--cpus 4` parses. `--cpus 0` fails. `--no-inbound` is off unless the flag is set. |
 | `TestCPUs` | Needs Docker and KVM. `--cpus 4` is a CPU quota of 4 in the Docker box (`cpu.max`) and four processors in the strong-wall guest. |
 | `TestSparseRootDisk` | Needs Docker. A 50 GB root disk is sparse (little allocated space) and is not noticeably slower to create than a 1 GB disk. |
+| `TestHabitatRootfsIsPrivate` | Two strong-habitat rootfs files copied from one cache, and a third copied afterwards, are different paths. A write in the first is not in the others or in the cache. The copy stays sparse. The helper bind source is `var/<id>/rootfs.ext4`, not the cache path. |
+| `TestHabitatRootfsReplacesSymlink` | A symlink at `var/<id>/rootfs.ext4` is replaced by the copy. The cache bytes stay. The result is a regular file, and no `rootfs.ext4.partial` is left. |
+| `TestHabitatRootfsFailureKeepsDest` | When the rename onto `rootfs.ext4` fails, only `rootfs.ext4.partial` is removed. A `rootfs.ext4.partial` symlink is not opened, so the cache is not truncated. |
+| `TestRemovePrivateRootfs` | Removing the private disk deletes `var/<id>/rootfs.ext4` and a symlink of that name. It leaves `rootfs.ext4.partial`, a neighboring data file, `rootfs-<image>-<size>.ext4`, and an unsuffixed `rootfs-<id>.ext4`. |
+| `TestDropUnmountedRootfs` | Needs Docker, not KVM. When no `htm-fc-<id>` exists, the failed-create cleanup removes only `var/<id>/rootfs.ext4`. When that container exists, the private file stays. The cache, an unsuffixed `rootfs-<id>.ext4`, and a neighboring data file stay either way. |
 | `TestNoInboundURLMessage` | `noInbound: true` is the sentence `this habitat has no inbound address`. A stored URL is returned. An empty URL without `noInbound` is an error. |
 | `TestNoInbound` | Needs Docker and KVM. An image that only sleeps starts on both walls with `--no-inbound` and a gate file that has no inhabitant peer and no inbound port. No host port is published. `url` prints that sentence. |
+| `TestNoInboundGatePort` | Needs Docker and KVM. A gate file that still listens on 18081, with `--no-inbound`, does not accept that port from the bridge gateway on either wall. Squid is listening on 127.0.0.1:18081. Without the flag, 18081 is published and the bridge gateway can connect. |
 | `TestACLOpensWeb` | An `http_access allow` for inbound, vendor, or probe does not open the web. `container_out` and `container_tls` do. |
 | `TestGateDNS` | Needs Docker and KVM. On both walls, with a closed gate file, `example.com` does not resolve and the log says `NXDOMAIN`, while `probe.hermetarium.test` resolves to the gate and is logged. With the web open, `example.com` resolves and the log has the address. A query to `1.1.1.1` gets no answer. `localhost` is `127.0.0.1`. |
 | `TestChooseID` | With no `--id`, `create` still makes a 12-character id. `--id claude` is kept. A blank, a space, a slash, a leading `-` or `.`, and a name longer than 63 characters are rejected. `claude` and `grok` do not share a subnet. |
@@ -46,6 +52,8 @@ In-process. No Docker habitat.
 | `TestCreateRejectsBadDataFlag` | On the strong wall, `--data` with no file, or a value that starts with `-`, exits 2 and creates no file. A `--data` path containing `:` exits 2 and creates no file. |
 | `TestEnsureDataDisk` | An existing `--data` file is accepted only when it is a regular file with ext4 magic `0xEF53` at offset `0x438`. A directory, a non-ext4 file, and a path containing `:` are rejected. The colon path is not created. An accepted file is not resized. |
 | `TestDataDiskLock` | Taking the data-disk lock fails with "in use" when another flock already holds the lock file. It also fails with "in use" in a second process while the first call still holds the lock. |
+| `TestRefusedDataDiskLeavesNoLock` | A non-ext4 file or a directory passed as `--data` is refused before the lock is taken: no `FILE.lock` is created and the file is unchanged. A valid ext4 file still gets its lock. |
+| `TestDataMountFailureIncludesGuestReason` | The data-mount failure error includes the tail of the guest serial log (the mount error and `DATA_MOUNT_FAIL`), not the whole log. |
 | `TestVersionCommand` | `version` exits 0 and prints `supervisor.Version`. |
 | `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the embedded helper Dockerfile. |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
@@ -55,7 +63,11 @@ In-process. No Docker habitat.
 | `TestFirecrackerStamp` | The extract stamp is the pinned tarball checksum plus the binary's SHA-256. A missing stamp, a stamp without that hash, or a swapped binary is not a cache hit. A rejected tarball deletes the stamp. A matching tarball keeps it. |
 | `TestEnsureStrongAssetsRejectsTarballWithoutBinary` | Needs Docker. A tarball with no `firecracker-*x86_64` binary, and an existing cached binary, makes `EnsureStrongAssets` return an error and does not write the extract stamp. |
 | `TestGateFilesHardened` | Shipped gate files do not set `DONT_VERIFY_PEER` or `dns_v4_first`, and no active line uses `myport`. |
+| `TestDockerRunNotPrivileged` | No non-test `.go` file under `supervisor/` contains `--privileged`. |
 | `TestSquidStartupQuiet` | Needs Docker. Squid started with the echo gate file does not log the `myport` or `dns_v4_first` warnings. |
+| `TestWaitSquidRetriesMissingLogUntilDeadline` | With the pid present but cache.log missing, WaitSquid keeps retrying until the deadline, runs no chmod, and then fails. |
+| `TestWaitSquidReturnsChmodError` | A Docker error from the chmod is retried and, once the deadline passes, returned as the create error. |
+| `TestWaitSquidChmodSucceedsOnlyWhenBothLogsExist` | The chmod runs once, after both access.log and cache.log exist, and WaitSquid then succeeds. |
 | `TestUntrustedVendorGetsNoKey` | Needs Docker. A vendor certificate the gate does not trust gets no request and no key. The same certificate trusted via `tls-cafile` does. |
 | `TestInstallACL` | An empty ACL path fails. A file is copied to `<instance>/squid.conf`. |
 | `TestInstallACLMissingFile` | A missing ACL path fails with `read ACL`. |
@@ -69,7 +81,8 @@ In-process. No Docker habitat.
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
 | `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcHelperDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-helper/` directory there. |
-| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4`. A second extract leaves the entrypoint mtime unchanged. |
+| `TestExtract` | The same two scripts extract executable. The entrypoint contains `fc-helper`. The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). A second extract leaves the entrypoint mtime unchanged. |
+| `TestGateCAFallsThroughToCurl` | The fc-init gate CA fetch runs against a fake busybox without wget: curl is tried next under timeout 3 and writes the CA to both paths. With no curl, the only output is `fc-init: could not fetch the gate CA`. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
 | `TestToolCommand` | A tool-use payload `{"command":"id -u"}` yields the command `id -u`. |
@@ -96,7 +109,7 @@ Porter tests compare argv. They do not exec `claude` or `grok`.
 
 `tests/data-disk` `TestDataDiskSurvivesDestroy`. Needs Docker and `/dev/kvm`. Strong wall, `--no-inbound`, a 32 MiB sparse ext4 file. The first boot writes `/data/marker`. A second `create` with that file while the first habitat is running is refused. After `destroy` the file is still there, mode `0600`. `e2fsck -p` then a read-only mount with `noexec,nosuid,nodev` shows the marker and refuses to run a program from the disk. A new `create --data` of the same file sees the marker.
 
-`TestDataDiskMountFailure`. Needs Docker and `/dev/kvm`. A file with ext4 magic `0xEF53` at offset `0x438` and no valid superblock makes create fail. No container for that id is left. The inhabitant does not write `/data/marker` on the root disk.
+`TestDataDiskMountFailure`. Needs Docker and `/dev/kvm`. A file with ext4 magic `0xEF53` at offset `0x438` and no valid superblock makes create fail. The create error contains `DATA_MOUNT_FAIL` and the guest's `/dev/vdb` mount error. No container for that id is left. The inhabitant does not write `/data/marker` on the root disk.
 
 ### Guest Docker
 
