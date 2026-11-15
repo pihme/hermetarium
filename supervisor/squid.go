@@ -74,6 +74,8 @@ func EnsureNetTools(root string) error {
 }
 
 // The gate image declares volumes. -v removes those anonymous ones; bind mounts stay.
+// Volumes left by earlier runs are not removed.
+// Release-Notes: `docker volume ls -qf dangling=true` lists every unused volume, named or anonymous, and a past habitat's volumes are the two long hex names for /var/log/squid and /var/spool/squid. Inspect before `docker volume rm`.
 func removeGate(id string) {
 	DockerIgnore("rm", "-fv", "htm-gate-"+id)
 }

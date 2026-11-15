@@ -15,9 +15,12 @@ empty commit triggers it (one footer line per artifact):
 The bare form "Release-As: X.Y.Z" is ignored with a warning: it names no artifact.
 Upwards only: a version at or below the current one is ignored with a warning.
 Several footers for one artifact: the highest wins.
-A "Release-Notes:" trailer on that same commit is copied into the GitHub release
-notes (one bullet per trailer line). Without it, the notes fall back to
-"version set by a Release-As footer in <sha>".
+A "Release-Notes:" trailer is one GitHub release bullet. On a Release-As
+commit those trailers are the whole note, or the fallback line if there are
+none. A normal fix, feat, or perf note always includes the commit subject.
+Each Release-Notes trailer in that commit's message, and each Release-Notes
+line added in its diff (optional // or # comment prefix), is an extra bullet.
+The diff line is what remains when a squash merge keeps only the subject.
 """
 from __future__ import annotations
 
@@ -122,20 +125,67 @@ def commit_kind(subject: str, body: str) -> Optional[str]:
     return None
 
 
+# A Release-Notes bullet. The diff form allows a leading // or # comment marker.
+_NOTE = re.compile(r"^(?://\s*|#\s*)?Release-Notes:[ \t]+(\S(?:.*\S)?)\s*$")
+_ADDED_NOTE = re.compile(r"^\+(?://\s*|#\s*)?Release-Notes:[ \t]+(\S(?:.*\S)?)\s*$")
+
+
+def message_note_lines(body: str) -> List[str]:
+    found = []
+    for line in body.splitlines():
+        m = _NOTE.match(line.strip())
+        if m:
+            found.append(m.group(1).strip())
+    return found
+
+
+def diff_note_lines(sha: str) -> List[str]:
+    """Release-Notes lines added by this commit.
+
+    A squash merge onto main keeps the subject and drops the body, so a
+    trailer in the message never reaches the published notes. An added
+    source line still does.
+    """
+    r = subprocess.run(
+        ["git", "--no-pager", "show", "-U0", "--format=", "--no-ext-diff", sha],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        err = (r.stderr or "").rstrip()
+        raise SystemExit(f"command failed ({r.returncode}): git show {sha}\n{err}")
+    found = []
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("+++"):
+            continue
+        m = _ADDED_NOTE.match(line)
+        if m:
+            found.append(m.group(1).strip())
+    return found
+
+
 def log_kinds(since: Optional[str], paths: List[str]) -> List[Tuple[str, str]]:
     rng = f"{since}..HEAD" if since else "HEAD"
-    fmt = "%s%x1f%b%x1e"
+    fmt = "%H%x1f%s%x1f%b%x1e"
     args = ["git", "log", rng, "--format=" + fmt, "--"] + paths
     out = run(args, check=False)
-    rows = []
+    rows: List[Tuple[str, str]] = []
+    seen_notes = set()
     for rec in out.split("\x1e"):
         rec = rec.strip()
         if not rec:
             continue
-        subj, _, body = rec.partition("\x1f")
-        kind = commit_kind(subj.strip(), body)
+        sha, _, rest = rec.partition("\x1f")
+        subj, _, body = rest.partition("\x1f")
+        subj = subj.strip()
+        sha = sha.strip()
+        kind = commit_kind(subj, body)
         if kind:
-            rows.append((kind, subj.strip()))
+            rows.append((kind, subj))
+        for line in message_note_lines(body) + diff_note_lines(sha):
+            if line not in seen_notes:
+                rows.append(("", line))
+                seen_notes.add(line)
     return rows
 
 
@@ -235,7 +285,11 @@ def main() -> int:
             forced = None
         if forced:
             kind = "Release-As " + forced[1]
-            kinds_subj = kinds_subj + [("", line) for line in release_as_note_lines(forced[1])]
+            have = {s for _, s in kinds_subj}
+            for line in release_as_note_lines(forced[1]):
+                if line not in have:
+                    kinds_subj.append(("", line))
+                    have.add(line)
         if not kind:
             touched = run(["git", "rev-list", "-1", "HEAD", "--"] + c["paths"], check=False)
             if not prev and touched:
