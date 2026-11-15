@@ -18,7 +18,7 @@ const (
 	modelKey    = "htm-model-key"
 	modelHost   = "upstream.example"
 	modelPrefix = "/openai"
-	modelPeer   = "127.0.0.1 parent 18082 0 no-query no-digest originserver name=model"
+	modelPeer   = "127.0.0.1 parent 18082 0 no-query no-digest originserver login=PASSTHRU name=model"
 )
 
 func TestModelGate(t *testing.T) {
@@ -47,15 +47,15 @@ func TestModelGate(t *testing.T) {
 			t.Fatalf("unfilled gate file:\n%s", conf)
 		}
 	}
-	// A Squid that appends instead of replacing would forward the box Authorization.
+	// login=PASSTHRU is on the test peer: without the deny line the box Authorization is forwarded and the mock does not see only the gate key.
 	if !squidActiveLine(conf, "request_header_access Authorization deny modelhost") {
 		t.Fatal("gate file does not deny the box Authorization")
 	}
-	peerHost, peerPort, err := cachePeerHostPort(conf)
+	_, peerPort, err := cachePeerHostPort(conf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	image := buildModelImage(t, root, peerHost, peerPort)
+	image := buildModelImage(t, root, peerPort)
 	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestModelGate(t *testing.T) {
 	}
 }
 
-func buildModelImage(t *testing.T, root, peerHost, peerPort string) string {
+func buildModelImage(t *testing.T, root, peerPort string) string {
 	t.Helper()
 	ctx := t.TempDir()
 	client := filepath.Join(ctx, "modelclient")
@@ -151,14 +151,14 @@ reached() {
   out=$(wget -T 3 -S -O /dev/null "$1" 2>&1) || true
   printf '%%s\n' "$out" | grep -q 'HTTP/'
 }
-if [ -z "$gw" ] || reached "http://$gw:%s/" || reached "http://%s:%s/"; then
+if [ -z "$gw" ] || reached "http://$gw:%s/"; then
   echo UPSTREAM_OK
 else
   echo UPSTREAM_FAIL
 fi
 echo MODEL_DONE
 exec sleep 3600
-`, peerPort, peerHost, peerPort)
+`, peerPort)
 	if err := os.WriteFile(filepath.Join(ctx, "probe.sh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestModelGateDeniesBoxAuthorization(t *testing.T) {
 	conf = strings.ReplaceAll(conf, "__MODEL_PREFIX__", modelPrefix)
 	conf = strings.ReplaceAll(conf, "__MODEL_HOST__", modelHost)
 	conf = strings.ReplaceAll(conf, "__MODEL_KEY__", modelKey)
-	// A Squid that appends instead of replacing would forward the box Authorization.
+	// login=PASSTHRU is on the test peer: without the deny line the box Authorization is forwarded and the mock does not see only the gate key.
 	if !squidActiveLine(conf, "request_header_access Authorization deny modelhost") {
 		t.Fatal("gate file does not deny the box Authorization")
 	}

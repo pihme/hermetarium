@@ -73,6 +73,8 @@ Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI ima
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
 - Secrets: see §8.
 
+On both walls, the habitat may reach the gate only on TCP 3128, TCP 3130, TCP 3131, and TCP/UDP 53. Other packets from the habitat to the gate, including ICMP, are dropped.
+
 Message bodies stay out of the log. Optional decryption of ordinary HTTPS is `OPEN-HTTPS` in the gate file.
 
 The gate resolves names for the habitat. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate address, which is what a process started inside the habitat needs when it does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web: an uncommented `http_access allow` whose ACL is not `inbound`, `vendorhost`, `probe`, or `probe_dst`. The resolver forwards those queries to the same servers Squid uses. The habitat cannot resolve outside names through any resolver except the gate. Each query is an I/O log line (`protocol` `dns`, `destination` the name, `method` the type, `result` the answer). The strong-wall guest also has `127.0.0.1 localhost` in `/etc/hosts`.
