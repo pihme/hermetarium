@@ -87,7 +87,7 @@ In-process. No Docker habitat.
 | `TestRootCheckoutFromCwd` | With the env unset, a checkout working directory is the root. Cache is `<root>/.cache`. |
 | `TestRootXDGWhenNoCheckout` | Outside a checkout, root is `$XDG_DATA_HOME/hermetarium` and cache is `$XDG_CACHE_HOME/hermetarium`. |
 | `TestCacheDirExplicitRoot` | `CacheDir` follows the root argument. |
-| `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. A bumped line is decrypted and keeps the path. A spliced line is passthrough and takes the destination from SNI. |
+| `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. A bumped line is decrypted and keeps the path. A CONNECT line is `https` on the authority port. A bumped CONNECT to an IP is named from SNI and keeps that IP in `upstream`. A spliced line is passthrough, takes the destination from SNI, and keeps the upstream address from the peer or, when the peer is `-`, from the IP authority. |
 | `TestACLWantsHTTPS` | A commented `https_port` line leaves interception off. An active `https_port` with `ssl-bump` turns it on. |
 | `TestPrepareMITM` | `PrepareMITM` writes a CA certificate and keeps the private key out of the public directory. |
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
@@ -130,6 +130,14 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 `tests/data-disk` `TestDataDiskSurvivesDestroy`. Needs Docker and `/dev/kvm`. Strong wall, `--no-inbound`, a 32 MiB sparse ext4 file. The first boot writes `/data/marker`. A second `create` with that file while the first habitat is running is refused. After `destroy` the file is still there, mode `0600`. `e2fsck -p` then a read-only mount with `noexec,nosuid,nodev` shows the marker and refuses to run a program from the disk. A new `create --data` of the same file sees the marker.
 
 `TestDataDiskMountFailure`. Needs Docker and `/dev/kvm`. A file with ext4 magic `0xEF53` at offset `0x438` and no valid superblock makes create fail. The create error contains `DATA_MOUNT_FAIL` and the guest's `/dev/vdb` mount error. No container for that id is left. The inhabitant does not write `/data/marker` on the root disk.
+
+### Backup
+
+`tests/backup` `TestBackupWhileWriting`. Needs Docker and `/dev/kvm`. `restic` comes from `PATH`. When it is missing, the test downloads the pinned official linux-amd64 binary into `.cache` and does not commit it. Strong wall, `--no-inbound`, a 32 MiB data disk. The guest keeps rewriting `/data/churn` after writing `/data/known`. `omakase/backup.sh` freezes `/data` with `fsfreeze` through `hermetarium attach`, then Restic reads the host file. A restore to another directory passes `e2fsck -fn`, and `/data/known` is `known-v1`. A fake model key that exists only in the gate file, and a fake gate private key planted at `mitm/ca.key`, are absent from the snapshot listing and from the restored tree. A second backup, while the guest has changed the disk only a little, adds little data. The guest is still writing after the script returns.
+
+`tests/backup` `TestSecretRefusal`. Runs `omakase/backup.sh` with stand-in `restic`, `docker`, and `hermetarium` binaries. No Docker daemon and no KVM. The disk or the journal is `squid.conf`, a symlink to `squid.conf`, a `..` path that reaches `squid.conf`, `mitm/ca.key`, `var/<id>/`, or `var/<id>`. The script exits with the refusal and does not run `restic backup`.
+
+`tests/backup` `TestBackupThawOnResticFailure`. Needs Docker and `/dev/kvm`. Same writing habitat as `TestBackupWhileWriting`. A `restic` ahead of the real binary on `PATH` exits non-zero for `backup` after the guest is frozen. The script fails, and the guest writes a later `WRITE_n`, so the EXIT trap thawed `/data`.
 
 ### Guest Docker
 
