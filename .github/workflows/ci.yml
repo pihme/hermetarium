@@ -33,7 +33,7 @@ jobs:
           - name: model
             pkgs: ./tests/model
           - name: unit
-            pkgs: ./supervisor ./firecracker-helper ./examples/... ./porter ./tests/echo ./tests/harness ./tests/vendormock
+            pkgs: ./supervisor ./supervisor/gatedns ./firecracker-helper ./examples/... ./porter ./tests/echo ./tests/harness ./tests/vendormock
     # x86_64: Firecracker binary and kernel in the strong-wall test are x86_64.
     runs-on: ubuntu-24.04
     timeout-minutes: 40

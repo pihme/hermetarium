@@ -116,6 +116,15 @@ The address from `url` is how you talk to the habitat. `exec` runs a command on 
 ./bin/hermetarium exec YOUR_ID -- hostname
 ```
 
+`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`.
+
+```bash
+./bin/hermetarium attach YOUR_ID
+./bin/hermetarium attach YOUR_ID -- sh -c 'tty; stty size'
+```
+
+The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. Escape sequences from the habitat reach the operator's terminal as they are. This path is not in the I/O log. It opens no network route out of the habitat.
+
 The folders `examples/` and `inhabitants/` are images you build. They are not command names.
 
 ## The gate file
@@ -186,13 +195,15 @@ Ordinary HTTPS is the block marked `OPEN-HTTPS` in those same files. Comment tho
 
 The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
 
+The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate, including for a process that does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web (an `http_access allow` other than the inbound, vendor, and probe rules, which is what the `OPEN-IN` and `OPEN-HTTPS` blocks add). The habitat cannot resolve outside names through any resolver except the gate. On the strong wall the guest's `/etc/hosts` includes `127.0.0.1 localhost`.
+
 ## Logs
 
 ```bash
 ./bin/hermetarium logs YOUR_ID
 ```
 
-That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. Message bodies stay out of the log.
+That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. A DNS query is the same file with `protocol` `dns`, the name in `destination`, the type in `method`, and the answer in `result`. Message bodies stay out of the log.
 
 The same directory holds:
 

@@ -99,6 +99,25 @@ func Run(args []string) int {
 		os.Stdout.WriteString(stdout)
 		os.Stderr.WriteString(stderr)
 		return code
+	case "attach":
+		if len(rest) < 1 {
+			usage()
+			return 2
+		}
+		id := rest[0]
+		argv := rest[1:]
+		if len(argv) > 0 && argv[0] == "--" {
+			argv = argv[1:]
+		}
+		if len(argv) == 0 {
+			argv = []string{"sh"}
+		}
+		code, err := Attach(root, id, argv)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return code
 	case "url":
 		if len(rest) < 1 {
 			usage()
@@ -257,10 +276,12 @@ func usage() {
        hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--data FILE] [--data-size MiB] [--id NAME] [--no-inbound]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
+       hermetarium attach <id> [-- <cmd>]
        hermetarium logs <id>
        hermetarium destroy <id>
        hermetarium version
 
 --cpus N works on both walls: that many processors in the virtual machine (1 to 32), or that CPU quota on Docker (1 to the host CPU count). The default is one processor, and no Docker quota.
+attach opens a terminal on either wall. With no command it runs sh. Bytes on that terminal stay out of the I/O log.
 `)
 }

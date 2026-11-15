@@ -101,6 +101,67 @@ func TestWaitGuestUname(t *testing.T) {
 	})
 }
 
+func TestVsockSocketOutsideGate(t *testing.T) {
+	root := t.TempDir()
+	id := "hab"
+	dir, err := InstanceDir(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureVsockDir(root, id); err != nil {
+		t.Fatal(err)
+	}
+	sock := vsockSockPath(root, id)
+	rel, err := filepath.Rel(dir, sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// runSquid bind-mounts the instance directory. A path inside it is on the gate.
+	if rel == "." || !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("vsock socket %s is inside the gate mount %s", sock, dir)
+	}
+	for _, p := range []string{filepath.Dir(sock), filepath.Dir(filepath.Dir(sock))} {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o700 {
+			t.Fatalf("%s mode %o, want 0700", p, st.Mode().Perm())
+		}
+	}
+	src, err := os.ReadFile("strong.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), "/log/vsock.sock") || !strings.Contains(string(src), `vsockDir(root, id)+":/vsock"`) || !strings.Contains(string(src), "vsockUDSPath") {
+		t.Fatal("vsock socket is not limited to the helper mount")
+	}
+	gate, err := os.ReadFile("squid.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(gate), "vsock") {
+		t.Fatal("gate mount includes the vsock socket")
+	}
+	att, err := os.ReadFile("attach.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(att), `filepath.Join(inst.Dir, "vsock.sock")`) || !strings.Contains(string(att), "vsockSockPath(root, id)") {
+		t.Fatal("attach dials a socket inside the gate mount")
+	}
+	ep, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "entrypoint.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ep), "/log/vsock.sock") || !strings.Contains(string(ep), vsockUDSPath) {
+		t.Fatal("entrypoint keeps the vsock socket on the gate mount")
+	}
+}
+
 func TestFcHelperDirExtractsWithoutTree(t *testing.T) {
 	root := t.TempDir()
 	dir, err := fcHelperDir(root)

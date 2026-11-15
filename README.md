@@ -125,6 +125,7 @@ hermetarium logs YOUR_ID
 hermetarium destroy YOUR_ID
 hermetarium version
 hermetarium exec YOUR_ID -- <cmd>
+hermetarium attach YOUR_ID [-- <cmd>]
 ```
 
 `create` starts a habitat and prints an id. `--image` is the container. Something inside must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for one. Nothing on the host can reach port 18081, even when the gate file still listens there. `url` then prints `this habitat has no inbound address`. `--acl FILE` is the gate file. Hermetarium copies it as you wrote it.
@@ -135,7 +136,7 @@ hermetarium exec YOUR_ID -- <cmd>
 
 `url` prints the address, or `this habitat has no inbound address` when the habitat was created with `--no-inbound`. `logs` prints what passed the gate. `destroy` stops the habitat.
 
-Ask the assistant over HTTP. `exec` runs a command on the Docker wall.
+Ask the assistant over HTTP. `exec` runs a command on the Docker wall. `attach` opens a terminal on either wall. With no command it runs `sh`. Bytes on that terminal stay out of the I/O log. Escape sequences from the habitat reach the operator's terminal as they are.
 
 Walls, the lines a gate file must contain, and an image of your own are in the [usage guide](USAGE.md).
 
@@ -145,7 +146,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 
 **Squid** is the logged path. Squid runs beside the supervisor. Its license stays with Squid. Hermetarium mounts the file you pass with `--acl`. Each example and each assistant ships its gate file next to its Dockerfile. Every setting is described in the [Squid 6 config guide](https://www.squid-cache.org/Versions/v6/cfgman/).
 
-**The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. Message bodies stay out of the log.
+**The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. DNS queries are in that log too: the name, the type, and the result. Message bodies stay out of the log.
 
 **Porter** (`porter/`) is a small program inside the assistant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code and Grok Build. You can skip porter and answer on 8080 yourself. The echo image does that.
 
