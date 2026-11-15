@@ -24,10 +24,10 @@ const (
 	// Extract stamp: pinned tarball checksum, then the binary's SHA-256.
 	// A missing or different stamp is not a cache hit.
 	fcStampName = "firecracker.stamp"
-	// Firecracker publishes no checksum for CI kernels.
-	kernelURL    = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20261111-778a26c0594c-0/x86_64/vmlinux-6.1.188"
+	// Release asset kernel/6.1.188, the build from Actions run 43712585538.
+	kernelURL    = "https://github.com/pihme/hermetarium/releases/download/kernel/6.1.188/vmlinux-6.1.188"
 	kernelFile   = "vmlinux-6.1.188"
-	kernelSHA256 = "f5735774e2570d9df451fc5665f3525d3baf723fa6a8a413a03591d5742b39a5"
+	kernelSHA256 = "b5f8e93cad94f04ccda9870b9959dd39b91551684c78760a17ef9eb4376475ba"
 	// Helper-only mount. The gate bind-mounts the instance directory at /log
 	// and is root there, so a socket on that mount is a root shell.
 	vsockUDSPath = "/vsock/vsock.sock"
@@ -677,6 +677,16 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 		if strings.Contains(text, "GUEST_UNAME=") {
 			return nil
 		}
+		if !running {
+			// The marker can be written as the helper exits, after the read above.
+			text, _ = console()
+			if strings.Contains(text, "DATA_MOUNT_FAIL") {
+				return fmt.Errorf("data disk did not mount")
+			}
+			if strings.Contains(text, "GUEST_UNAME=") {
+				return nil
+			}
+		}
 		if !running || !time.Now().Before(deadline) {
 			parts := make([]string, 0, 2)
 			if fc := strings.TrimSpace(tailHostFile(filepath.Join(dir, "fc.log"))); fc != "" {
@@ -713,6 +723,14 @@ func waitDataMounted(helper string) error {
 			return nil
 		}
 		if !helperRunning(helper) {
+			// The guest can print the marker and exit between the read and this check.
+			logs = helperLogs(helper)
+			if strings.Contains(logs, "DATA_MOUNT_FAIL") {
+				return dataMountFailure(logs)
+			}
+			if strings.Contains(logs, "DATA_MOUNT_OK") {
+				return nil
+			}
 			return fmt.Errorf("helper exited before the data disk mounted: %s", logs)
 		}
 		time.Sleep(200 * time.Millisecond)
