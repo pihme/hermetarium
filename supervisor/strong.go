@@ -30,6 +30,11 @@ const (
 	kernelSHA256 = "f5735774e2570d9df451fc5665f3525d3baf723fa6a8a413a03591d5742b39a5"
 )
 
+// fcPin is the tarball checksum EnsureStrongAssets accepts. Production
+// leaves it at fcSHA256. Tests point it at a fixture so a tarball with no
+// binary can be rejected without downloading the release asset.
+var fcPin = fcSHA256
+
 const strongGuestIP = "172.16.0.2"
 
 type StrongInstance struct {
@@ -37,6 +42,7 @@ type StrongInstance struct {
 	Wall       string `json:"wall"`
 	Helper     string `json:"helper"`
 	InboundURL string `json:"inboundUrl"`
+	NoInbound  bool   `json:"noInbound"`
 	LogPath    string `json:"logPath"`
 	SerialPath string `json:"serialPath"`
 	Dir        string `json:"dir"`
@@ -149,8 +155,8 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	discardFCStampIfTarballRejected(tgz, stamp, fcSHA256)
-	if err := download(fcURL, tgz, fcSHA256); err != nil {
+	discardFCStampIfTarballRejected(tgz, stamp, fcPin)
+	if err := download(fcURL, tgz, fcPin); err != nil {
 		return "", "", err
 	}
 	current, err := fcBinaryCurrent(firecracker, stamp)
@@ -158,10 +164,14 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 		return "", "", err
 	}
 	if !current {
+		// Drop the cached binary before the copy. xargs exits 0 when find
+		// prints nothing, so chmod would succeed on the old file and the
+		// stamp would record it as this tarball. An empty path must fail
+		// the shell, and the stamp is written only after that succeeds.
 		_, err = Docker(2*time.Minute, "run", "--rm",
 			"-v", CacheDir(root)+":/out",
 			AlpineImage, "sh", "-c",
-			"apk add --no-cache tar >/dev/null && tar -xzf /out/"+filepath.Base(tgz)+" -C /tmp && find /tmp -name 'firecracker-*x86_64' ! -name '*debug*' | head -1 | xargs -I{} cp {} /out/firecracker && chmod +x /out/firecracker",
+			"apk add --no-cache tar >/dev/null && rm -f /out/firecracker && tar -xzf /out/"+filepath.Base(tgz)+" -C /tmp && bin=$(find /tmp -name 'firecracker-*x86_64' ! -name '*debug*' | head -1) && test -n \"$bin\" && cp \"$bin\" /out/firecracker && chmod +x /out/firecracker && test -f /out/firecracker",
 		)
 		if err != nil {
 			return "", "", err
@@ -296,6 +306,11 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		"--entrypoint", "sh",
 	}
 	helperArgs = append(helperArgs, inboundPublish(opts.NoInbound)...)
+	// The helper entrypoint accepts tcp/18081 from the bridge gateway unless
+	// this is set. The gate file is copied unchanged and may still listen there.
+	if opts.NoInbound {
+		helperArgs = append(helperArgs, "-e", "NO_INBOUND=1")
+	}
 	helperArgs = append(helperArgs,
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
@@ -354,7 +369,7 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		return nil, err
 	}
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", Helper: helper, InboundURL: url,
+		ID: id, Wall: "strong", Helper: helper, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")

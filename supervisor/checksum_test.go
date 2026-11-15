@@ -1,6 +1,9 @@
 package supervisor
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -107,5 +110,68 @@ func TestFirecrackerStamp(t *testing.T) {
 	}
 	if _, err := os.Stat(tgz); !os.IsNotExist(err) {
 		t.Fatal("rejected tarball was kept")
+	}
+}
+
+func TestEnsureStrongAssetsRejectsTarballWithoutBinary(t *testing.T) {
+	pin := fcPin
+	t.Cleanup(func() { fcPin = pin })
+
+	root := t.TempDir()
+	cache := CacheDir(root)
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tgzPath := filepath.Join(cache, "firecracker-"+fcVersion+"-x86_64.tgz")
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, f := range []struct{ name, body string }{
+		{"release-v1.16.1-x86_64/LICENSE", "license"},
+		{"release-v1.16.1-x86_64/firecracker-v1.16.1-x86_64.debug", "debug-only"},
+	} {
+		b := []byte(f.body)
+		if err := tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o755, Size: int64(len(b))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	if err := os.WriteFile(tgzPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	fcPin = hex.EncodeToString(sum[:])
+
+	bin := filepath.Join(cache, "firecracker")
+	if err := os.WriteFile(bin, []byte("stale-firecracker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stamp := filepath.Join(cache, fcStampName)
+
+	_, _, err := EnsureStrongAssets(root)
+	if err == nil {
+		t.Fatal("tarball without firecracker-*x86_64 was accepted")
+	}
+	if _, statErr := os.Stat(stamp); !os.IsNotExist(statErr) {
+		t.Fatalf("stamp written after failed extract: %v", statErr)
+	}
+	if _, statErr := os.Stat(bin); !os.IsNotExist(statErr) {
+		t.Fatalf("stale binary still present: %v", statErr)
+	}
+	got, err := sha256File(tgzPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fcPin {
+		t.Fatal("fixture tarball was replaced")
 	}
 }

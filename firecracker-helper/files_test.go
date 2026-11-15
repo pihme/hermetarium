@@ -42,6 +42,12 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "rootfs.ext4") {
 		t.Fatalf("pack-oci.sh missing rootfs.ext4:\n%s", b)
 	}
+	if !strings.Contains(string(b), "mke2fs -t ext4 -F -d ") || !strings.Contains(string(b), "lazy_itable_init=1,lazy_journal_init=1") {
+		t.Fatal("pack-oci.sh must build a sparse ext4 image with mke2fs -d")
+	}
+	if strings.Contains(string(b), "umount") {
+		t.Fatal("pack-oci.sh mounts the root disk")
+	}
 	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
 		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
 	}
