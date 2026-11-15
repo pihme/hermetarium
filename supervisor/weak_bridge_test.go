@@ -160,12 +160,7 @@ func TestDestroyWeakForgetError(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() {
-		DockerIgnore("rm", "-fv", "htm-box-"+id)
-		DockerIgnore("rm", "-f", "htm-probe-"+id)
-		DockerIgnore("rm", "-f", "htm-mock-"+id)
-		stopGateDNS(id)
-		removeGate(id)
-		DockerIgnore("network", "rm", "htm-"+id)
+		_ = DestroyWeak(id)
 		if bridge != "" {
 			if err := forgetSameBridge(bridge); err != nil {
 				t.Errorf("remove forward accept on %s: %v", bridge, err)
