@@ -60,12 +60,14 @@ Start the same image in a virtual machine. The defaults are 512 MiB of memory an
 To choose the size, pass MiB. The disk size is in MiB too.
 
 ```bash
-./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --image hermetarium/echo:dev --acl examples/echo/squid.conf
+./bin/hermetarium create --wall strong --mem 2048 --disk 2048 --cpus 4 --image hermetarium/echo:dev --acl examples/echo/squid.conf
 ```
 
 `--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
 
-`--mem` and `--disk` belong to the strong wall. The Docker wall refuses them.
+`--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out.
+
+`--cpus N` works on both walls. The strong wall gives the guest that many processors. The Docker wall sets that CPU quota (`--cpus`). Leave it off and the guest has one processor, and the Docker wall has no quota.
 
 Ask where it is listening:
 

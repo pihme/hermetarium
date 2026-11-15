@@ -185,12 +185,16 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	if err != nil {
 		return CreateOpts{}, err
 	}
-	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk}, nil
+	cpus, err := sizeFlag(args, "--cpus", 0)
+	if err != nil {
+		return CreateOpts{}, err
+	}
+	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus}, nil
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--id NAME]
-       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--id NAME]
+	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--cpus N] [--id NAME]
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--id NAME]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>

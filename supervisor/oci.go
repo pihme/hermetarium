@@ -23,7 +23,8 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 			id = id[:12]
 		}
 	}
-	dest, err := cacheFile(root, "rootfs-"+id+".ext4")
+	// Size is part of the name so a later --disk does not reuse another size.
+	dest, err := cacheFile(root, fmt.Sprintf("rootfs-%s-%d.ext4", id, sizeMB))
 	if err != nil {
 		return "", err
 	}
