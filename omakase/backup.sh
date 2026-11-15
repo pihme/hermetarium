@@ -284,6 +284,10 @@ ssh_never_ran() {
 }
 
 # Armed only after fsfreeze -f returns, so a slow freeze cannot eat the cushion.
+# The token is written under the same lock as fsfreeze -f. A crash before
+# setsid still leaves that token so the host can thaw. If the freeze fails,
+# the previous token is restored before this script exits, and only when it
+# is still ours, so a freeze this run did not take is left alone.
 # The spliced quotes are one script: sleep, then re-read the token under the
 # lock and thaw. setsid -f returns at once; the child survives a host SIGKILL.
 freeze_script=$(cat <<'END'
@@ -296,11 +300,44 @@ seconds=$2
 mkdir -p /tmp
 thaw_file=/tmp/hermetarium-thaw.current
 lock=/tmp/hermetarium-thaw.lock
-flock -x "$lock" sh -c 'printf "%s\n" "$1" > "$2"' sh "$token" "$thaw_file" || {
+# Exit 2 is a freeze that did not happen. The token is ours only after -f.
+rc=0
+flock -x "$lock" sh -c '
+had=0
+prev=
+if [ -f "$2" ]; then
+  had=1
+  prev=$(cat "$2" 2>/dev/null || true)
+fi
+# The redirect truncates before the write. Put the owner back if it fails.
+if ! printf "%s\n" "$1" > "$2"; then
+  if [ "$had" = 1 ]; then
+    printf "%s\n" "$prev" > "$2" || exit 1
+  else
+    rm -f "$2" || exit 1
+  fi
+  exit 1
+fi
+if fsfreeze -f /data; then
+  exit 0
+fi
+cur=$(cat "$2" 2>/dev/null || true)
+if [ "$cur" = "$1" ]; then
+  if [ "$had" = 1 ]; then
+    printf "%s\n" "$prev" > "$2" || exit 1
+  else
+    rm -f "$2" || exit 1
+  fi
+fi
+exit 2
+' sh "$token" "$thaw_file" || rc=$?
+if [ "$rc" -eq 2 ]; then
+  exit 1
+fi
+if [ "$rc" -ne 0 ]; then
   echo "could not arm the thaw timer" >&2
   exit 1
-}
-fsfreeze -f /data || exit 1
+fi
 setsid -f sh -c 'sleep "$1"; flock -x "$2" sh -c '"'"'cur=$(cat "$2" 2>/dev/null || true); if [ "$cur" = "$1" ]; then fsfreeze -u /data && printf "done\n" > "$2"; fi'"'"' sh "$3" "$4"' sh "$seconds" "$lock" "$token" "$thaw_file" </dev/null >/dev/null 2>&1 || {
   echo "could not arm the thaw timer" >&2
   exit 1

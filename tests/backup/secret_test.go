@@ -648,6 +648,162 @@ exec "$@"
 	}
 }
 
+// A failed freeze must put the previous thaw token back. The old order wrote
+// this run's token, dropped the lock, and left it there when fsfreeze -f
+// failed, so cleanup thawed a freeze it did not take.
+func TestGuestFreezeToken(t *testing.T) {
+	checkout, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const thawFile = "/tmp/hermetarium-thaw.current"
+	const previous = "previous-owner\n"
+	var leaked string
+	t.Cleanup(func() {
+		if validThawStamp(leaked) {
+			killMatching(leaked)
+		}
+	})
+
+	root := t.TempDir()
+	id := "hab1"
+	disk, journal := writeHabitat(t, root, id)
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Ahead of the real fsfreeze, so this test cannot freeze the host.
+	writeExe(t, filepath.Join(bin, "fsfreeze"), `#!/bin/sh
+printf '%s\n' "$*" >> "$FSFREEZE_LOG"
+if [ "$1" = -f ]; then
+  cp /tmp/hermetarium-thaw.current "$FREEZE_TOKEN" 2>/dev/null || true
+  if [ "$FAIL_FREEZE" = newer ]; then
+    printf '%s\n' "newer-owner" > /tmp/hermetarium-thaw.current
+    exit 1
+  fi
+  if [ "$FAIL_FREEZE" = 1 ]; then
+    exit 1
+  fi
+fi
+exit 0
+`)
+	writeExe(t, filepath.Join(bin, "restic"), `#!/bin/sh
+if [ "$1" = backup ]; then
+  cp /tmp/hermetarium-thaw.current "$TOKEN_STAMP" || exit 1
+  : > "$BACKUP_STAMP"
+fi
+exit 0
+`)
+	writeDockerStub(t, filepath.Join(bin, "docker"))
+	herm := filepath.Join(root, "hermetarium")
+	writeExe(t, herm, `#!/bin/sh
+if [ "$1" = logs ]; then
+  exit 0
+fi
+if [ "$1" != attach ]; then
+  exit 1
+fi
+shift
+shift
+if [ "$1" != "--" ]; then
+  exit 1
+fi
+shift
+exec "$@"
+`)
+
+	run := func(t *testing.T, mode string) (out string, freezeLog string, tokenAtFreeze string, tokenAtBackup string) {
+		t.Helper()
+		if err := os.WriteFile(thawFile, []byte(previous), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		freezeLog = filepath.Join(dir, "fsfreeze")
+		freezeToken := filepath.Join(dir, "at-freeze")
+		tokenStamp := filepath.Join(dir, "at-backup")
+		backupStamp := filepath.Join(dir, "backup-started")
+		extra := []string{
+			"FSFREEZE_LOG=" + freezeLog,
+			"FREEZE_TOKEN=" + freezeToken,
+			"TOKEN_STAMP=" + tokenStamp,
+			"BACKUP_STAMP=" + backupStamp,
+			"HERMETARIUM_FREEZE_SECONDS=1",
+		}
+		if mode != "" {
+			extra = append(extra, "FAIL_FREEZE="+mode)
+		}
+		cmd := exec.Command(filepath.Join(checkout, "omakase", "backup.sh"))
+		cmd.Env = scriptEnv(t, root, bin, herm, id, disk, journal, extra)
+		raw, err := cmd.CombinedOutput()
+		out = string(raw)
+		tokenAtFreeze = mustRead(freezeToken)
+		tokenAtBackup = mustRead(tokenStamp)
+		leaked = strings.TrimSpace(tokenAtFreeze)
+		if validThawStamp(leaked) {
+			killMatching(leaked)
+		}
+		if mode == "" {
+			if err != nil {
+				t.Fatalf("backup.sh: %v\n%s", err, out)
+			}
+			if _, statErr := os.Stat(backupStamp); statErr != nil {
+				t.Fatalf("restic backup did not run: %v\n%s", statErr, out)
+			}
+			return out, mustRead(freezeLog), tokenAtFreeze, tokenAtBackup
+		}
+		if err == nil {
+			t.Fatalf("backup.sh exited 0\n%s", out)
+		}
+		if _, statErr := os.Stat(backupStamp); statErr == nil {
+			t.Fatalf("restic backup started after a failed freeze\n%s", out)
+		}
+		return out, mustRead(freezeLog), tokenAtFreeze, tokenAtBackup
+	}
+
+	t.Run("failed", func(t *testing.T) {
+		_, log, atFreeze, _ := run(t, "1")
+		if !strings.Contains(log, "-f /data") {
+			t.Fatalf("freeze was not attempted\n%s", log)
+		}
+		if strings.Contains(log, "-u /data") {
+			t.Fatalf("failed freeze thawed\n%s", log)
+		}
+		if strings.TrimSpace(atFreeze) == "previous-owner" {
+			t.Fatalf("freeze ran without publishing this run's token\n%s", atFreeze)
+		}
+		if got := mustRead(thawFile); got != previous {
+			t.Fatalf("thaw token %q, want previous owner", got)
+		}
+	})
+
+	t.Run("newer", func(t *testing.T) {
+		_, log, _, _ := run(t, "newer")
+		if !strings.Contains(log, "-f /data") {
+			t.Fatalf("freeze was not attempted\n%s", log)
+		}
+		if strings.Contains(log, "-u /data") {
+			t.Fatalf("failed freeze thawed a newer owner\n%s", log)
+		}
+		if got := mustRead(thawFile); got != "newer-owner\n" {
+			t.Fatalf("thaw token %q, want the newer owner", got)
+		}
+	})
+
+	t.Run("succeeded", func(t *testing.T) {
+		_, log, atFreeze, atBackup := run(t, "")
+		if !strings.Contains(log, "-f /data") {
+			t.Fatalf("disk was not frozen\n%s", log)
+		}
+		got := strings.TrimSpace(atBackup)
+		if !validThawStamp(got) {
+			t.Fatalf("successful freeze left %q", atBackup)
+		}
+		if got == strings.TrimSpace(previous) || got != strings.TrimSpace(atFreeze) {
+			t.Fatalf("token changed around the freeze\nfreeze %q\nbackup %q", atFreeze, atBackup)
+		}
+	})
+}
+
 func mustRead(path string) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
