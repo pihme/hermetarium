@@ -14,10 +14,22 @@ chmod +x /rootfs/fc-cmd 2>/dev/null || true
 if [ -f /in/fc-env ]; then
   cp /in/fc-env /rootfs/fc-env
 fi
-# amd64 ELF, no libc: getrandom(buf, 16, 0), then exit 0 only when 16 bytes
-# came back. fc-init bounds it so a missing CPU RNG cannot stall boot.
+# Static amd64 ELF: ET_EXEC, one PT_LOAD (R+X) at vaddr 0x400000, filesz 0xa9,
+# entry 0x400078. Code is file offset 0x78. buf is in the red zone.
+#   78: 48 c7 c0 3e 01 00 00   mov rax, 0x13e   # getrandom
+#   7f: 48 8d 7c 24 f0         lea rdi, [rsp-0x10]
+#   84: 48 c7 c6 10 00 00 00   mov rsi, 0x10
+#   8b: 48 31 d2               xor rdx, rdx
+#   8e: 0f 05                  syscall
+#   90: 48 83 f8 10            cmp rax, 0x10
+#   94: 48 c7 c7 01 00 00 00   mov rdi, 1
+#   9b: 75 03                  jne 0xa0         # short by 16: rdi stays 1
+#   9d: 48 31 ff               xor rdi, rdi     # 16 bytes: exit 0
+#   a0: 48 c7 c0 3c 00 00 00   mov rax, 0x3c    # exit(rdi)
+#   a7: 0f 05                  syscall
+# fc-init bounds the call so a missing CPU RNG cannot stall boot.
 base64 -d > /rootfs/fc-getrandom << 'END'
-f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOAABAAAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAqQAAAAAAAACpAAAAAAAAAAAQAAAAAAAASMfAPgEAAEiNfCTwSMfGEAAAAEgx0g8FSIP4EEjHxwEAAAB1BUgx/0jHwDwAAAAPBQ==
+f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOAABAAAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAqQAAAAAAAACpAAAAAAAAAAAQAAAAAAAASMfAPgEAAEiNfCTwSMfGEAAAAEgx0g8FSIP4EEjHxwEAAAB1A0gx/0jHwDwAAAAPBQ==
 END
 chmod +x /rootfs/fc-getrandom
 cat > /rootfs/fc-init << 'EOF'
@@ -47,7 +59,9 @@ while [ "$i" -lt 50 ]; do
   i=$((i + 1))
 done
 echo "GUEST_RNG=$rng"
-if [ -x /bin/busybox ] && /bin/busybox timeout 2 /fc-getrandom; then
+if [ ! -x /bin/busybox ]; then
+  echo GUEST_GETRANDOM_SKIPPED
+elif /bin/busybox timeout 2 /fc-getrandom; then
   echo GUEST_GETRANDOM_OK
 else
   echo GUEST_GETRANDOM_FAIL

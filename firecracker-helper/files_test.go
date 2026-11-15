@@ -1,6 +1,7 @@
 package fchelper
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,8 +56,26 @@ func TestExtract(t *testing.T) {
 	if !strings.Contains(string(b), "echo DATA_MOUNT_OK") {
 		t.Fatal("pack-oci.sh missing DATA_MOUNT_OK")
 	}
-	if !strings.Contains(string(b), "GUEST_RNG=") || !strings.Contains(string(b), "/fc-getrandom") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_OK") {
+	if !strings.Contains(string(b), "GUEST_RNG=") || !strings.Contains(string(b), "/fc-getrandom") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_OK") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_SKIPPED") {
 		t.Fatal("pack-oci.sh must record virtio-rng and a bounded getrandom")
+	}
+	if !strings.Contains(string(b), "9b: 75 03") || !strings.Contains(string(b), "jne 0xa0") {
+		t.Fatal("pack-oci.sh getrandom listing is not the failure path")
+	}
+	var blob string
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "f0VMRg") {
+			blob = line
+			break
+		}
+	}
+	raw, err := base64.StdEncoding.DecodeString(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Listing: jne at file offset 0x9b is 75 03, and 0xa0 is mov rax, 0x3c.
+	if len(raw) < 0xa8 || raw[0x9b] != 0x75 || raw[0x9c] != 0x03 || raw[0xa0] != 0x48 || raw[0xa1] != 0xc7 {
+		t.Fatalf("getrandom failure path: %x", raw)
 	}
 
 	st1, err := os.Stat(ep)
