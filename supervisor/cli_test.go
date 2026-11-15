@@ -18,8 +18,12 @@ func TestResolveCreate(t *testing.T) {
 	if err != nil || ex.Image != "myorg/box:1" || ex.ACL != "/tmp/acl.conf" {
 		t.Fatalf("got %+v %v", ex, err)
 	}
-	if ex.MemMiB != 512 || ex.DiskMB != 1024 {
-		t.Fatalf("defaults mem=%d disk=%d", ex.MemMiB, ex.DiskMB)
+	if ex.MemMiB != 512 || ex.DiskMB != 1024 || ex.NoInbound {
+		t.Fatalf("defaults mem=%d disk=%d no-inbound=%v", ex.MemMiB, ex.DiskMB, ex.NoInbound)
+	}
+	quiet, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--no-inbound"})
+	if err != nil || !quiet.NoInbound {
+		t.Fatalf("no-inbound %+v %v", quiet, err)
 	}
 	sized, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--mem", "2048", "--disk", "4096"})
 	if err != nil || sized.MemMiB != 2048 || sized.DiskMB != 4096 {

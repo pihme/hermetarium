@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -77,12 +76,11 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		}
 	}()
 
-	if err := runSquid(root, gate, dir, []string{
+	if err := runSquid(root, gate, dir, append([]string{
 		"--network", "bridge",
 		"--add-host", "inhabitant:" + sub.Box,
 		"--sysctl", "net.ipv4.ip_forward=1",
-		"-p", fmt.Sprintf("127.0.0.1::%d", InboundPort),
-	}); err != nil {
+	}, inboundPublish(opts.NoInbound)...)); err != nil {
 		return nil, err
 	}
 	if _, err := Docker(30*time.Second, "network", "connect", "--ip", sub.Gate, network, gate); err != nil {
@@ -129,12 +127,8 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		}
 	}
 
-	hostPort, err := containerHostPort(gate, InboundPort)
+	url, err := finishInbound(gate, opts.NoInbound, 20*time.Second)
 	if err != nil {
-		return nil, err
-	}
-	url := inboundURL(hostPort)
-	if err := waitInbound(url, 20*time.Second); err != nil {
 		return nil, err
 	}
 
