@@ -1,6 +1,8 @@
 #!/bin/sh
 # Keep writing /data for the whole life of the habitat.
 echo known-v1 > /data/known
+# Stable unique bytes. The second snapshot should add only what changed.
+dd if=/dev/urandom of=/data/stable bs=1048576 count=16 status=none
 sync
 echo KNOWN_READY
 i=0

@@ -29,7 +29,8 @@ Where the repository lives and who holds its password is your choice. The script
 ```
 RESTIC_REPOSITORY=/srv/hermetarium-restic
 RESTIC_PASSWORD_FILE=/home/you/.config/hermetarium/restic-password
-HERMETARIUM_ROOT=/path/to/hermetarium
+HERMETARIUM_BACKUP_SCRIPT=/path/to/hermetarium/omakase/backup.sh
+PATH=/usr/local/bin:/usr/bin:/bin
 HERMETARIUM_ID=opencode
 HERMETARIUM_DATA_DISK=/srv/opencode.ext4
 GIT_WARDEN_JOURNAL=/srv/opencode.journal
@@ -40,12 +41,13 @@ GIT_WARDEN_JOURNAL=/srv/opencode.journal
 | `RESTIC_REPOSITORY` | Restic repository. Required. |
 | `RESTIC_PASSWORD_FILE` | File whose contents are the repository password. Required unless `RESTIC_PASSWORD` is set. |
 | `RESTIC_PASSWORD` | Password in the environment. Prefer the file. |
+| `HERMETARIUM_BACKUP_SCRIPT` | Absolute path of this script. Required. The timer runs this and nothing else. |
+| `PATH` | Command search path for the timer. Required to contain `restic`. The user manager does not use a login PATH. |
 | `HERMETARIUM_ID` | Habitat id. Required. The habitat must be running. |
 | `HERMETARIUM_DATA_DISK` | Host path passed to `create --data`. Required. It must be the disk that habitat has mounted. |
 | `GIT_WARDEN_JOURNAL` | File or directory of Git Warden's journal for this habitat. Required. |
-| `HERMETARIUM_ROOT` | Data directory. Optional. Same rule as the `hermetarium` command. |
+| `HERMETARIUM_ROOT` | Data directory. Optional. Same rule as the `hermetarium` command. Not the script path. |
 | `HERMETARIUM` | `hermetarium` binary. Optional. Otherwise `PATH`, then `$HERMETARIUM_ROOT/bin/hermetarium`. |
-| `HERMETARIUM_BACKUP_SCRIPT` | This script, when it is not `$HERMETARIUM_ROOT/omakase/backup.sh`. |
 
 This repository does not install Git Warden and does not define a journal format. Point `GIT_WARDEN_JOURNAL` at the journal you keep for that habitat.
 
@@ -55,7 +57,7 @@ Initialize the repository once, with those settings:
 restic init
 ```
 
-`restic` must be on `PATH`.
+`backup.env` sets `HERMETARIUM_BACKUP_SCRIPT` and a `PATH` that contains `restic`. The systemd user manager does not use a login `PATH`. An empty `HERMETARIUM_ROOT` is not a script path.
 
 ## Timer
 

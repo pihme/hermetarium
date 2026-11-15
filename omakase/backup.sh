@@ -144,12 +144,28 @@ done
 # attach closes stdin with SIGHUP. That can kill fsfreeze before /data is frozen.
 hold_dir=$(mktemp -d)
 frozen=0
+
+# frozen stays 1 until fsfreeze -u returns zero. A failed thaw is retried.
+thaw() {
+  attempt=1
+  while [ "$attempt" -le 5 ]; do
+    if "$bin" attach "$HERMETARIUM_ID" -- fsfreeze -u /data <&3 >&2; then
+      frozen=0
+      return 0
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      sleep 0.2
+    fi
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
 cleanup() {
   rc=${1:-$?}
   trap - EXIT INT TERM
   if [ "$frozen" = 1 ]; then
-    frozen=0
-    "$bin" attach "$HERMETARIUM_ID" -- fsfreeze -u /data <&3 >&2 || echo "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data" >&2
+    thaw || echo "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data" >&2
   fi
   exec 3>&- 2>/dev/null || true
   rm -rf "$hold_dir"
@@ -163,10 +179,11 @@ hold_fifo=$hold_dir/stdin
 mkfifo "$hold_fifo"
 exec 3<>"$hold_fifo"
 
+# The guest can freeze /data and still have attach return an error.
+frozen=1
 if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c 'sync; command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }; fsfreeze -f /data' <&3 >&2; then
   die "could not freeze /data (the habitat image needs fsfreeze from util-linux)"
 fi
-frozen=1
 
 restic backup --json --tag hermetarium \
   "$inst/io.jsonl" \
@@ -174,9 +191,6 @@ restic backup --json --tag hermetarium \
   "$journal" \
   "$disk"
 
-if "$bin" attach "$HERMETARIUM_ID" -- fsfreeze -u /data <&3 >&2; then
-  frozen=0
-else
-  frozen=0
+if ! thaw; then
   die "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data"
 fi

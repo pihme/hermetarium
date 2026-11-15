@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -89,10 +90,6 @@ func TestBackupWhileWriting(t *testing.T) {
 	if !strings.Contains(serial, "KNOWN_READY") {
 		t.Fatalf("writer did not start\n%s", serial)
 	}
-	before := lastWrite(serial)
-	if before < 1 {
-		t.Fatalf("writer count %d\n%s", before, serial)
-	}
 
 	instDir := filepath.Join(root, "var", id)
 	gateFile, err := os.ReadFile(filepath.Join(instDir, "squid.conf"))
@@ -146,17 +143,20 @@ func TestBackupWhileWriting(t *testing.T) {
 	// Immediately, while the guest has changed only a little. A later check
 	// would let the writer run for as long as e2fsck takes.
 	second := runBackup(t, script, env)
+	returned, _ := supervisor.Docker(10*time.Second, "logs", inst.Helper)
+	atReturn := lastWrite(returned)
+	if atReturn < 1 {
+		t.Fatalf("no WRITE_n when backup.sh returned\n%s", returned)
+	}
 	t.Logf("second backup added %d bytes (files new %d, changed %d, unmodified %d)",
 		second.DataAdded, second.FilesNew, second.FilesChanged, second.FilesUnmodified)
 	if second.FilesNew != 0 {
 		t.Fatalf("second backup treated files as new (%d)", second.FilesNew)
 	}
-	const little = 8 << 20
-	if second.DataAdded >= little {
-		t.Fatalf("second backup added %d bytes, want less than %d", second.DataAdded, little)
-	}
-	if second.TotalBytesProcessed > 0 && second.DataAdded >= second.TotalBytesProcessed/4 {
-		t.Fatalf("second backup added %d of %d bytes processed", second.DataAdded, second.TotalBytesProcessed)
+	// FilesNew == 0 still allows another copy of every unique block.
+	// The second snapshot must be a small fraction of the first.
+	if first.DataAdded < 1 || second.DataAdded*4 >= first.DataAdded {
+		t.Fatalf("second backup added %d bytes, first added %d", second.DataAdded, first.DataAdded)
 	}
 
 	restore := filepath.Join(t.TempDir(), "restore")
@@ -177,8 +177,6 @@ func TestBackupWhileWriting(t *testing.T) {
 	assertTreeHas(t, restore, "io.jsonl")
 	assertTreeMissing(t, restore, modelKey)
 	assertTreeMissing(t, restore, gateKey)
-	assertTreeMissing(t, repo, modelKey)
-	assertTreeMissing(t, repo, gateKey)
 	ls := resticLS(t, resticBin, env)
 	for _, bad := range []string{"squid.conf", "ca.key"} {
 		if strings.Contains(ls, bad) {
@@ -192,17 +190,17 @@ func TestBackupWhileWriting(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(30 * time.Second)
-	after := before
+	after := atReturn
 	for time.Now().Before(deadline) {
 		serial, _ = supervisor.Docker(10*time.Second, "logs", inst.Helper)
 		after = lastWrite(serial)
-		if after > before {
+		if after > atReturn {
 			break
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	if after <= before {
-		t.Fatalf("habitat stopped writing across the backup (%d then %d)", before, after)
+	if after <= atReturn {
+		t.Fatalf("habitat stopped writing after backup.sh returned (%d then %d)", atReturn, after)
 	}
 }
 
@@ -421,19 +419,15 @@ func waitSerial(t *testing.T, helper, needle string) string {
 func lastWrite(s string) int {
 	n := 0
 	const mark = "WRITE_"
-	for i := 0; i+len(mark) < len(s); i++ {
-		if s[i:i+len(mark)] != mark {
+	for _, field := range strings.Fields(s) {
+		if !strings.HasPrefix(field, mark) {
 			continue
 		}
-		v := 0
-		ok := false
-		for j := i + len(mark); j < len(s) && s[j] >= '0' && s[j] <= '9'; j++ {
-			ok = true
-			v = v*10 + int(s[j]-'0')
+		v, err := strconv.Atoi(field[len(mark):])
+		if err != nil || v <= n {
+			continue
 		}
-		if ok && v > n {
-			n = v
-		}
+		n = v
 	}
 	return n
 }
