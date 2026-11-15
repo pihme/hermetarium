@@ -31,7 +31,7 @@ The container can call the model. The rest of the web is closed. To let it fetch
 Comment these lines in. Remove the `#` at the start of each one. In the file they are marked `OPEN-IN`.
 
 ```
-acl container_out myport 3128
+acl container_out myportname intercept
 always_direct allow container_out !vendorhost
 never_direct deny container_out !vendorhost
 never_direct allow vendorhost

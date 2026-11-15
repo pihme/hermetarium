@@ -108,6 +108,14 @@ func testStrong(t *testing.T, root string) {
 		t.Log("strong wall: destroyed")
 	}()
 
+	priv, err := supervisor.Docker(10*time.Second, "inspect", "-f", "{{.HostConfig.Privileged}}", inst.Helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(priv) != "false" {
+		t.Fatalf("helper is privileged: %q", priv)
+	}
+
 	serial, waitErr := supervisor.WaitStrongSerial(inst, 90*time.Second)
 	for _, line := range strings.Split(serial, "\n") {
 		if strings.Contains(line, "GUEST_") || strings.Contains(line, "LEAK") {

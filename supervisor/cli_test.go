@@ -18,8 +18,12 @@ func TestResolveCreate(t *testing.T) {
 	if err != nil || ex.Image != "myorg/box:1" || ex.ACL != "/tmp/acl.conf" {
 		t.Fatalf("got %+v %v", ex, err)
 	}
-	if ex.MemMiB != 512 || ex.DiskMB != 1024 {
-		t.Fatalf("defaults mem=%d disk=%d", ex.MemMiB, ex.DiskMB)
+	if ex.MemMiB != 512 || ex.DiskMB != 1024 || ex.NoInbound {
+		t.Fatalf("defaults mem=%d disk=%d no-inbound=%v", ex.MemMiB, ex.DiskMB, ex.NoInbound)
+	}
+	quiet, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--no-inbound"})
+	if err != nil || !quiet.NoInbound {
+		t.Fatalf("no-inbound %+v %v", quiet, err)
 	}
 	sized, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--mem", "2048", "--disk", "4096"})
 	if err != nil || sized.MemMiB != 2048 || sized.DiskMB != 4096 {
@@ -30,6 +34,16 @@ func TestResolveCreate(t *testing.T) {
 	}
 	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--disk", "nope"}); err == nil {
 		t.Fatal("expected --disk to reject a non-integer")
+	}
+	if ex.CPUs != 0 {
+		t.Fatalf("default cpus %d", ex.CPUs)
+	}
+	withCPU, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--cpus", "4"})
+	if err != nil || withCPU.CPUs != 4 {
+		t.Fatalf("cpus %+v %v", withCPU, err)
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--cpus", "0"}); err == nil {
+		t.Fatal("expected --cpus to reject 0")
 	}
 }
 
