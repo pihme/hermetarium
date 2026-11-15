@@ -40,7 +40,12 @@ if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
   done
   mkdir -p /data
   # destroy powers the machine off. sync makes a finished write durable.
-  mount -t ext4 -o sync,noatime /dev/vdb /data || echo DATA_MOUNT_FAIL
+  # Do not start the inhabitant when the disk will not mount.
+  if ! mount -t ext4 -o sync,noatime /dev/vdb /data; then
+    echo DATA_MOUNT_FAIL
+    exit 1
+  fi
+  echo DATA_MOUNT_OK
 fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"

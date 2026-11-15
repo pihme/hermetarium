@@ -198,7 +198,16 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	if err != nil {
 		return CreateOpts{}, err
 	}
-	data := strings.TrimSpace(flag(args, "--data", ""))
+	data := ""
+	if flagPresent(args, "--data") {
+		data = strings.TrimSpace(flag(args, "--data", ""))
+		if data == "" || strings.HasPrefix(data, "-") {
+			return CreateOpts{}, fmt.Errorf("--data requires a file")
+		}
+		if strings.Contains(data, ":") {
+			return CreateOpts{}, fmt.Errorf("data disk path %s must not contain ':'", data)
+		}
+	}
 	if flagPresent(args, "--data-size") && data == "" {
 		return CreateOpts{}, fmt.Errorf("--data-size requires --data")
 	}

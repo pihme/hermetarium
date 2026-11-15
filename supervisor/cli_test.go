@@ -95,6 +95,29 @@ func TestCreateRejectsDataOnWeakWall(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsBadDataFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	cases := [][]string{
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "--mem"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "-disk.ext4"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "disk:ext4"},
+	}
+	for _, args := range cases {
+		if code := Run(args); code != 2 {
+			t.Fatalf("%v code=%d", args, code)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("created %v", entries)
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {

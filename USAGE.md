@@ -69,16 +69,22 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--cpus N` works on both walls. The strong wall gives the guest that many processors. The Docker wall sets that CPU quota (`--cpus`). Leave it off and the guest has one processor, and the Docker wall has no quota.
 
-`--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. An existing file is attached as it is and is not resized. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. A file a running habitat has open is refused. The Docker wall refuses `--data`.
+`--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
 
-To read the file on the host, stop the habitat first. `destroy` powers the machine off, so replay the journal before the read-only mount:
+Hermetarium keeps a lock beside that file, named `FILE.lock`. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.
 
 ```bash
-sudo e2fsck -p FILE
+rm FILE FILE.lock
+```
+
+To read the file on the host, stop the habitat first. `destroy` powers the machine off. Check the filesystem, then mount it read-only:
+
+```bash
+sudo e2fsck -p FILE || test $? -le 1
 sudo mount -o loop,ro,noexec,nosuid,nodev FILE /mnt
 ```
 
-`e2fsck -p` only replays the journal. `noexec,nosuid,nodev` keeps a program stored on the disk from running while you read it. Unmount the file before the next `create --data`.
+`e2fsck -p` replays the journal and applies other safe fixes. Exit status 1 means it changed the filesystem, and the read-only mount should still run. `noexec,nosuid,nodev` keeps a program stored on the disk from running while you read it. Unmount the file before the next `create --data`.
 
 Ask where it is listening:
 
