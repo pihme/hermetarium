@@ -53,18 +53,7 @@ path_under() {
 dir_holds_inode() {
   dir=$1
   shift
-  err=$(mktemp) || die "could not walk $dir"
-  status=0
-  list=$(find -P "$dir" -type f -printf '%D:%i\n' 2>"$err") || status=$?
-  walk=$(cat "$err" 2>/dev/null || true)
-  rm -f "$err"
-  if [ "$status" -ne 0 ]; then
-    if [ -n "$walk" ]; then
-      printf '%s\n' "$walk" >&2
-      exit 1
-    fi
-    die "could not walk $dir"
-  fi
+  list=$(find -P "$dir" -type f -printf '%D:%i\n') || die "could not walk $dir"
   for ino in "$@"; do
     case "
 $list
