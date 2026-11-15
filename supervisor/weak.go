@@ -309,20 +309,13 @@ fi
 // still has to be retried, because the bridge name is all destroy kept.
 // OWNED=1 means hermetarium created table ip filter. Delete only when the
 // listing is nothing but FORWARD, INPUT, and OUTPUT, each with no rules and
-// policy accept. A drop policy, another chain, a rule, or a named object stays.
+// policy accept. A drop policy, another chain, a rule, a named object, a
+// table flag, or a chain that is not the filter hook at priority 0 stays.
 // Real nft delete table removes a non-empty table and does not fail, so the
 // delete is not a content check. A delete nft refuses is listed again; the
 // test fake returns EBUSY for that path, and the marker then stays.
-const dropOwnedFilterTableScript = `filter_table_has_content() {
-  case "$1" in
-    *'"rule"'*|*'{"set":'*|*'{"map":'*|*'{"counter":'*|*'{"flowtable":'*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-# Allow-list, not a search for objects we know. A policy drop has no rule
-# and would otherwise be deleted, which fails open.
+const dropOwnedFilterTableScript = `# Allow-list. A policy drop, a table flag, or a chain that is not the
+# iptables-nft filter hook has no rule and would otherwise be deleted.
 filter_table_disposable() {
   printf '%s' "$1" | awk '
 function skip_ws() {
@@ -388,15 +381,92 @@ function parse_skip(    c, depth, instr, esc) {
   }
   badparse = 1
 }
-function parse_chain_body(    key, name, policy, c, seen_name, seen_policy) {
+function parse_number(    c, start, tok) {
+  if (badparse) return ""
+  start = i
+  c = substr(s, i, 1)
+  if (c == "-") {
+    i++
+    c = substr(s, i, 1)
+  }
+  if (c < "0" || c > "9") { badparse = 1; return "" }
+  while (i <= n) {
+    c = substr(s, i, 1)
+    if (c < "0" || c > "9") break
+    i++
+  }
+  if (i <= n && substr(s, i, 1) == ".") {
+    i++
+    c = substr(s, i, 1)
+    if (c < "0" || c > "9") { badparse = 1; return "" }
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (c < "0" || c > "9") break
+      i++
+    }
+  }
+  if (i <= n) {
+    c = substr(s, i, 1)
+    if (c == "e" || c == "E") {
+      i++
+      c = substr(s, i, 1)
+      if (c == "+" || c == "-") {
+        i++
+        c = substr(s, i, 1)
+      }
+      if (c < "0" || c > "9") { badparse = 1; return "" }
+      while (i <= n) {
+        c = substr(s, i, 1)
+        if (c < "0" || c > "9") break
+        i++
+      }
+    }
+  }
+  tok = substr(s, start, i - start)
+  return tok
+}
+function parse_table_body(    key, c) {
+  if (badparse) return
+  skip_ws()
+  if (substr(s, i, 1) != "{") { badparse = 1; return }
+  i++
+  skip_ws()
+  if (substr(s, i, 1) == "}") { i++; keep = 1; return }
+  while (i <= n && !badparse) {
+    skip_ws()
+    key = parse_string()
+    if (badparse) return
+    skip_ws()
+    if (substr(s, i, 1) != ":") { badparse = 1; return }
+    i++
+    skip_ws()
+    if (key == "family" || key == "name") parse_string()
+    else if (key == "handle") parse_number()
+    else { keep = 1; parse_skip() }
+    if (badparse) return
+    skip_ws()
+    c = substr(s, i, 1)
+    if (c == ",") { i++; continue }
+    if (c == "}") { i++; return }
+    badparse = 1
+    return
+  }
+}
+function parse_chain_body(    key, name, policy, typ, hook, prio, c, seen_name, seen_policy, seen_type, seen_hook, seen_prio) {
   if (badparse) return
   skip_ws()
   if (substr(s, i, 1) != "{") { badparse = 1; return }
   i++
   name = ""
   policy = ""
+  typ = ""
+  hook = ""
+  prio = ""
   seen_name = 0
   seen_policy = 0
+  seen_type = 0
+  seen_hook = 0
+  seen_prio = 0
   skip_ws()
   if (substr(s, i, 1) == "}") { i++; keep = 1; return }
   while (i <= n && !badparse) {
@@ -413,9 +483,21 @@ function parse_chain_body(    key, name, policy, c, seen_name, seen_policy) {
     } else if (key == "policy") {
       policy = parse_string()
       seen_policy = 1
+    } else if (key == "type") {
+      typ = parse_string()
+      seen_type = 1
+    } else if (key == "hook") {
+      hook = parse_string()
+      seen_hook = 1
+    } else if (key == "prio") {
+      prio = parse_number()
+      seen_prio = 1
+    } else if (key == "handle") {
+      parse_number()
+    } else if (key == "family" || key == "table") {
+      parse_string()
     } else {
-      c = substr(s, i, 1)
-      if (c == "{" || c == "[") keep = 1
+      keep = 1
       parse_skip()
     }
     if (badparse) return
@@ -429,6 +511,9 @@ function parse_chain_body(    key, name, policy, c, seen_name, seen_policy) {
   if (!seen_name || !seen_policy) keep = 1
   if (name != "FORWARD" && name != "INPUT" && name != "OUTPUT") keep = 1
   if (policy != "accept") keep = 1
+  if (seen_type && typ != "filter") keep = 1
+  if (seen_hook && !((name == "INPUT" && hook == "input") || (name == "FORWARD" && hook == "forward") || (name == "OUTPUT" && hook == "output"))) keep = 1
+  if (seen_prio && prio != "0") keep = 1
 }
 function parse_element(    key, c) {
   if (badparse) return
@@ -446,7 +531,8 @@ function parse_element(    key, c) {
     i++
     skip_ws()
     if (key == "chain") parse_chain_body()
-    else if (key == "metainfo" || key == "table") parse_skip()
+    else if (key == "table") parse_table_body()
+    else if (key == "metainfo") parse_skip()
     else { keep = 1; parse_skip() }
     if (badparse) return
     skip_ws()
@@ -509,9 +595,6 @@ END {
 }
 '
 }
-filter_table_keep() {
-  filter_table_has_content "$1" || ! filter_table_disposable "$1"
-}
 if [ "${OWNED:-}" = 1 ]; then
   command -v nft >/dev/null 2>&1 || {
     printf 'nft: missing\n' >&2
@@ -531,7 +614,7 @@ if [ "${OWNED:-}" = 1 ]; then
     printf 'nft: %s\n' "$rules" >&2
     exit 1
   }
-  if filter_table_keep "$rules"; then
+  if ! filter_table_disposable "$rules"; then
     exit 0
   fi
   if ! err=$(nft delete table ip filter 2>&1); then
@@ -545,7 +628,7 @@ if [ "${OWNED:-}" = 1 ]; then
       printf 'nft: %s\n' "$again" >&2
       exit 1
     }
-    if filter_table_keep "$again"; then
+    if ! filter_table_disposable "$again"; then
       exit 0
     fi
     printf 'nft: %s\n' "$err" >&2

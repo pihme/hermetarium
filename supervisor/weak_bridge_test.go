@@ -306,6 +306,16 @@ func TestNftFilterTableDrop(t *testing.T) {
 				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}},{"limit":{"name":"lim"}}]}`},
 			{name: "synproxy", owned: true, wantDelete: false, wantDrop: false,
 				json: `{"nftables":[{"chain":{"name":"FORWARD","policy":"accept"}},{"synproxy":{"name":"sp","flags":["timestamp"]}}]}`},
+			{name: "flags-string", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"table":{"family":"ip","name":"filter","handle":1,"flags":"dormant"}},{"chain":{"family":"ip","table":"filter","name":"FORWARD","handle":1,"type":"filter","hook":"forward","prio":0,"policy":"accept"}},{"chain":{"family":"ip","table":"filter","name":"INPUT","handle":2,"type":"filter","hook":"input","prio":0,"policy":"accept"}},{"chain":{"family":"ip","table":"filter","name":"OUTPUT","handle":3,"type":"filter","hook":"output","prio":0,"policy":"accept"}}]}`},
+			{name: "flags-array", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"table":{"family":"ip","name":"filter","handle":1,"flags":["dormant","persist"]}},{"chain":{"family":"ip","table":"filter","name":"FORWARD","handle":1,"type":"filter","hook":"forward","prio":0,"policy":"accept"}}]}`},
+			{name: "comment", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"family":"ip","table":"filter","name":"FORWARD","handle":1,"type":"filter","hook":"forward","prio":0,"policy":"accept","comment":"keep"}}]}`},
+			{name: "nat", owned: true, wantDelete: false, wantDrop: false,
+				json: `{"nftables":[{"chain":{"family":"ip","table":"filter","name":"FORWARD","handle":1,"type":"nat","hook":"prerouting","prio":-100,"policy":"accept"}}]}`},
+			{name: "full", owned: true, wantDelete: true, wantDrop: true,
+				json: `{"nftables":[{"table":{"family":"ip","name":"filter","handle":1}},{"chain":{"family":"ip","table":"filter","name":"INPUT","handle":2,"type":"filter","hook":"input","prio":0,"policy":"accept"}},{"chain":{"family":"ip","table":"filter","name":"FORWARD","handle":3,"type":"filter","hook":"forward","prio":0,"policy":"accept"}},{"chain":{"family":"ip","table":"filter","name":"OUTPUT","handle":4,"type":"filter","hook":"output","prio":0,"policy":"accept"}}]}`},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
