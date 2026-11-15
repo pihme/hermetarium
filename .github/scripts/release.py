@@ -17,9 +17,23 @@ Upwards only: a version at or below the current one is ignored with a warning.
 Several footers for one artifact: the highest wins.
 A "Release-Notes:" trailer on that same commit is copied into the GitHub release
 notes (one bullet per trailer line). Without it, the notes fall back to
-"version set by a Release-As footer in <sha>". A normal fix, feat, or perf
-note is the commit subject, plus each Release-Notes line added in that
-commit's diff (optional // or # comment prefix).
+"version set by a Release-As footer in <sha>".
+
+Release notes of a normal release: one bullet per fix/feat/perf commit subject,
+plus one bullet per Release-Notes line that a commit adds to the artifact's
+source (a squash merge drops the commit body, so a source line is the only
+note that reaches main). Such a line counts exactly when:
+  - it is a whole line "Release-Notes: <text>", optionally indented and
+    optionally behind a // or # comment marker, e.g.
+        // Release-Notes: <text>
+            # Release-Notes: <text>
+  - it is added in a file under that artifact's paths (the table above), and
+    the file is not a test or doc: *_test.go, *.md and anything under a
+    testdata/, fixtures/ or vendor/ directory never count;
+  - the same commit does not also remove a note with the same text (a moved
+    note is not new). Renamed files only count their changed lines.
+Notes elsewhere (tests/, docs/, .github/, examples/, inhabitants/) never count.
+The same note text appears once per release.
 """
 from __future__ import annotations
 
@@ -124,32 +138,53 @@ def commit_kind(subject: str, body: str) -> Optional[str]:
     return None
 
 
-# An added Release-Notes line. Optional // or # comment prefix.
-_ADDED_NOTE = re.compile(r"^\+(?://\s*|#\s*)?Release-Notes:[ \t]+(\S(?:.*\S)?)\s*$")
+# A Release-Notes line in a -U0 diff: + (added) or - (removed), optional
+# indentation, optional // or # comment marker.
+_DIFF_NOTE = re.compile(r"^([+-])[ \t]*(?:(?://|#)[ \t]*)?Release-Notes:[ \t]+(\S(?:.*\S)?)\s*$")
+
+# Never a source of release notes, even under an artifact's paths.
+NOTE_EXCLUDES = [
+    ":(exclude,glob)**/*_test.go",
+    ":(exclude,glob)**/*.md",
+    ":(exclude,glob)**/testdata/**",
+    ":(exclude,glob)**/fixtures/**",
+    ":(exclude,glob)**/vendor/**",
+]
 
 
-def diff_note_lines(sha: str) -> List[str]:
-    """Release-Notes lines added by this commit.
+def diff_note_lines(sha: str, paths: List[str]) -> List[str]:
+    """Release-Notes lines this commit adds under paths (see module docstring).
 
     A squash merge onto main keeps the subject and drops the body, so a
     trailer in the message never reaches the published notes. An added
-    source line still does.
+    source line still does. The diff is limited to paths minus NOTE_EXCLUDES,
+    so a large vendored or generated change elsewhere is never read.
     """
     r = subprocess.run(
-        ["git", "--no-pager", "show", "-U0", "--format=", "--no-ext-diff", sha],
+        ["git", "--no-pager", "show", "-U0", "-M", "--format=", "--no-color", "--no-ext-diff", sha, "--"]
+        + paths
+        + NOTE_EXCLUDES,
         capture_output=True,
         text=True,
     )
     if r.returncode != 0:
         err = (r.stderr or "").rstrip()
         raise SystemExit(f"command failed ({r.returncode}): git show {sha}\n{err}")
-    found = []
+    added: List[str] = []
+    removed: List[str] = []
     for line in (r.stdout or "").splitlines():
-        if line.startswith("+++"):
+        if line.startswith("+++ ") or line.startswith("--- "):
             continue
-        m = _ADDED_NOTE.match(line)
+        m = _DIFF_NOTE.match(line)
         if m:
-            found.append(m.group(1).strip())
+            text = " ".join(m.group(2).split())
+            (added if m.group(1) == "+" else removed).append(text)
+    found = []
+    for text in added:
+        if text in removed:
+            removed.remove(text)  # moved, not new
+        elif text not in found:
+            found.append(text)
     return found
 
 
@@ -171,7 +206,7 @@ def log_kinds(since: Optional[str], paths: List[str]) -> List[Tuple[str, str]]:
         kind = commit_kind(subj, body)
         if kind:
             rows.append((kind, subj))
-        for line in diff_note_lines(sha):
+        for line in diff_note_lines(sha, paths):
             if line not in seen_notes:
                 rows.append(("", line))
                 seen_notes.add(line)
