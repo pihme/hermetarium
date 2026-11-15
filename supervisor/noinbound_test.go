@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -109,6 +110,89 @@ func TestNoInbound(t *testing.T) {
 		waitGuestCmd(t, "htm-fc-"+id, "sleep")
 		assertURLSaysNone(t, id)
 	})
+}
+
+func TestNoInboundRejectedMachineConfig(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		t.Skip("/dev/kvm not available")
+	}
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureImageExists(BusyboxImage); err != nil {
+		t.Fatal(err)
+	}
+	acl := filepath.Join(t.TempDir(), "squid.conf")
+	conf := "" +
+		"http_port 127.0.0.1:3129\n" +
+		"http_port 0.0.0.0:3128 intercept\n" +
+		"visible_hostname hermetarium\n" +
+		"pid_filename /log/squid.pid\n" +
+		"coredump_dir /tmp\n" +
+		"cache_log /log/cache.log\n" +
+		"logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp\n" +
+		"access_log stdio:/log/access.log htm\n" +
+		"logfile_rotate 0\n" +
+		"shutdown_lifetime 1 seconds\n" +
+		"cache_effective_user proxy\n" +
+		"dns_v4_first on\n" +
+		"cache deny all\n" +
+		"http_access deny all\n"
+	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := newTestID(t)
+	t.Cleanup(func() { _ = DestroyStrong(id) })
+	_, err = CreateStrong(root, id, CreateOpts{
+		Image: BusyboxImage, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
+		AfterGate: func(string, string) error {
+			// Firecracker reads vm.json only after squid.pid appears, which
+			// is after this hook. vcpu_count 0 is rejected before the guest
+			// can print GUEST_UNAME=.
+			p := filepath.Join(VarDir(root), id, "vm.json")
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			var vm map[string]any
+			if err := json.Unmarshal(b, &vm); err != nil {
+				return err
+			}
+			mc, ok := vm["machine-config"].(map[string]any)
+			if !ok {
+				return errors.New("vm.json has no machine-config")
+			}
+			mc["vcpu_count"] = 0
+			raw, err := json.MarshalIndent(vm, "", "  ")
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(p, append(raw, '\n'), 0o644)
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "guest did not boot") {
+		t.Fatal(err)
+	}
+	fc, readErr := os.ReadFile(filepath.Join(VarDir(root), id, "fc.log"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	lines := strings.Split(strings.TrimSpace(string(fc)), "\n")
+	last := lines[len(lines)-1]
+	if last == "" || !strings.Contains(err.Error(), last) {
+		t.Fatalf("error missing fc.log\nerr=%v\nfc.log=%s", err, fc)
+	}
+	left, err := Docker(15*time.Second, "ps", "-a", "--filter", "name="+id, "--format", "{{.Names}}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(left) != "" {
+		t.Fatalf("containers left: %s", left)
+	}
 }
 
 func newTestID(t *testing.T) string {

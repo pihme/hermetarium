@@ -358,7 +358,18 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 		}
 	}
 
-	url, err := finishInbound(helper, opts.NoInbound, 40*time.Second)
+	// No inbound port, so the serial line is the signal the guest reached
+	// user space. It is printed only after a data disk has mounted.
+	inboundTimeout := 40 * time.Second
+	if opts.NoInbound {
+		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
+			return helperLogs(helper), helperRunning(helper)
+		}); err != nil {
+			_ = DestroyStrong(id)
+			return nil, err
+		}
+	}
+	url, err := finishInbound(helper, opts.NoInbound, inboundTimeout)
 	if err != nil {
 		_ = DestroyStrong(id)
 		return nil, err
@@ -520,6 +531,51 @@ func waitDataClaim(dir, helper string) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("data disk was not claimed")
+}
+
+// waitGuestUname blocks until fc-init prints GUEST_UNAME= on the helper
+// serial console. A dead or missing helper fails immediately. fc-init prints
+// DATA_MOUNT_FAIL and exits before that line, so a mount failure must not
+// turn into a boot timeout.
+func waitGuestUname(dir string, timeout time.Duration, console func() (string, bool)) error {
+	deadline := time.Now().Add(timeout)
+	var text string
+	var running bool
+	for {
+		text, running = console()
+		if strings.Contains(text, "DATA_MOUNT_FAIL") {
+			return fmt.Errorf("data disk did not mount")
+		}
+		if strings.Contains(text, "GUEST_UNAME=") {
+			return nil
+		}
+		if !running || !time.Now().Before(deadline) {
+			return fmt.Errorf("guest did not boot: %s", guestBootTail(dir, text))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func guestBootTail(dir, console string) string {
+	parts := make([]string, 0, 2)
+	if fc := strings.TrimSpace(tailHostFile(filepath.Join(dir, "fc.log"))); fc != "" {
+		parts = append(parts, fc)
+	}
+	serial := strings.TrimSpace(tailHostFile(filepath.Join(dir, "serial.log")))
+	if serial == "" {
+		serial = strings.TrimSpace(tailText(console))
+	}
+	if serial != "" {
+		parts = append(parts, serial)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func tailText(s string) string {
+	if len(s) > 4000 {
+		return s[len(s)-4000:]
+	}
+	return s
 }
 
 // The guest prints one of these after it tries /dev/vdb. Create does not
