@@ -1,6 +1,7 @@
 package datadisk
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,83 @@ func TestDataDiskSurvivesDestroy(t *testing.T) {
 	}
 	if _, err := os.Stat(disk); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDataDiskMountFailure(t *testing.T) {
+	if _, err := supervisor.Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		t.Skip("/dev/kvm not available")
+	}
+	root, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := buildDataImage(root); err != nil {
+		t.Fatal(err)
+	}
+	// Magic alone passes the host check. The guest mount is what must fail.
+	disk := filepath.Join(t.TempDir(), "disk.ext4")
+	f, err := os.OpenFile(disk, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{0x53, 0xEF}, 0x438); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	acl := filepath.Join(root, "examples", "echo", "squid.conf")
+	id, err := supervisor.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.DestroyStrong(id)
+	_, err = supervisor.CreateStrong(root, id, supervisor.CreateOpts{
+		Image: dataImage, ACL: acl, NoInbound: true,
+		MemMiB: 128, DiskMB: 256,
+		DataPath: disk, DataMiB: 32,
+	})
+	if err == nil {
+		t.Fatal("create succeeded")
+	}
+	if !strings.Contains(err.Error(), "did not mount") {
+		t.Fatal(err)
+	}
+	left, err := supervisor.Docker(15*time.Second, "ps", "-a", "--filter", "name="+id, "--format", "{{.Names}}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(left) != "" {
+		t.Fatalf("containers left: %s", left)
+	}
+	imageID, err := supervisor.Docker(15*time.Second, "inspect", "-f", "{{.Id}}", dataImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageID = strings.TrimPrefix(strings.TrimSpace(imageID), "sha256:")
+	if len(imageID) > 12 {
+		imageID = imageID[:12]
+	}
+	rootfs := filepath.Join(supervisor.CacheDir(root), fmt.Sprintf("rootfs-%s-256.ext4", imageID))
+	marker, err := supervisor.Docker(2*time.Minute, "run", "--rm", "--privileged", "--entrypoint", "sh",
+		"-v", rootfs+":/disk.ext4",
+		supervisor.AlpineImage, "-c", `
+set -eu
+apk add --no-cache e2fsprogs >/dev/null
+e2fsck -p /disk.ext4 || test $? -le 1
+mkdir -p /mnt
+mount -t ext4 -o loop,ro,noexec,nosuid,nodev /disk.ext4 /mnt
+if [ -e /mnt/data/marker ] || [ -e /mnt/data/runme ]; then echo INHABITANT_RAN; else echo INHABITANT_ABSENT; fi
+`)
+	if err != nil {
+		t.Fatalf("rootfs read: %v\n%s", err, marker)
+	}
+	if strings.Contains(marker, "INHABITANT_RAN") {
+		t.Fatal("inhabitant wrote /data/marker on the root disk")
 	}
 }
 
