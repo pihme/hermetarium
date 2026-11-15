@@ -131,8 +131,8 @@ Squid listens on three ports. The first is a plain local port Squid wants open. 
 
 ```
 http_port 127.0.0.1:3129
-http_port 0.0.0.0:18081 accel defaultsite=inhabitant vhost
-http_port 0.0.0.0:3128 intercept
+http_port 0.0.0.0:18081 accel defaultsite=inhabitant vhost name=inbound
+http_port 0.0.0.0:3128 intercept name=intercept
 ```
 
 The container's name on the gate is `inhabitant`. Something inside must listen on port 8080. `proxy` is the user in the Squid image.
@@ -149,10 +149,10 @@ always_direct deny all
 never_direct allow all
 ```
 
-Your door is `myport 18081`, and that traffic goes only to `inhabitant`. Squid uses the first matching line, so name `inbound` first and put the allow before the deny.
+Your door is the port named `inbound`. `myport` is not reliable once Squid is intercepting, so the gate matches `myportname` instead. That traffic goes only to `inhabitant`. Squid uses the first matching line, so name `inbound` first and put the allow before the deny.
 
 ```
-acl inbound myport 18081
+acl inbound myportname inbound
 cache_peer_access inhabitant allow inbound
 cache_peer_access inhabitant deny all
 http_access allow inbound

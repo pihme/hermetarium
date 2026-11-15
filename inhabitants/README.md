@@ -61,7 +61,7 @@ Squid listens on three ports. One is a plain local port Squid wants open. Port 1
 Logs go to `/log`. `hermetarium logs` prints them. Nothing is cached.
 
 ```
-acl inbound myport 18081
+acl inbound myportname inbound
 acl vendorhost dstdomain <the stand-in host>
 ```
 

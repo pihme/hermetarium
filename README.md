@@ -40,7 +40,7 @@ Two walls can hold that container. The container image is the same on both. A we
 
 <a id="getting-started"></a>
 
-From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container is privileged. The host itself needs no sudo.
+From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container receives `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`. The host itself needs no sudo.
 
 From source:
 
