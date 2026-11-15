@@ -36,7 +36,8 @@ iptables -t nat -A PREROUTING -s 172.16.0.0/24 -p tcp --dport 80 -j REDIRECT --t
 if grep -Eq '^[[:space:]]*https_port[[:space:]].*ssl-bump' /log/squid.conf 2>/dev/null; then
   iptables -t nat -A PREROUTING -s 172.16.0.0/24 -p tcp --dport 443 -j REDIRECT --to-ports 3130
   if [ -f /log/mitm-pub/ca.pem ]; then
-    busybox httpd -p 172.16.0.1:3131 -h /log/mitm-pub
+    # Base busybox has no httpd applet. busybox-extras installs this one.
+    /usr/sbin/httpd -p 172.16.0.1:3131 -h /log/mitm-pub
   fi
 fi
 

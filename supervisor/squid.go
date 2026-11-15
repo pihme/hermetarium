@@ -65,7 +65,9 @@ func EnsureNetTools(root string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iproute2\n"
+	// busybox-extras supplies /usr/sbin/httpd. The base busybox has no httpd applet,
+	// and the strong helper serves the gate CA with it when HTTPS is open.
+	df := "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iproute2 busybox-extras\n"
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
 		return err
 	}

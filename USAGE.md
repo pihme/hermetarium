@@ -139,7 +139,7 @@ cache_log /log/cache.log
 access_log stdio:/log/access.log htm
 ```
 
-`hermetarium logs` splits the access log on spaces. Keep this field order. The last word is the local port. Port 18081 means the line came in from you.
+`hermetarium logs` splits the access log on spaces. Keep this field order. The local port is the field after the mime type. Port 18081 means the line came in from you. A gate file may append the bump mode and the SNI after that port.
 
 ```
 logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp
@@ -186,13 +186,15 @@ Ordinary HTTPS is the block marked `OPEN-HTTPS` in those same files. Comment tho
 
 The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
 
+`examples/openweb/squid.conf` is an open-web gate file. It decrypts HTTPS, except hosts on its pass-through list, which keep their own certificate. `api.github.com` gets the bearer token from that file, and the box's `Authorization` on that host is dropped. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Deletes, contents writes, Git data writes, and repository settings are denied. The token is not in the image. Two fine-grained tokens are described in [examples/openweb/README.md](examples/openweb/README.md).
+
 ## Logs
 
 ```bash
 ./bin/hermetarium logs YOUR_ID
 ```
 
-That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. Message bodies stay out of the log.
+That reads Squid's access log, writes `var/<id>/io.jsonl`, and prints one JSON line per record. A line has `time`, `direction` (`in` or `out`), `protocol`, `destination`, `port`, `method`, `path` when the address has one, `allowed`, and `bytes`. When the gate file logs bump mode, the line also has `tls`: `decrypted` or `passthrough`. A passed-through connection is named from SNI. Message bodies stay out of the log.
 
 The same directory holds:
 
