@@ -195,7 +195,7 @@ Ordinary HTTPS is the block marked `OPEN-HTTPS` in those same files. Comment tho
 
 The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
 
-The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate, including for a process that does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web (an `http_access allow` other than the inbound, vendor, and probe rules, which is what the `OPEN-IN` and `OPEN-HTTPS` blocks add). A query to any DNS server except the gate gets no answer. On the strong wall the guest's `/etc/hosts` includes `127.0.0.1 localhost`.
+The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate, including for a process that does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web (an `http_access allow` other than the inbound, vendor, and probe rules, which is what the `OPEN-IN` and `OPEN-HTTPS` blocks add). The habitat cannot resolve outside names through any resolver except the gate. On the strong wall the guest's `/etc/hosts` includes `127.0.0.1 localhost`.
 
 ## Logs
 

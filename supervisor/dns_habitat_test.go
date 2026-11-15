@@ -27,6 +27,8 @@ func TestGateDNS(t *testing.T) {
 		"echo DNS_PROBE=$(nslookup probe.hermetarium.test 2>/dev/null | awk 'BEGIN{p=0} /^$/{p=1; next} p && /Address/ {print $NF; exit}')\n" +
 		"echo DNS_LOCAL=$(awk '/^127\\.0\\.0\\.1[[:space:]]/ {print $1; exit}' /etc/hosts)\n" +
 		"if timeout 3 nslookup example.com 1.1.1.1 >/dev/null 2>&1; then echo DNS_DIRECT=OK; else echo DNS_DIRECT=FAIL; fi\n" +
+		"ans=$(timeout 3 nslookup example.com 127.0.0.11 2>/dev/null | awk 'BEGIN{p=0} /^$/{p=1; next} p && /Address/ {print $NF; exit}')\n" +
+		"if [ -n \"$ans\" ]; then echo DNS_DOCKER=OK; else echo DNS_DOCKER=FAIL; fi\n" +
 		"echo DNS_DONE\n" +
 		"exec sleep 3600\n"
 	if err := os.WriteFile(filepath.Join(ctx, "probe.sh"), []byte(script), 0o755); err != nil {
@@ -93,6 +95,10 @@ func TestGateDNS(t *testing.T) {
 				}
 				if markerValue(logs, "DNS_DIRECT") != "FAIL" {
 					t.Fatalf("query to 1.1.1.1 was answered\n%s", logs)
+				}
+				// 127.0.0.11 is Docker's resolver. The strong wall has none.
+				if wall == "weak" && markerValue(logs, "DNS_DOCKER") != "FAIL" {
+					t.Fatalf("127.0.0.11 resolved an outside name\n%s", logs)
 				}
 				if !strings.Contains(markerValue(logs, "DNS_LOCAL"), "127.0.0.1") {
 					t.Fatalf("localhost\n%s", logs)

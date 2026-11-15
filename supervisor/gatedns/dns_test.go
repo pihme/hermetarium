@@ -49,6 +49,71 @@ func TestForwardedResult(t *testing.T) {
 	}
 }
 
+func TestMalformedPacket(t *testing.T) {
+	valid := dnsQuery("example.com", 1)
+	response := append([]byte(nil), valid...)
+	response[2] |= 0x80
+	opcode := append([]byte(nil), valid...)
+	opcode[2] |= 0x08
+	loop := []byte{0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0, 0x0C, 0, 1, 0, 1}
+	short := valid[:20]
+	pkts := []struct {
+		name string
+		pkt  []byte
+	}{
+		{"truncated-header", []byte{0x12, 0x34, 0x01, 0x00, 0, 1}},
+		{"truncated-body", short},
+		{"response", response},
+		{"opcode", opcode},
+		{"pointer-loop", loop},
+	}
+	for _, open := range []bool{false, true} {
+		state := "closed"
+		if open {
+			state = "open"
+		}
+		for _, tc := range pkts {
+			t.Run(tc.name+"/"+state, func(t *testing.T) {
+				assertNoOutsideAnswer(t, open, tc.pkt)
+			})
+		}
+	}
+}
+
+func TestLongLabel(t *testing.T) {
+	q := dnsQuery(strings.Repeat("a", 64), 1)
+	for _, open := range []bool{false, true} {
+		assertNoOutsideAnswer(t, open, q)
+	}
+}
+
+func assertNoOutsideAnswer(t *testing.T, open bool, q []byte) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "dns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &gateDNS{
+		open:  open,
+		gate:  net.ParseIP("172.16.0.1").To4(),
+		names: map[string]struct{}{"probe.hermetarium.test": {}},
+		up:    []string{"127.0.0.1"},
+		log:   f,
+	}
+	resp := g.answer(q)
+	if len(resp) != 0 {
+		t.Fatalf("open %v response rcode %d len %d", open, resp[3]&0x0F, len(resp))
+	}
+	st, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Size() != 0 {
+		b, _ := os.ReadFile(f.Name())
+		t.Fatalf("logged an answer: %s", b)
+	}
+}
+
 func dnsQuery(name string, typ uint16) []byte {
 	var b []byte
 	b = append(b, 0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0)
