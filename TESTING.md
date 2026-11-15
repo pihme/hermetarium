@@ -38,6 +38,7 @@ In-process. No Docker habitat.
 | `TestVersionCommand` | `version` exits 0 and prints `supervisor.Version`. |
 | `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the embedded helper Dockerfile. |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
+| `TestDestroyRemovesGateVolumes` | Needs Docker. Starting the gate creates the image's anonymous volumes. `DestroyWeak` and `DestroyStrong` remove those volumes. |
 | `TestInstallACL` | An empty ACL path fails. A file is copied to `<instance>/squid.conf`. |
 | `TestInstallACLMissingFile` | A missing ACL path fails with `read ACL`. |
 | `TestRootEnvWins` | `HERMETARIUM_ROOT` is the data root. Cache is `<root>/.cache`. |

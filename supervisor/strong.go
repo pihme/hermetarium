@@ -273,7 +273,7 @@ func extraFC(inst *StrongInstance) string {
 func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
-	DockerIgnore("rm", "-f", "htm-gate-"+id)
+	removeGate(id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)
 	return nil
 }

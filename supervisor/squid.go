@@ -73,6 +73,11 @@ func EnsureNetTools(root string) error {
 	return err
 }
 
+// The gate image declares volumes. -v removes those anonymous ones; bind mounts stay.
+func removeGate(id string) {
+	DockerIgnore("rm", "-fv", "htm-gate-"+id)
+}
+
 func runSquid(root, name, logDir string, extra []string) error {
 	if err := EnsureSquid(root); err != nil {
 		return err
