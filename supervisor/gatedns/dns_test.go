@@ -51,8 +51,9 @@ func TestForwardedResult(t *testing.T) {
 }
 
 func TestMalformedPacket(t *testing.T) {
-	if dnsWireLen(overlongName()) != 256 {
-		t.Fatalf("overlong wire length %d", dnsWireLen(overlongName()))
+	over := nameWithLastLabel(62)
+	if dnsWireLen(over) != 256 {
+		t.Fatalf("overlong wire length %d", dnsWireLen(over))
 	}
 	valid := dnsQuery("example.com", 1)
 	response := append([]byte(nil), valid...)
@@ -74,7 +75,7 @@ func TestMalformedPacket(t *testing.T) {
 		{"response", response},
 		{"opcode", opcode},
 		{"pointer-loop", loop},
-		{"name-over-255", dnsQuery(overlongName(), 1)},
+		{"name-over-255", dnsQuery(over, 1)},
 	}
 	for _, open := range []bool{false, true} {
 		state := "closed"
@@ -104,7 +105,7 @@ func TestLongNamesAnswerAndLog(t *testing.T) {
 		{"9-labels", nameWithLabels(9)},
 		{"10-labels", nameWithLabels(10)},
 		{"11-labels", nameWithLabels(11)},
-		{"255-octets", maxWireName()},
+		{"255-octets", nameWithLastLabel(61)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,22 +233,12 @@ func nameWithLabels(n int) string {
 	return strings.Join(parts, ".")
 }
 
-func maxWireName() string {
-	// Three 63-octet labels and one 61-octet label, plus length octets and the root, is 255.
+func nameWithLastLabel(n int) string {
 	return strings.Join([]string{
 		strings.Repeat("a", 63),
 		strings.Repeat("b", 63),
 		strings.Repeat("c", 63),
-		strings.Repeat("d", 61),
-	}, ".")
-}
-
-func overlongName() string {
-	return strings.Join([]string{
-		strings.Repeat("a", 63),
-		strings.Repeat("b", 63),
-		strings.Repeat("c", 63),
-		strings.Repeat("d", 62),
+		strings.Repeat("d", n),
 	}, ".")
 }
 
