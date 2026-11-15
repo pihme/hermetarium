@@ -43,6 +43,10 @@ func Run(args []string) int {
 			fmt.Fprintln(os.Stderr, "--mem and --disk apply only to --wall strong")
 			return 2
 		}
+		if wall != "strong" && flagPresent(rest, "--data") {
+			fmt.Fprintln(os.Stderr, "--data applies only to --wall strong")
+			return 2
+		}
 		if err := limitCPUs(wall, ex.CPUs); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
@@ -203,7 +207,31 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 	if err != nil {
 		return CreateOpts{}, err
 	}
-	return CreateOpts{Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus, NoInbound: flagPresent(args, "--no-inbound")}, nil
+	data := ""
+	if flagPresent(args, "--data") {
+		data = strings.TrimSpace(flag(args, "--data", ""))
+		if data == "" || strings.HasPrefix(data, "-") {
+			return CreateOpts{}, fmt.Errorf("--data requires a file")
+		}
+		if strings.Contains(data, ":") {
+			return CreateOpts{}, fmt.Errorf("data disk path %s must not contain ':'", data)
+		}
+	}
+	if flagPresent(args, "--data-size") && data == "" {
+		return CreateOpts{}, fmt.Errorf("--data-size requires --data")
+	}
+	dataMiB := 0
+	if data != "" {
+		dataMiB, err = sizeFlag(args, "--data-size", 1024)
+		if err != nil {
+			return CreateOpts{}, err
+		}
+	}
+	return CreateOpts{
+		Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus,
+		DataPath: data, DataMiB: dataMiB,
+		NoInbound: flagPresent(args, "--no-inbound"),
+	}, nil
 }
 
 // limitCPUs rejects a count the wall cannot apply. Zero is an omitted --cpus
@@ -229,7 +257,7 @@ func limitCPUs(wall string, cpus int) error {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--cpus N] [--id NAME] [--no-inbound]
-       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--id NAME] [--no-inbound]
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--data FILE] [--data-size MiB] [--id NAME] [--no-inbound]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium logs <id>
