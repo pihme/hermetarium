@@ -21,7 +21,8 @@ iptables -P FORWARD DROP
 # Squid shares this namespace and listens on 0.0.0.0. This container is also on
 # Docker's default bridge, so without these rules a neighbor container could send
 # requests straight to Squid and get the vendor key injected. Allow loopback,
-# replies, and from the VM only Squid (3128, 3130) and the gate CA (3131).
+# replies, and from the VM only Squid (3128, 3130), the gate CA (3131),
+# and the gate resolver (UDP and TCP 53).
 # Another listener in this netns must not be reachable from the guest, or the
 # guest could bypass Squid. The inbound port is allowed from the bridge gateway
 # (where the published port arrives) unless NO_INBOUND=1: create --no-inbound
@@ -35,6 +36,8 @@ iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -i tap0 -p tcp --dport 3128 -j ACCEPT
 iptables -A INPUT -i tap0 -p tcp --dport 3130 -j ACCEPT
 iptables -A INPUT -i tap0 -p tcp --dport 3131 -j ACCEPT
+iptables -A INPUT -i tap0 -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -i tap0 -p tcp --dport 53 -j ACCEPT
 if [ "${NO_INBOUND:-}" != 1 ]; then
   iptables -A INPUT -s "$bridge_gw" -p tcp --dport 18081 -j ACCEPT
 fi

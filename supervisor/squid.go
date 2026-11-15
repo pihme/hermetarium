@@ -149,10 +149,11 @@ func applyIntercept(netns, cidr string, https bool) error {
 // gate. Squid listens on 0.0.0.0, and the gate has an address on that bridge,
 // so without this a neighbor could send requests straight to Squid and get the
 // vendor key injected. Loopback, replies, and the habitat-side interface may
-// reach the gate. From that interface only Squid (3128 and 3130) and the gate
-// CA (3131) are accepted, so the box cannot open another listener in this
-// netns and bypass Squid. The inbound port is also accepted from the bridge
-// gateway, where the published port arrives, unless --no-inbound was set:
+// reach the gate. From that interface only Squid (3128 and 3130), the gate
+// CA (3131), and the gate resolver (UDP and TCP 53) are accepted, so the box
+// cannot open another listener in this netns and bypass Squid. The inbound
+// port is also accepted from the bridge gateway, where the published port
+// arrives, unless --no-inbound was set:
 // the gate file is copied unchanged and may still listen there. The habitat
 // side is matched by interface, not source address, because a neighbor can
 // spoof an address.
@@ -177,6 +178,8 @@ iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -i "$hab" -p tcp --dport 3128 -j ACCEPT
 iptables -A INPUT -i "$hab" -p tcp --dport 3130 -j ACCEPT
 iptables -A INPUT -i "$hab" -p tcp --dport 3131 -j ACCEPT
+iptables -A INPUT -i "$hab" -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -i "$hab" -p tcp --dport 53 -j ACCEPT
 ` + acceptInbound + `iptables -P INPUT DROP`
 	_, err = Docker(30*time.Second, "run", "--rm",
 		"--network", "container:"+gate,
