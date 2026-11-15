@@ -25,6 +25,7 @@ func TestGateFilesHardened(t *testing.T) {
 		filepath.Join(root, "examples", "echo", "squid.conf"),
 		filepath.Join(root, "examples", "agentd", "squid.conf"),
 		filepath.Join(root, "examples", "model", "squid.conf"),
+		filepath.Join(root, "examples", "openweb", "squid.conf"),
 		filepath.Join(root, "inhabitants", "claude-code", "squid.conf"),
 		filepath.Join(root, "inhabitants", "grok-build", "squid.conf"),
 	}

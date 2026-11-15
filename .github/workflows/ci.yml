@@ -32,6 +32,8 @@ jobs:
             pkgs: ./tests/data-disk
           - name: model
             pkgs: ./tests/model
+          - name: openweb
+            pkgs: ./tests/openweb
           - name: backup
             pkgs: ./tests/backup
           - name: unit
@@ -79,7 +81,9 @@ jobs:
 
       - name: Release binaries are static (glibc baseline)
         if: matrix.name == 'unit'
-        run: python3 .github/scripts/release.py --check-build
+        run: |
+          rm -f supervisor/fcattach.bin supervisor/gatedns.bin
+          python3 .github/scripts/release.py --check-build
 
 
   test:

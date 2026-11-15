@@ -22,6 +22,9 @@ type Record struct {
 	Result      string `json:"result,omitempty"`
 	Allowed     bool   `json:"allowed"`
 	Bytes       int    `json:"bytes,omitempty"`
+	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
+	// A spliced line has no URL host; the name comes from SNI.
+	TLS string `json:"tls,omitempty"`
 }
 
 func ParseSquidLine(line string) (Record, bool) {
@@ -46,12 +49,14 @@ func ParseSquidLine(line string) (Record, bool) {
 	port := 80
 	protocol := "http"
 	path := ""
+	parsedHost := false
 	if u, err := url.Parse(rawURL); err == nil {
 		if u.Scheme == "https" || u.Scheme == "http" {
 			protocol = u.Scheme
 		}
 		if u.Hostname() != "" {
 			dest = u.Hostname()
+			parsedHost = true
 		}
 		if u.Path != "" && u.Path != "/" {
 			path = u.Path
@@ -77,6 +82,19 @@ func ParseSquidLine(line string) (Record, bool) {
 			dir = "in"
 		}
 	}
+	// Bump mode and SNI follow the local port when the gate file logs them.
+	tlsMode := ""
+	if len(f) >= 12 {
+		switch f[11] {
+		case "bump":
+			tlsMode = "decrypted"
+		case "splice":
+			tlsMode = "passthrough"
+		}
+	}
+	if len(f) >= 13 && f[12] != "-" && !parsedHost {
+		dest = f[12]
+	}
 	return Record{
 		Time:        time.Unix(unix, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano),
 		Direction:   dir,
@@ -87,6 +105,7 @@ func ParseSquidLine(line string) (Record, bool) {
 		Path:        path,
 		Allowed:     !strings.Contains(status, "DENIED"),
 		Bytes:       bytes,
+		TLS:         tlsMode,
 	}, true
 }
 
