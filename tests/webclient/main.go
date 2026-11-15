@@ -27,8 +27,12 @@ func main() {
 	showUnverifiedCert("api.github.com")
 	showUnverifiedCert("pinned.example")
 	call(client, http.MethodPost, "https://api.github.com/user/repos")
+	call(client, http.MethodPost, "https://api.github.com/graphql")
+	call(client, http.MethodPatch, "https://api.github.com/repos/octo/hello")
+	call(client, http.MethodPost, "https://api.github.com/repos/octo/hello/git/refs")
 	call(client, http.MethodDelete, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
+	call(client, http.MethodGet, "http://api.github.com/user")
 	call(client, http.MethodGet, "https://other.example/")
 	fmt.Println("WEB_DONE")
 }
@@ -69,6 +73,7 @@ func call(client *http.Client, method, rawURL string) {
 			return
 		}
 		req.Header.Set("Authorization", "Bearer box-token")
+		req.Header.Add("Authorization", "bearer box-token")
 		resp, err := client.Do(req)
 		if err != nil {
 			last = err
@@ -80,7 +85,7 @@ func call(client *http.Client, method, rawURL string) {
 		if resp.StatusCode >= 500 && attempt < 7 {
 			continue
 		}
-		fmt.Printf("HTTP %s %s %d\n", method, req.URL.Host, resp.StatusCode)
+		fmt.Printf("HTTP %s %s %d\n", method, rawURL, resp.StatusCode)
 		return
 	}
 	fmt.Println("HTTP_FAIL", method, rawURL, last)

@@ -21,14 +21,7 @@ import (
 const (
 	gateToken = "htm-github-token"
 	boxToken  = "box-token"
-	// Squid will not use a cache_peer until its startup probe succeeds. The mock
-	// shares the gate netns, so on the weak wall it cannot listen before that probe.
-	peerBlock = "cache_peer api.github.com parent 443 0 no-query no-digest originserver ssl tls-cafile=/etc/ssl/certs/ca-certificates.crt name=github\n" +
-		"cache_peer_access github allow githubhost\n" +
-		"cache_peer_access github deny all\n\n" +
-		"always_direct deny githubhost\n" +
-		"never_direct allow githubhost\n"
-	directBlock = "tls_outgoing_options cafile=/log/mockca.pem\n"
+	systemCA  = "/etc/ssl/certs/ca-certificates.crt"
 )
 
 func TestOpenWeb(t *testing.T) {
@@ -46,17 +39,20 @@ func TestOpenWeb(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), peerBlock) {
-		t.Fatal("gate file has no peer block to replace for the mock")
+	shipped := string(src)
+	if !strings.Contains(shipped, "tls_outgoing_options cafile="+systemCA) || strings.Contains(shipped, "cache_peer") || strings.Contains(shipped, "never_direct allow githubhost") {
+		t.Fatal("gate file does not use the shipped origin route")
 	}
-	// The shipped file peers to api.github.com and checks its certificate.
-	// This copy connects to the mock and trusts the mock CA.
-	conf := strings.Replace(string(src), peerBlock, directBlock, 1)
+	// Trust the mock CA. The route stays the one in the shipped file.
+	conf := strings.Replace(shipped, systemCA, "/log/mockca.pem", 1)
 	conf = strings.ReplaceAll(conf, "__GITHUB_TOKEN__", gateToken)
 	// Squid checks that an intercepted name resolves to the address the box used.
 	conf = strings.Replace(conf, "cache deny all\n", "cache deny all\nhosts_file /log/hosts\n", 1)
-	if strings.Contains(conf, "__GITHUB_TOKEN__") || strings.Contains(conf, "cache_peer") {
+	if strings.Contains(conf, "__GITHUB_TOKEN__") || strings.Contains(conf, systemCA) || strings.Contains(conf, "cache_peer") {
 		t.Fatalf("unfilled gate file:\n%s", conf)
+	}
+	if strings.Count(conf, "tls_outgoing_options cafile=/log/mockca.pem") != 1 || !strings.Contains(conf, "hosts_file /log/hosts") {
+		t.Fatalf("mock CA was not the only routing change:\n%s", conf)
 	}
 	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
@@ -129,10 +125,14 @@ func TestOpenWeb(t *testing.T) {
 				t.Fatalf("pass-through saw the gate certificate\n%s", logs)
 			}
 			for _, want := range []string{
-				"HTTP POST api.github.com 200",
-				"HTTP DELETE api.github.com 403",
-				"HTTP PUT api.github.com 403",
-				"HTTP GET other.example 200",
+				"HTTP POST https://api.github.com/user/repos 200",
+				"HTTP POST https://api.github.com/graphql 403",
+				"HTTP PATCH https://api.github.com/repos/octo/hello 403",
+				"HTTP POST https://api.github.com/repos/octo/hello/git/refs 403",
+				"HTTP DELETE https://api.github.com/repos/octo/hello 403",
+				"HTTP PUT https://api.github.com/repos/octo/hello/contents/README.md 403",
+				"HTTP GET http://api.github.com/user 403",
+				"HTTP GET https://other.example/ 200",
 			} {
 				if !strings.Contains(logs, want) {
 					t.Fatalf("missing %s\n%s\n%s", want, logs, diag(id, dir))
@@ -157,6 +157,20 @@ func TestOpenWeb(t *testing.T) {
 			if !ok || put.Allowed {
 				t.Fatalf("contents %+v\n%s", put, diag(id, dir))
 			}
+			for _, deny := range []struct{ method, path string }{
+				{"POST", "/graphql"},
+				{"PATCH", "/repos/octo/hello"},
+				{"POST", "/git/refs"},
+				{"GET", "/user"},
+			} {
+				rec, found := findRec(recs, deny.method, deny.path)
+				if !found || rec.Allowed || rec.Destination != "api.github.com" {
+					t.Fatalf("%s %s %+v\n%s", deny.method, deny.path, rec, diag(id, dir))
+				}
+				if deny.path == "/user" && (rec.Path != "/user" || rec.Protocol != "http" || rec.Port != 80) {
+					t.Fatalf("cleartext %+v\n%s", rec, diag(id, dir))
+				}
+			}
 			if !hasTLS(recs, "pinned.example", "passthrough") {
 				t.Fatalf("pass-through log %+v\n%s", recs, diag(id, dir))
 			}
@@ -165,13 +179,20 @@ func TestOpenWeb(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(got)
-			if !lineHas(text, "path=/user/repos", "auth=Bearer "+gateToken) || lineHas(text, "path=/user/repos", boxToken) {
-				t.Fatalf("github auth\n%s", text)
+			reposAuth, ok := fieldAuth(text, "path=/user/repos")
+			if !ok || reposAuth != "Bearer "+gateToken || strings.Contains(reposAuth, boxToken) {
+				t.Fatalf("github auth %q\n%s", reposAuth, text)
 			}
-			if !lineHas(text, "host=other.example", "auth=Bearer "+boxToken) || lineHas(text, "host=other.example", gateToken) {
-				t.Fatalf("other host auth\n%s", text)
+			otherAuth, ok := fieldAuth(text, "host=other.example")
+			if !ok || otherAuth != "Bearer "+boxToken+", bearer "+boxToken || strings.Contains(otherAuth, gateToken) {
+				t.Fatalf("other host auth %q\n%s", otherAuth, text)
 			}
-			if strings.Contains(text, "method=DELETE") || strings.Contains(text, "/contents/") {
+			for _, line := range strings.Split(text, "\n") {
+				if strings.Contains(line, gateToken) && !strings.Contains(line, "path=/user/repos") {
+					t.Fatalf("gate token on the wrong request\n%s", text)
+				}
+			}
+			if strings.Contains(text, "method=DELETE") || strings.Contains(text, "/contents/") || strings.Contains(text, "path=/graphql") || strings.Contains(text, "method=PATCH") || strings.Contains(text, "/git/refs") || strings.Contains(text, "path=/user host") {
 				t.Fatalf("denied request reached the mock\n%s", text)
 			}
 			if wall == "weak" {
@@ -344,13 +365,17 @@ func hasTLS(recs []supervisor.Record, host, mode string) bool {
 	return false
 }
 
-func lineHas(text, a, b string) bool {
+func fieldAuth(text, sub string) (string, bool) {
 	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, a) && strings.Contains(line, b) {
-			return true
+		if !strings.Contains(line, sub) {
+			continue
+		}
+		_, auth, ok := strings.Cut(line, " auth=")
+		if ok {
+			return auth, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func betweenCert(logs, host string) string {

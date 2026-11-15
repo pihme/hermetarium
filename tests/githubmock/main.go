@@ -94,7 +94,7 @@ func getenv(k, d string) string {
 func record(w http.ResponseWriter, r *http.Request) {
 	path := os.Getenv("MOCK_REPORT")
 	if path != "" {
-		line := fmt.Sprintf("method=%s path=%s host=%s auth=%s\n", r.Method, r.URL.Path, r.Host, r.Header.Get("Authorization"))
+		line := fmt.Sprintf("method=%s path=%s host=%s auth=%s\n", r.Method, r.URL.Path, r.Host, strings.Join(r.Header.Values("Authorization"), ", "))
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err == nil {
 			_, _ = f.WriteString(line)
