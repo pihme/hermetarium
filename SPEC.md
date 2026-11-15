@@ -73,6 +73,8 @@ Hello-world implements **both** walls. CLI `create` takes `--image` (any OCI ima
 - A process that opens a connection without going through an inhabitant “tool” still appears on the I/O log.
 - Secrets: see §8.
 
+On both walls, the habitat may reach the gate only on TCP 3128, TCP 3130, TCP 3131, and TCP/UDP 53. Other packets from the habitat to the gate, including ICMP, are dropped.
+
 Message bodies stay out of the log. Optional decryption of ordinary HTTPS is `OPEN-HTTPS` in the gate file.
 
 The gate resolves names for the habitat. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate address, which is what a process started inside the habitat needs when it does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web: an uncommented `http_access allow` whose ACL is not `inbound`, `vendorhost`, `probe`, or `probe_dst`. The resolver forwards those queries to the same servers Squid uses. The habitat cannot resolve outside names through any resolver except the gate. Each query is an I/O log line (`protocol` `dns`, `destination` the name, `method` the type, `result` the answer). The strong-wall guest also has `127.0.0.1 localhost` in `/etc/hosts`.
@@ -106,6 +108,7 @@ How a credentialed destination is attached:
 | --- | --- |
 | Anthropic | `ANTHROPIC_BASE_URL` |
 | xAI | `GROK_XAI_API_BASE_URL` set to `http://grok.hermetarium.test/v1`. On Grok 1.0.77, `GROK_CLI_CHAT_PROXY_BASE_URL` does not move the sampler. The gate credential must be an xAI API key. A login session token gets 401 from `GET /v1/api-key`, and Grok stops. |
+| OpenAI-compatible | `http://model.hermetarium.test/v1`. The gate file names the upstream peer, the `Host` value, a path prefix, and the bearer key. Squid drops the box's `Authorization` and sets that key. |
 
 Fail closed if `--acl` is missing or Squid cannot start. Habitat `squid.conf` files use `__VENDOR_KEY__` for the inject header; tests substitute a mock key or a live env var before `create`. The supervisor does not read vendor API keys from its environment.
 

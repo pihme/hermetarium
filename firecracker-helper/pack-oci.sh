@@ -118,7 +118,7 @@ $IP route add default via 172.16.0.1 2>/dev/null || true
 # The image ships an empty resolv.conf, and this guest's hosts file has no localhost.
 printf 'nameserver 172.16.0.1\n' > /etc/resolv.conf
 printf '127.0.0.1 localhost\n' >> /etc/hosts
-printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test\n' >> /etc/hosts
+printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test model.hermetarium.test\n' >> /etc/hosts
 echo "GUEST_UNAME=$(uname -r)"
 if [ -x /bin/busybox ] && /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
   echo LEAK_OK

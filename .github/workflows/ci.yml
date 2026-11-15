@@ -30,6 +30,8 @@ jobs:
             pkgs: ./tests/guest-docker
           - name: data-disk
             pkgs: ./tests/data-disk
+          - name: model
+            pkgs: ./tests/model
           - name: openweb
             pkgs: ./tests/openweb
           - name: unit

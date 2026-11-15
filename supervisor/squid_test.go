@@ -3,6 +3,7 @@ package supervisor
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,6 +43,10 @@ func TestInstallACL(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "http_access deny all") {
 		t.Fatal(string(b))
+	}
+	st, err := os.Stat(filepath.Join(dir, "model-rewrite"))
+	if err != nil || st.Mode()&0o111 == 0 {
+		t.Fatalf("model-rewrite: %v", err)
 	}
 }
 
@@ -271,4 +276,25 @@ func TestEnsureNetToolsStamp(t *testing.T) {
 			t.Fatalf("stamp should be removed, stat err: %v", err)
 		}
 	})
+}
+
+func TestModelRewrite(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "model-rewrite")
+	if err := os.WriteFile(script, []byte(modelRewrite), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(line, want string) {
+		t.Helper()
+		cmd := exec.Command("sh", script, "/openai")
+		cmd.Stdin = strings.NewReader(line)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("sh %s: %v\n%s", line, err, out)
+		}
+		if got := string(out); got != want {
+			t.Fatalf("line %q\ngot  %q\nwant %q", line, got, want)
+		}
+	}
+	run("http://model.hermetarium.test -\n", "OK rewrite-url=\"http://model.hermetarium.test/openai/\"\n")
+	run("http://model.hermetarium.test/v1/chat/completions -\n", "OK rewrite-url=\"http://model.hermetarium.test/openai/v1/chat/completions\"\n")
 }
