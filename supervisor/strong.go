@@ -28,6 +28,9 @@ const (
 	kernelURL    = "https://github.com/pihme/hermetarium/releases/download/kernel/6.1.188/vmlinux-6.1.188"
 	kernelFile   = "vmlinux-6.1.188"
 	kernelSHA256 = "b5f8e93cad94f04ccda9870b9959dd39b91551684c78760a17ef9eb4376475ba"
+	// Helper-only mount. The gate bind-mounts the instance directory at /log
+	// and is root there, so a socket on that mount is a root shell.
+	vsockUDSPath = "/vsock/vsock.sock"
 )
 
 // fcPin is the tarball checksum EnsureStrongAssets accepts. Production
@@ -225,6 +228,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	defer func() {
 		if err != nil {
 			dropUnmountedRootfs(id, dir)
+			if helperFree("htm-fc-"+id) == nil {
+				_ = os.RemoveAll(vsockDir(root, id))
+			}
 		}
 	}()
 	logPath := filepath.Join(dir, "io.jsonl")
@@ -302,12 +308,23 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			"guest_mac":     "AA:FC:00:00:00:01",
 			"host_dev_name": "tap0",
 		}},
+		// CID 2 is the host. The guest CID is the attach terminal, not an IP path.
+		"vsock": map[string]any{
+			"guest_cid": 3,
+			"uds_path":  vsockUDSPath,
+		},
 	}
 	raw, err := json.MarshalIndent(vm, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "vm.json"), raw, 0o644); err != nil {
+		return nil, err
+	}
+	if err := ensureVsockDir(root, id); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(vsockSockPath(root, id)); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 
@@ -347,6 +364,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	}
 	helperArgs = append(helperArgs,
 		"-v", helperScript+":/fc-helper.sh:ro",
+		"-v", vsockDir(root, id)+":/vsock",
 		"-v", dir+":/log",
 		NetToolsImage,
 		"/fc-helper.sh",
@@ -449,6 +467,32 @@ func strongRootfsVolume(dir string) string {
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
 	dropUnmountedRootfs(id, dir)
+	if dir == "" || helperFree("htm-fc-"+id) != nil {
+		return
+	}
+	_ = os.RemoveAll(vsockDir(filepath.Dir(filepath.Dir(dir)), id))
+}
+
+// vsockDir is mode 0700 and outside the instance directory. runSquid mounts
+// that directory into the gate; this one is mounted into the helper only.
+func vsockDir(root, id string) string {
+	return filepath.Join(VarDir(root), ".vsock", id)
+}
+
+func vsockSockPath(root, id string) string {
+	return filepath.Join(vsockDir(root, id), "vsock.sock")
+}
+
+func ensureVsockDir(root, id string) error {
+	parent := filepath.Dir(vsockDir(root, id))
+	dir := vsockDir(root, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(parent, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o700)
 }
 
 // dropUnmountedRootfs removes the private rootfs when no helper container

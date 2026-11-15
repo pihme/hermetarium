@@ -1,4 +1,5 @@
 bin/
+supervisor/fcattach.bin
 .cache/
 var/
 dist/

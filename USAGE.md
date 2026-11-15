@@ -116,6 +116,15 @@ The address from `url` is how you talk to the habitat. `exec` runs a command on 
 ./bin/hermetarium exec YOUR_ID -- hostname
 ```
 
+`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`.
+
+```bash
+./bin/hermetarium attach YOUR_ID
+./bin/hermetarium attach YOUR_ID -- sh -c 'tty; stty size'
+```
+
+The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. Escape sequences from the habitat reach the operator's terminal as they are. This path is not in the I/O log. It opens no network route out of the habitat.
+
 The folders `examples/` and `inhabitants/` are images you build. They are not command names.
 
 ## The gate file
