@@ -71,7 +71,7 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. An existing file that is not ext4 is refused. If the guest cannot mount the data disk, create fails and the habitat is removed. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
 
-Hermetarium keeps a lock beside that file, named `FILE.lock`. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.
+Hermetarium keeps a lock beside that file, named `FILE.lock`. A refused file gets no lock. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.
 
 ```bash
 rm FILE FILE.lock
