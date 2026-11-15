@@ -62,7 +62,12 @@ func PrepareMITM(dir string) error {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	mitm := filepath.Join(dir, "mitm")
 	pub := filepath.Join(dir, "mitm-pub")
-	if err := replaceMITMDir(mitm); err != nil {
+	for _, path := range []string{mitm, mitm + ".replaced"} {
+		if err := removeTree(path); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(mitm, 0o755); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(pub, 0o755); err != nil {
@@ -77,43 +82,24 @@ func PrepareMITM(dir string) error {
 	return os.WriteFile(filepath.Join(pub, "ca.pem"), certPEM, 0o644)
 }
 
-// replaceMITMDir removes path and creates it empty. When the gate user owns
-// the tree, the host renames it (the parent is writable) and deletes that
-// copy from a root container.
-func replaceMITMDir(path string) error {
-	if err := os.RemoveAll(path); err != nil {
-		trash := path + ".replaced"
-		if err := os.RemoveAll(trash); err != nil {
-			if err := rmAsRoot(trash); err != nil {
-				return err
-			}
-		}
-		if err := os.Rename(path, trash); err != nil {
-			return err
-		}
-		if err := rmAsRoot(trash); err != nil {
-			return err
-		}
+// The gate user may own path. The root container mounts only this directory.
+func removeTree(path string) error {
+	if err := os.RemoveAll(path); err == nil {
+		return nil
 	}
-	return os.MkdirAll(path, 0o755)
-}
-
-func rmAsRoot(path string) error {
-	parent := filepath.Dir(path)
 	base := filepath.Base(path)
 	if base == "." || base == ".." || strings.ContainsRune(base, os.PathSeparator) {
 		return fmt.Errorf("refuse to delete %s", path)
 	}
-	_, err := Docker(60*time.Second, "run", "--rm",
-		"-v", parent+":/log",
-		"--entrypoint", "rm",
+	if _, err := Docker(60*time.Second, "run", "--rm",
+		"-v", path+":/log",
+		"--entrypoint", "find",
 		AlpineImage,
-		"-rf", "/log/"+base,
-	)
-	if err != nil {
+		"/log", "-mindepth", "1", "-delete",
+	); err != nil {
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
-	return nil
+	return os.RemoveAll(path)
 }
 
 // InitMITMDB builds the certificate store Squid uses to sign per-site certificates.

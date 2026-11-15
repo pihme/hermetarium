@@ -39,9 +39,27 @@ func TestPrepareMITM(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "mitm-pub", "ca.key")); err == nil {
 		t.Fatal("public directory contains the private key")
 	}
+	keyPEM, err := os.ReadFile(filepath.Join(dir, "mitm", "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(keyPEM)
+	if block == nil || block.Type != "RSA PRIVATE KEY" {
+		t.Fatalf("key block %v", block)
+	}
+	info, err := os.Stat(filepath.Join(dir, "mitm", "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("ca.key mode %#o, want 0600", info.Mode().Perm())
+	}
 }
 
 func TestPrepareMITMAfterGateChown(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Fatal("euid is 0; permission-denied reuse is not exercised")
+	}
 	if _, err := Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +77,22 @@ func TestPrepareMITMAfterGateChown(t *testing.T) {
 	if err := InitMITMDB(root, dir); err != nil {
 		t.Fatal(err)
 	}
+	before := parseCert(t, filepath.Join(dir, "mitm", "ca.pem"))
+	replaced := filepath.Join(dir, "mitm.replaced")
+	if err := os.MkdirAll(replaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stranded := filepath.Join(replaced, "ca.key")
+	if err := os.WriteFile(stranded, []byte("stranded-private-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Docker(60*time.Second, "run", "--rm",
+		"-v", replaced+":/log",
+		"--entrypoint", "chown",
+		AlpineImage, "-R", "nobody:nobody", "/log",
+	); err != nil {
+		t.Fatal(err)
+	}
 	if err := PrepareMITM(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -66,11 +100,25 @@ func TestPrepareMITMAfterGateChown(t *testing.T) {
 	if !cert.IsCA {
 		t.Fatal("certificate is not a CA")
 	}
+	if cert.SerialNumber.Cmp(before.SerialNumber) == 0 {
+		t.Fatal("CA was not rotated")
+	}
+	pub := parseCert(t, filepath.Join(dir, "mitm-pub", "ca.pem"))
+	if !pub.Equal(cert) {
+		t.Fatal("public certificate differs from the CA")
+	}
 	if _, err := os.Stat(filepath.Join(dir, "mitm-pub", "ca.key")); err == nil {
 		t.Fatal("public directory contains the private key")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "mitm.replaced")); err == nil {
-		t.Fatal("replaced mitm directory was left behind")
+	info, err := os.Stat(filepath.Join(dir, "mitm", "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("ca.key mode %#o, want 0600", info.Mode().Perm())
+	}
+	if _, err := os.Stat(stranded); !os.IsNotExist(err) {
+		t.Fatalf("stranded ca.key still present: %v", err)
 	}
 	keyPEM, err := os.ReadFile(filepath.Join(dir, "mitm", "ca.key"))
 	if err != nil {
