@@ -177,7 +177,7 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 	return firecracker, kernel, nil
 }
 
-func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
+func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err error) {
 	// Return before the rootfs copy. A live htm-fc-<id> still has that
 	// file open, and a second copy would replace it.
 	helper := "htm-fc-" + id
@@ -211,6 +211,13 @@ func CreateStrong(root, id string, opts CreateOpts) (*StrongInstance, error) {
 	if _, err := habitatRootfs(dir, cached); err != nil {
 		return nil, err
 	}
+	// The copy is in place before docker run. On a later error, remove it
+	// only when htm-fc-<id> does not exist. An existing helper keeps its disk.
+	defer func() {
+		if err != nil {
+			dropUnmountedRootfs(id, dir)
+		}
+	}()
 	logPath := filepath.Join(dir, "io.jsonl")
 	serialPath := filepath.Join(dir, "serial.log")
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
@@ -413,6 +420,12 @@ func strongRootfsVolume(dir string) string {
 // --data file are not in that directory.
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
+	dropUnmountedRootfs(id, dir)
+}
+
+// dropUnmountedRootfs removes the private rootfs when no helper container
+// has this id. The cache and the operator --data file are not in dir.
+func dropUnmountedRootfs(id, dir string) {
 	if err := helperFree("htm-fc-" + id); err != nil {
 		return
 	}

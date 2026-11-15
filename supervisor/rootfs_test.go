@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestHabitatRootfsIsPrivate(t *testing.T) {
@@ -286,6 +287,93 @@ func TestRemovePrivateRootfs(t *testing.T) {
 		{partial, "part"},
 		{sized, "sized"},
 		{orphan, "orphan"},
+	} {
+		b, err := os.ReadFile(pair.path)
+		if err != nil || string(b) != pair.body {
+			t.Fatalf("%s: %v %q", pair.path, err, b)
+		}
+	}
+}
+
+func TestDropUnmountedRootfs(t *testing.T) {
+	if _, err := Docker(5*time.Second, "info"); err != nil {
+		t.Skip(err)
+	}
+	root := t.TempDir()
+	absent, err := NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := plantRootfsFixture(t, root, absent)
+	dropUnmountedRootfs(absent, filepath.Dir(kept.priv))
+	if _, err := os.Lstat(kept.priv); !os.IsNotExist(err) {
+		t.Fatalf("private rootfs after failed create: %v", err)
+	}
+	kept.unchanged(t)
+
+	present, err := NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := plantRootfsFixture(t, root, present)
+	name := "htm-fc-" + present
+	if _, err := Docker(30*time.Second, "create", "--name", name, AlpineImage, "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
+	dropUnmountedRootfs(present, filepath.Dir(live.priv))
+	if b, err := os.ReadFile(live.priv); err != nil || string(b) != "priv" {
+		t.Fatalf("private rootfs while helper exists: %v %q", err, b)
+	}
+	live.unchanged(t)
+}
+
+type rootfsFixture struct {
+	priv    string
+	partial string
+	data    string
+	sized   string
+	orphan  string
+}
+
+func plantRootfsFixture(t *testing.T, root, id string) rootfsFixture {
+	t.Helper()
+	dir := filepath.Join(VarDir(root), id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(root, ".cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fx := rootfsFixture{
+		priv:    habitatRootfsPath(dir),
+		partial: habitatRootfsPath(dir) + ".partial",
+		data:    filepath.Join(dir, "disk.ext4"),
+		sized:   filepath.Join(cacheDir, "rootfs-img-256.ext4"),
+		orphan:  filepath.Join(cacheDir, "rootfs-"+id+".ext4"),
+	}
+	for _, pair := range []struct{ path, body string }{
+		{fx.priv, "priv"},
+		{fx.partial, "part"},
+		{fx.data, "data"},
+		{fx.sized, "sized"},
+		{fx.orphan, "orphan"},
+	} {
+		if err := os.WriteFile(pair.path, []byte(pair.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return fx
+}
+
+func (fx rootfsFixture) unchanged(t *testing.T) {
+	t.Helper()
+	for _, pair := range []struct{ path, body string }{
+		{fx.partial, "part"},
+		{fx.data, "data"},
+		{fx.sized, "sized"},
+		{fx.orphan, "orphan"},
 	} {
 		b, err := os.ReadFile(pair.path)
 		if err != nil || string(b) != pair.body {
