@@ -447,7 +447,10 @@ func dropUnmountedRootfs(id, dir string) {
 }
 
 func removePrivateRootfs(dir string) {
-	_ = os.Remove(habitatRootfsPath(dir))
+	path := habitatRootfsPath(dir)
+	_ = os.Remove(path)
+	// A killed copy leaves the partial. Remove does not follow a symlink.
+	_ = os.Remove(path + ".partial")
 }
 
 func WaitStrongSerial(inst *StrongInstance, timeout time.Duration) (string, error) {
