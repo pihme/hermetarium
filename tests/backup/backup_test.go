@@ -73,11 +73,11 @@ func TestBackupWhileWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst, err := supervisor.CreateStrong(root, id, supervisor.CreateOpts{
+	inst, err := supervisor.CreateStrong(root, id, supervisor.WithTestLabel(t, supervisor.CreateOpts{
 		Image: backupImage, ACL: acl, NoInbound: true,
 		MemMiB: 128, DiskMB: 256,
 		DataPath: disk, DataMiB: 32,
-	})
+	}))
 	if err != nil {
 		_ = supervisor.DestroyStrong(id)
 		t.Fatal(err)

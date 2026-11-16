@@ -357,9 +357,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	helperArgs = append(helperArgs,
 		"-v", helperScript+":/fc-helper.sh:ro",
 		"-v", dir+":/log",
-		NetToolsImage,
-		"/fc-helper.sh",
 	)
+	helperArgs = append(helperArgs, TestLabelArgs(opts.TestLabel)...)
+	helperArgs = append(helperArgs, NetToolsImage, "/fc-helper.sh")
 	if _, err := Docker(30*time.Second, helperArgs...); err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		endStrong(id, dir)
 		return nil, err
 	}
-	if err := runSquid(root, gate, dir, []string{"--network", "container:" + helper}); err != nil {
+	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + helper}); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if err := startGateDNS(root, id, helper, gate, strongGateIP, conf); err != nil {
+	if err := startGateDNS(root, id, helper, gate, strongGateIP, opts.TestLabel, conf); err != nil {
 		if !helperRunning(helper) {
 			err = waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 				return helperLogs(helper), helperRunning(helper)

@@ -22,7 +22,7 @@ func testWall(t *testing.T, root string, strong bool) {
 		t.Fatal(err)
 	}
 	if strong {
-		inst, err := harness.CreateStrongAgentd(root, id, true)
+		inst, err := harness.CreateStrongAgentd(t, root, id, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +31,7 @@ func testWall(t *testing.T, root string, strong bool) {
 		harness.Exercise(t, inst.InboundURL, inst.Dir, inst.LogPath, supervisor.ClaudeHost)
 		return
 	}
-	inst, err := harness.CreateWeakAgentd(root, id, true)
+	inst, err := harness.CreateWeakAgentd(t, root, id, true)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ func TestOfficialCLILive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			inst, err := harness.CreateWeakInhabitant(root, id, tc.name, false)
+			inst, err := harness.CreateWeakInhabitant(t, root, id, tc.name, false)
 			if err != nil {
 				t.Fatal(err)
 			}

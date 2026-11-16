@@ -41,7 +41,7 @@ func TestCPUs(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = DestroyWeak(id) })
-		if _, err := CreateWeak(root, id, opts); err != nil {
+		if _, err := CreateWeak(root, id, WithTestLabel(t, opts)); err != nil {
 			t.Fatal(err)
 		}
 		stdout, stderr, code := ExecWeak(&WeakInstance{Box: "htm-box-" + id}, []string{"cat", "/sys/fs/cgroup/cpu.max"})
@@ -59,7 +59,7 @@ func TestCPUs(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = DestroyStrong(id) })
-		inst, err := CreateStrong(root, id, opts)
+		inst, err := CreateStrong(root, id, WithTestLabel(t, opts))
 		if err != nil {
 			t.Fatal(err)
 		}

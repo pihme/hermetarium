@@ -53,7 +53,7 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 		return "", err
 	}
 	cid = strings.TrimSpace(cid)
-	defer DockerIgnore("rm", "-f", cid)
+	defer DockerIgnore("rm", "-fv", cid)
 
 	work := filepath.Join(CacheDir(root), "oci-"+id)
 	if err := os.MkdirAll(work, 0o755); err != nil {

@@ -32,11 +32,11 @@ func testArbitraryImage(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	t.Logf("arbitrary --image %s create %s", harness.EchoImage, id)
-	inst, err := supervisor.CreateWeak(root, id, supervisor.CreateOpts{
+	inst, err := supervisor.CreateWeak(root, id, supervisor.WithTestLabel(t, supervisor.CreateOpts{
 		Image:  harness.EchoImage,
 		ACL:    filepath.Join(root, "examples", "echo", "squid.conf"),
 		MemMiB: 128, DiskMB: 256,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func testWeak(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	t.Logf("weak wall: create %s", id)
-	inst, err := harness.CreateWeakEcho(root, id)
+	inst, err := harness.CreateWeakEcho(t, root, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func testStrong(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	t.Logf("strong wall: create %s", id)
-	inst, err := harness.CreateStrongEcho(root, id)
+	inst, err := harness.CreateStrongEcho(t, root, id)
 	if err != nil {
 		t.Fatal(err)
 	}

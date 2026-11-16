@@ -89,23 +89,25 @@ func TestOpenWeb(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(instDir, "mockca.pem"), ca, 0o644); err != nil {
 				t.Fatal(err)
 			}
+			label := supervisor.TrackTestContainers(t)
 			opts := supervisor.CreateOpts{
 				Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
+				TestLabel: label,
 				AfterGate: func(hid, netns string) error {
-					return startGitHubMock(mockBin, hid, netns, report)
+					return startGitHubMock(mockBin, hid, netns, report, label)
 				},
 			}
 			var dir string
 			if wall == "weak" {
 				t.Cleanup(func() { _ = supervisor.DestroyWeak(id) })
-				inst, err := supervisor.CreateWeak(root, id, opts)
+				inst, err := supervisor.CreateWeak(root, id, supervisor.WithTestLabel(t, opts))
 				if err != nil {
 					t.Fatal(err)
 				}
 				dir = inst.Dir
 			} else {
 				t.Cleanup(func() { _ = supervisor.DestroyStrong(id) })
-				inst, err := supervisor.CreateStrong(root, id, opts)
+				inst, err := supervisor.CreateStrong(root, id, supervisor.WithTestLabel(t, opts))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -262,20 +264,21 @@ func buildMock(t *testing.T, root string) string {
 	return bin
 }
 
-func startGitHubMock(bin, id, netns, report string) error {
+func startGitHubMock(bin, id, netns, report, label string) error {
 	if err := supervisor.EnsureImageExists(supervisor.AlpineImage); err != nil {
 		return err
 	}
-	_, err := supervisor.Docker(30*time.Second,
-		"run", "-d", "--name", "htm-mock-"+id,
-		"--network", "container:"+netns,
+	args := []string{
+		"run", "-d", "--name", "htm-mock-" + id,
+		"--network", "container:" + netns,
 		"-e", "MOCK_REPORT=/report/got",
 		"-e", "CERT_DIR=/report",
-		"-v", bin+":/usr/local/bin/github-mock:ro",
-		"-v", report+":/report",
-		supervisor.AlpineImage,
-		"/usr/local/bin/github-mock",
-	)
+		"-v", bin + ":/usr/local/bin/github-mock:ro",
+		"-v", report + ":/report",
+	}
+	args = append(args, supervisor.TestLabelArgs(label)...)
+	args = append(args, supervisor.AlpineImage, "/usr/local/bin/github-mock")
+	_, err := supervisor.Docker(30*time.Second, args...)
 	return err
 }
 

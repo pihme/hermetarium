@@ -91,7 +91,7 @@ func TestDestroyWeakMissingNetTools(t *testing.T) {
 		}
 	})
 	acl := filepath.Join(root, "examples", "echo", "squid.conf")
-	if _, err := CreateWeak(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true}); err != nil {
+	if _, err := CreateWeak(root, id, WithTestLabel(t, CreateOpts{Image: image, ACL: acl, NoInbound: true})); err != nil {
 		t.Fatal(err)
 	}
 	network := "htm-" + id
@@ -170,7 +170,7 @@ func TestDestroyWeakForgetError(t *testing.T) {
 		}
 	})
 	acl := filepath.Join(root, "examples", "echo", "squid.conf")
-	if _, err := CreateWeak(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true}); err != nil {
+	if _, err := CreateWeak(root, id, WithTestLabel(t, CreateOpts{Image: image, ACL: acl, NoInbound: true})); err != nil {
 		t.Fatal(err)
 	}
 	namePath := filepath.Join(VarDir(root), id, "bridge.name")

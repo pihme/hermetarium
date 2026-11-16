@@ -28,12 +28,12 @@ func TestGuestDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("strong wall docker: create %s", id)
-	inst, err := supervisor.CreateStrong(root, id, supervisor.CreateOpts{
+	inst, err := supervisor.CreateStrong(root, id, supervisor.WithTestLabel(t, supervisor.CreateOpts{
 		Image:  guestDockerImage,
 		ACL:    filepath.Join(root, "examples", "echo", "squid.conf"),
 		MemMiB: 2048,
 		DiskMB: 2048,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

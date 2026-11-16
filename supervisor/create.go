@@ -28,6 +28,11 @@ type CreateOpts struct {
 	// does not accept the inbound port from the bridge gateway. The strong
 	// wall still waits until the guest prints GUEST_UNAME=.
 	NoInbound bool
+
+	// TestLabel is applied as hermetarium.test=<value> to containers this
+	// create starts (gate, box, DNS, Firecracker helper). Empty for the
+	// operator CLI; tests set it so cleanup is scoped to one test.
+	TestLabel string
 }
 
 func VendorHosts() []string {

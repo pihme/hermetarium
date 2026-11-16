@@ -33,7 +33,7 @@ func ACLOpensWeb(conf []byte) bool {
 	return false
 }
 
-func startGateDNS(root, id, netns, gateContainer, gateIP string, conf []byte) error {
+func startGateDNS(root, id, netns, gateContainer, gateIP, label string, conf []byte) error {
 	bin, err := ensureGateDNSBin(root)
 	if err != nil {
 		return err
@@ -64,13 +64,15 @@ func startGateDNS(root, id, netns, gateContainer, gateIP string, conf []byte) er
 		return err
 	}
 	name := "htm-dns-" + id
-	if _, err := Docker(30*time.Second, "run", "-d", "--name", name,
-		"--network", "container:"+netns,
-		"-v", dir+":/log",
-		"-v", bin+":/gatedns:ro",
+	args := []string{"run", "-d", "--name", name,
+		"--network", "container:" + netns,
+		"-v", dir + ":/log",
+		"-v", bin + ":/gatedns:ro",
 		"--entrypoint", "/gatedns",
-		AlpineImage,
-	); err != nil {
+	}
+	args = append(args, TestLabelArgs(label)...)
+	args = append(args, AlpineImage)
+	if _, err := Docker(30*time.Second, args...); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(5 * time.Second)
