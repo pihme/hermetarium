@@ -283,7 +283,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	// this is set. The gate file is copied unchanged and may still listen there.
 	fcArgs = append(fcArgs, "-e", "GATE_IP="+plan.Gate, "-e", "GUEST_IP="+plan.Guest, "-e", "GATE_CIDR="+plan.CIDR, "-e", "GATE_PREFIX="+strconv.Itoa(plan.Prefix))
 	if https {
-		fcArgs = append(fcArgs, "-e", "GATE_HTTPS=1")
+		fcArgs = append(fcArgs, "-e", "GATE_HTTPS=1", "-e", "GATE_CA_PORT="+strconv.Itoa(GateCAPort))
 	}
 	if opts.NoInbound {
 		fcArgs = append(fcArgs, "-e", "NO_INBOUND=1")
@@ -313,8 +313,8 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	// Firecracker starts only after squid.pid and dns.ready. DNS stays down
-	// until the certificate server is up, so the guest cannot fetch the CA
-	// before it is served. A container that has already exited hides the boot error.
+	// until httpd has accepted, so the guest cannot fetch the CA before it
+	// is served. A container that has already exited hides the boot error.
 	inboundTimeout := 40 * time.Second
 	if !containerRunning(fcContainer) {
 		err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
@@ -328,7 +328,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	if https {
-		if err := serveGateCA(id, fcContainer, plan.Gate, opts.TestLabel, dir); err != nil {
+		if err := waitGateCA(dir, fcContainer); err != nil {
 			endStrong(id, dir)
 			return nil, err
 		}
@@ -504,7 +504,6 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
-	removeGateCA(id)
 	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)

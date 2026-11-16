@@ -3,6 +3,7 @@ package fcscripts
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,8 +56,8 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "umount") {
 		t.Fatal("pack-oci.sh mounts the root disk")
 	}
-	if !strings.Contains(string(b), ". /gate-cert.sh") {
-		t.Fatal("pack-oci.sh does not use the shared gate certificate install")
+	if !strings.Contains(string(b), ". /gate-cert.sh || exit 1") {
+		t.Fatal("pack-oci.sh does not stop when the shared gate certificate install fails")
 	}
 	cert, err := os.ReadFile(filepath.Join(dir, "gate-cert.sh"))
 	if err != nil {
@@ -199,7 +200,10 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 		writeExe(t, filepath.Join(bin, "curl"), curlWritesCA)
 		linkExe(t, bin, "mkdir")
 		linkExe(t, bin, "cp")
-		stdout, calls := runGateCA(t, root, bin, snippet)
+		stdout, calls, err := runGateCA(t, root, bin, snippet)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if stdout != "" {
 			t.Fatalf("stdout = %q, want empty", stdout)
 		}
@@ -236,7 +240,10 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 		writeExe(t, filepath.Join(bin, "busybox"), busyboxNoWget)
 		linkExe(t, bin, "mkdir")
 		linkExe(t, bin, "cp")
-		stdout, calls := runGateCA(t, root, bin, snippet)
+		stdout, calls, err := runGateCA(t, root, bin, snippet)
+		if err == nil {
+			t.Fatal("failed fetch exited 0")
+		}
 		if stdout != caFetchFail+"\n" {
 			t.Fatalf("stdout = %q, want one serial line", stdout)
 		}
@@ -264,7 +271,7 @@ func fcInitScript(t *testing.T, pack string) string {
 	return rest[:j]
 }
 
-func runGateCA(t *testing.T, root, bin, snippet string) (string, string) {
+func runGateCA(t *testing.T, root, bin, snippet string) (string, string, error) {
 	t.Helper()
 	ssl := filepath.Join(root, "ssl")
 	certs := filepath.Join(root, "ca-certificates")
@@ -298,14 +305,15 @@ func runGateCA(t *testing.T, root, bin, snippet string) (string, string) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("snippet: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
-	}
+	runErr := cmd.Run()
 	calls, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return stdout.String(), string(calls)
+	if runErr != nil && stdout.Len() == 0 && stderr.Len() > 0 {
+		return stdout.String(), string(calls), fmt.Errorf("snippet: %v\nstderr:\n%s", runErr, stderr.String())
+	}
+	return stdout.String(), string(calls), runErr
 }
 
 func writeExe(t *testing.T, path, body string) {

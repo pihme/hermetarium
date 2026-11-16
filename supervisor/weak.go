@@ -72,14 +72,9 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	// One script, same bytes the strong helper runs. Failure must not start the box.
+	// One script, same bytes the Firecracker container runs. Failure must not start the box.
 	if err := applyGateRules(gate, dir, plan.Gate, plan.CIDR, https, opts.NoInbound); err != nil {
 		return nil, err
-	}
-	if https {
-		if err := serveGateCA(id, gate, plan.Gate, opts.TestLabel, dir); err != nil {
-			return nil, err
-		}
 	}
 	// Sidecars share this netns only after Squid is listening.
 	if err := runGateReady(root, id, gate); err != nil {
@@ -162,7 +157,6 @@ func DestroyWeak(id string) error {
 	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
-	removeGateCA(id)
 	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("network", "rm", "htm-"+id)

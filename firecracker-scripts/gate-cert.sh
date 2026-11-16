@@ -20,14 +20,14 @@ install_gate_cert() {
     fi
     if [ "$fetched" -eq 0 ]; then
       echo "fc-init: could not fetch the gate CA"
-      return 0
+      return 1
     fi
   fi
   cp "$dest" /usr/local/share/ca-certificates/hermetarium-mitm.crt || return 1
   if command -v update-ca-certificates >/dev/null 2>&1; then
-    update-ca-certificates >/dev/null 2>&1 || true
+    update-ca-certificates >/dev/null 2>&1 || return 1
   elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-    cat "$dest" >> /etc/ssl/certs/ca-certificates.crt
+    cat "$dest" >> /etc/ssl/certs/ca-certificates.crt || return 1
   fi
   export SSL_CERT_FILE="$dest"
   export NODE_EXTRA_CA_CERTS="$dest"

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -119,36 +118,31 @@ func waitGateRules(dir, name string) error {
 	return fmt.Errorf("gate rules were not applied")
 }
 
-func caContainer(id string) string {
-	return "htm-ca-" + id
-}
-
-// serveGateCA publishes the certificate on the gate address. Both walls use
-// this; the strong helper used to start its own httpd.
-func serveGateCA(id, netns, gateIP, label, dir string) error {
-	pub := filepath.Join(dir, "mitm-pub")
-	args := []string{"run", "-d", "--name", caContainer(id),
-		"--network", "container:" + netns,
-		"-v", pub + ":/www:ro",
-		"--entrypoint", "/usr/sbin/httpd",
+// waitGateCA blocks until the Firecracker container's httpd has accepted.
+// ca.ready is written only after a fetch succeeds, so a dead httpd cannot
+// look like a published certificate. Create must not release the guest before this.
+func waitGateCA(dir, name string) error {
+	ready := filepath.Join(dir, "ca.ready")
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(ready); err == nil {
+			return nil
+		}
+		if !containerRunning(name) {
+			return fmt.Errorf("gate certificate: %s", strings.TrimSpace(containerLogs(name)))
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	args = append(args, TestLabelArgs(label)...)
-	args = append(args, NetToolsImage, "-f", "-p", gateIP+":"+strconv.Itoa(GateCAPort), "-h", "/www")
-	_, err := Docker(30*time.Second, args...)
-	if err != nil {
-		return fmt.Errorf("serve gate certificate: %w", err)
+	if !containerRunning(name) {
+		return fmt.Errorf("gate certificate: %s", strings.TrimSpace(containerLogs(name)))
 	}
-	return nil
-}
-
-func removeGateCA(id string) {
-	DockerIgnore("rm", "-f", caContainer(id))
+	return fmt.Errorf("gate certificate was not served")
 }
 
 // installGateCert runs the shared install script. The weak wall mounts the
 // certificate first because the image entrypoint is already PID 1, so the
 // script finds the file and only updates the trust store. The strong guest
-// sources the same script and fetches what serveGateCA is holding.
+// sources the same script and fetches the certificate httpd is holding.
 func installGateCert(container string) error {
 	if _, err := Docker(30*time.Second, "exec", container, "sh", "/gate-cert.sh"); err != nil {
 		return fmt.Errorf("install gate certificate: %w", err)

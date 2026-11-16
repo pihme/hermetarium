@@ -51,13 +51,16 @@ func TestAddressPlanOneList(t *testing.T) {
 	if strings.Contains(string(conf), "172.16.") {
 		t.Fatal("echo gate file hardcodes a strong-wall address")
 	}
-	for _, p := range []string{"../firecracker-helper/entrypoint.sh", "../firecracker-helper/pack-oci.sh"} {
+	for _, p := range []string{"../firecracker-scripts/entrypoint.sh", "../firecracker-scripts/pack-oci.sh"} {
 		b, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(string(b), "172.16.0.1") || strings.Contains(string(b), ProbeHost) {
 			t.Fatalf("%s carries a gate address or a stand-in name", p)
+		}
+		if strings.Contains(string(b), "ipv4()") || strings.Contains(string(b), "hostnames()") {
+			t.Fatalf("%s re-parses the address plan", p)
 		}
 	}
 }
