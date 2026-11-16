@@ -75,24 +75,6 @@ func TestExtract(t *testing.T) {
 	if strings.Count(init, ". /fc-env") != 1 {
 		t.Fatal("/fc-env sourced more than once")
 	}
-	failAt := strings.Index(init, "echo DATA_MOUNT_FAIL")
-	exitAt := -1
-	if failAt >= 0 {
-		rest := init[failAt:]
-		if i := strings.Index(rest, "\n  fi\n"); i >= 0 {
-			rest = rest[:i]
-		}
-		if i := strings.Index(rest, "exit 1"); i >= 0 {
-			exitAt = failAt + i
-		}
-	}
-	envAt := strings.Index(init, ". /fc-env")
-	if strings.Contains(init, "|| echo DATA_MOUNT_FAIL") || exitAt < 0 || envAt < exitAt || execAt < exitAt {
-		t.Fatal("data mount failure must stop before the inhabitant")
-	}
-	if !strings.Contains(string(b), "echo DATA_MOUNT_OK") {
-		t.Fatal("pack-oci.sh missing DATA_MOUNT_OK")
-	}
 	if !strings.Contains(string(b), "nameserver 172.16.0.1") || !strings.Contains(string(b), "127.0.0.1 localhost") {
 		t.Fatal("pack-oci.sh missing gate resolver or localhost")
 	}

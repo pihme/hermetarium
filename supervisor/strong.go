@@ -4,13 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	fcscripts "github.com/pihme/hermetarium/firecracker-scripts"
@@ -268,55 +266,23 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	entrypoint := filepath.Join(scripts, "entrypoint.sh")
-	if opts.DataPath != "" {
-		abs, err := filepath.Abs(opts.DataPath)
-		if err != nil {
-			return nil, err
-		}
-		// A colon breaks the Firecracker container's docker -v mount of this file.
-		if strings.Contains(abs, ":") {
-			return nil, fmt.Errorf("data disk path %s must not contain ':'", abs)
-		}
-		opts.DataPath = abs
-		// Held until this boot's data.claimed is visible (function return is
-		// after waitDataClaim). A second create is "in use" for that window,
-		// including mkfs.
-		lock, err := lockDataDisk(opts.DataPath)
-		if err != nil {
-			return nil, err
-		}
-		defer lock.Close()
-		if err := ensureDataDisk(opts.DataPath, opts.DataMiB); err != nil {
-			return nil, err
-		}
-	}
 	// Public half only. The private key stays outside the instance directory.
 	pubArg, err := writeAttachKey(root, id)
 	if err != nil {
 		return nil, err
 	}
 	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg
-	drives := []map[string]any{{
-		"drive_id":       "rootfs",
-		"path_on_host":   "/opt/rootfs.ext4",
-		"is_root_device": true,
-		"is_read_only":   false,
-	}}
-	if opts.DataPath != "" {
-		bootArgs += " hermetarium.data=1"
-		drives = append(drives, map[string]any{
-			"drive_id":       "data",
-			"path_on_host":   "/opt/data.ext4",
-			"is_root_device": false,
-			"is_read_only":   false,
-		})
-	}
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
 			"boot_args":         bootArgs,
 		},
-		"drives": drives,
+		"drives": []map[string]any{{
+			"drive_id":       "rootfs",
+			"path_on_host":   "/opt/rootfs.ext4",
+			"is_root_device": true,
+			"is_read_only":   false,
+		}},
 		// No rate limit. An empty object is the virtio-rng device, so getrandom
 		// does not depend on the host CPU exposing RDRAND to the guest.
 		"entropy":        map[string]any{},
@@ -357,19 +323,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", strongRootfsVolume(dir),
-	)
-	if opts.DataPath != "" {
-		fcArgs = append(fcArgs,
-			"-v", opts.DataPath+":/opt/data.ext4",
-			"-v", opts.DataPath+".lock:/opt/data.lock",
-		)
-		// A reused id keeps the instance dir. An old claim would look like
-		// this boot's Firecracker container already holds the disk.
-		if err := os.Remove(filepath.Join(dir, "data.claimed")); err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-	fcArgs = append(fcArgs,
 		"-v", entrypoint+":/entrypoint.sh:ro",
 		"-v", dir+":/log",
 	)
@@ -377,12 +330,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	fcArgs = append(fcArgs, NetToolsImage, "/entrypoint.sh")
 	if _, err := Docker(30*time.Second, fcArgs...); err != nil {
 		return nil, err
-	}
-	if opts.DataPath != "" {
-		if err := waitDataClaim(dir, fcContainer); err != nil {
-			endStrong(id, dir)
-			return nil, err
-		}
 	}
 
 	gate := "htm-gate-" + id
@@ -417,15 +364,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		endStrong(id, dir)
 		return nil, err
 	}
-	if opts.DataPath != "" {
-		if err := waitDataMounted(fcContainer); err != nil {
-			endStrong(id, dir)
-			return nil, err
-		}
-	}
 
 	// No inbound port, so the serial line is the signal the guest reached
-	// user space. It is printed only after a data disk has mounted.
+	// user space.
 	if opts.NoInbound {
 		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 			return containerLogs(fcContainer), containerRunning(fcContainer)
@@ -486,8 +427,7 @@ func strongRootfsVolume(dir string) string {
 
 // endStrong removes the private rootfs only after htm-fc-<id> is gone.
 // DestroyStrong takes only an id, and tests pass a different root, so the
-// caller supplies the instance directory. The cache and the operator
-// --data file are not in that directory.
+// caller supplies the instance directory. The cache is not in that directory.
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
 	dropUnmountedRootfs(id, dir)
@@ -498,7 +438,7 @@ func endStrong(id, dir string) {
 }
 
 // dropUnmountedRootfs removes the private rootfs when no Firecracker container
-// has this id. The cache and the operator --data file are not in dir.
+// has this id. The cache is not in dir.
 func dropUnmountedRootfs(id, dir string) {
 	if err := containerFree("htm-fc-" + id); err != nil {
 		return
@@ -541,153 +481,20 @@ func extraFC(inst *StrongInstance) string {
 	return "\n--- fc.log ---\n" + string(b)
 }
 
-func ensureDataDisk(path string, sizeMiB int) error {
-	if err := dataDiskUsable(path); err != nil {
-		return err
-	}
-	if sizeMiB <= 0 {
-		sizeMiB = 1024
-	}
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	if err := f.Truncate(int64(sizeMiB) << 20); err != nil {
-		f.Close()
-		_ = os.Remove(path)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	// Same -E flags as the root disk: lazy init does not fill the sparse file.
-	if _, err := Docker(2*time.Minute, "run", "--rm",
-		"-v", path+":/data.ext4",
-		AlpineImage, "sh", "-c",
-		"apk add --no-cache e2fsprogs >/dev/null && mkfs.ext4 -F -E lazy_itable_init=1,lazy_journal_init=1 /data.ext4 >/dev/null",
-	); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	return os.Chmod(path, 0o600)
-}
-
-// dataDiskUsable accepts a missing path or a regular ext4 file.
-// It creates nothing. Call it before the lock file is created: a refused
-// disk must not leave path.lock beside the operator's file.
-func dataDiskUsable(path string) error {
-	if strings.Contains(path, ":") {
-		return fmt.Errorf("data disk path %s must not contain ':'", path)
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if !st.Mode().IsRegular() {
-		return fmt.Errorf("data disk %s is not a file", path)
-	}
-	// 0xEF53 at byte 1080 is the ext4 superblock magic. Anything else
-	// stays unattached: a failed guest mount would otherwise write
-	// /data onto the shared rootfs cache.
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	var magic [2]byte
-	_, rerr := f.ReadAt(magic[:], 0x438)
-	f.Close()
-	if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
-		return fmt.Errorf("data disk %s is not ext4", path)
-	}
-	return nil
-}
-
-// lockDataDisk holds an exclusive POSIX lock on path.lock until the caller
-// closes it. flock does not conflict with that lock, so the Firecracker
-// container can still flock the file for the life of the VM. A second open of
-// this file must not be closed while the lock is held: closing any descriptor
-// drops the POSIX lock. The in-use probe is therefore a flock on this same
-// descriptor, released before the Firecracker container's own nonblocking flock.
-func lockDataDisk(path string) (*os.File, error) {
-	if err := dataDiskUsable(path); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	lk := syscall.Flock_t{Type: syscall.F_WRLCK, Whence: io.SeekStart}
-	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lk); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EACCES) {
-			return nil, fmt.Errorf("data disk %s is in use", path)
-		}
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, fmt.Errorf("data disk %s is in use", path)
-		}
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return f, nil
-}
-
-func waitDataClaim(dir, fcContainer string) error {
-	claimed := filepath.Join(dir, "data.claimed")
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(claimed); err == nil {
-			return nil
-		}
-		if !containerRunning(fcContainer) {
-			logs := containerLogs(fcContainer)
-			if strings.Contains(logs, "data disk in use") {
-				return fmt.Errorf("data disk is in use")
-			}
-			return fmt.Errorf("Firecracker container exited before the data disk was claimed: %s", logs)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("data disk was not claimed")
-}
-
 // waitGuestUname blocks until fc-init prints GUEST_UNAME= on the Firecracker
 // container serial console. A dead or missing container fails immediately.
-// fc-init prints DATA_MOUNT_FAIL and exits before that line, so a mount
-// failure must not turn into a boot timeout.
 func waitGuestUname(dir string, timeout time.Duration, console func() (string, bool)) error {
 	deadline := time.Now().Add(timeout)
 	var text string
 	var running bool
 	for {
 		text, running = console()
-		if strings.Contains(text, "DATA_MOUNT_FAIL") {
-			return fmt.Errorf("data disk did not mount")
-		}
 		if strings.Contains(text, "GUEST_UNAME=") {
 			return nil
 		}
 		if !running {
 			// The marker can be written as the Firecracker container exits, after the read above.
 			text, _ = console()
-			if strings.Contains(text, "DATA_MOUNT_FAIL") {
-				return fmt.Errorf("data disk did not mount")
-			}
 			if strings.Contains(text, "GUEST_UNAME=") {
 				return nil
 			}
@@ -711,46 +518,6 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-}
-
-// The guest prints one of these after it tries /dev/vdb. Create does not
-// succeed on DATA_MOUNT_FAIL; fc-init does not start the inhabitant either.
-func waitDataMounted(fcContainer string) error {
-	deadline := time.Now().Add(60 * time.Second)
-	var logs string
-	for time.Now().Before(deadline) {
-		logs = containerLogs(fcContainer)
-		if strings.Contains(logs, "DATA_MOUNT_FAIL") {
-			// Destroy removes the Firecracker container, and docker logs with it.
-			return dataMountFailure(logs)
-		}
-		if strings.Contains(logs, "DATA_MOUNT_OK") {
-			return nil
-		}
-		if !containerRunning(fcContainer) {
-			// The guest can print the marker and exit between the read and this check.
-			logs = containerLogs(fcContainer)
-			if strings.Contains(logs, "DATA_MOUNT_FAIL") {
-				return dataMountFailure(logs)
-			}
-			if strings.Contains(logs, "DATA_MOUNT_OK") {
-				return nil
-			}
-			return fmt.Errorf("Firecracker container exited before the data disk mounted: %s", logs)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return fmt.Errorf("data disk was not mounted: %s", logs)
-}
-
-// dataMountFailure keeps the guest's reason. The tail is enough: the mount
-// error and DATA_MOUNT_FAIL are written at the end of the serial log.
-func dataMountFailure(logs string) error {
-	const max = 4000
-	if len(logs) > max {
-		logs = logs[len(logs)-max:]
-	}
-	return fmt.Errorf("data disk did not mount: %s", strings.TrimSpace(logs))
 }
 
 func DestroyStrong(id string) error {

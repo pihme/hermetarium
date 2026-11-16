@@ -75,23 +75,6 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--rootfs FILE` is the strong wall's root disk instead of a fresh pack of `--image`. The file must already be a regular file with ext4 magic. Hermetarium copies it, keeping holes, to `var/<id>/rootfs.ext4` and boots the copy. `--image` and `--acl` are still required. `destroy` deletes the copy and leaves `FILE`. The Docker wall rejects `--rootfs`.
 
-`--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. An existing file that is not ext4 is refused. If the guest cannot mount the data disk, create fails and the habitat is removed. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
-
-Hermetarium keeps a lock beside that file, named `FILE.lock`. A refused file gets no lock. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.
-
-```bash
-rm FILE FILE.lock
-```
-
-To read the file on the host, stop the habitat first. `destroy` powers the machine off. Check the filesystem, then mount it read-only:
-
-```bash
-sudo e2fsck -p FILE || test $? -le 1
-sudo mount -o loop,ro,noexec,nosuid,nodev FILE /mnt
-```
-
-`e2fsck -p` replays the journal and applies other safe fixes. Exit status 1 means it changed the filesystem, and the read-only mount should still run. `noexec,nosuid,nodev` keeps a program stored on the disk from running while you read it. Unmount the file before the next `create --data`.
-
 Ask where it is listening:
 
 ```bash

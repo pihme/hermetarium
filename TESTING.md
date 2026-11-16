@@ -45,7 +45,7 @@ In-process. No Docker habitat.
 | `TestNoInbound` | Needs Docker and KVM. An image that only sleeps starts on both walls with `--no-inbound` and a gate file that has no inhabitant peer and no inbound port. No host port is published. `url` prints that sentence. |
 | `TestNoInboundGatePort` | Needs Docker and KVM. A gate file that still listens on 18081, with `--no-inbound`, does not accept that port from the bridge gateway on either wall. Squid is listening on 127.0.0.1:18081. Without the flag, 18081 is published and the bridge gateway can connect. |
 | `TestModelGate` | Needs Docker and KVM. On both walls the box calls `http://model.hermetarium.test/v1/chat/completions` with a placeholder key. The mock sees exactly one `Authorization` value, the gate file's key, plus that file's `Host` and path prefix. Streamed lines arrive with a gap, not in one piece. The key is not in the box environment or filesystem. The box cannot reach the mock on the gate address. |
-| `TestWaitGuestUname` | A serial log containing `GUEST_UNAME=` makes the strong-wall boot wait return nil. A log without that line and a dead Firecracker container returns immediately and includes the `fc.log` tail. `DATA_MOUNT_FAIL` is still "did not mount", not a boot timeout. |
+| `TestWaitGuestUname` | A serial log containing `GUEST_UNAME=` makes the strong-wall boot wait return nil. A log without that line and a dead Firecracker container returns immediately and includes the `fc.log` tail. |
 | `TestNoInboundRejectedMachineConfig` | Needs Docker and KVM. `AfterGate` sets `vcpu_count` to 0, which Firecracker rejects. Strong-wall `create --no-inbound` returns an error that includes the `fc.log` tail, and no container for that id remains. |
 | `TestOpenWeb` | Needs Docker and KVM. On both walls the shipped gate file keeps the bumped connection Squid already opened to the origin and checks that certificate with the system CA. The test replaces only that CA path with the mock CA. The gate token replaces two box `Authorization` values on `api.github.com`. A `DELETE`, a contents write, `POST /graphql`, `PATCH`, and a Git refs write are denied and do not reach the origin. A POST whose path contains `..` or `%` is denied and does not reach the origin. Cleartext `api.github.com` is denied, and that request does not carry the gate token. Creating a repository passes. A pass-through host shows its own certificate in the box and its name in the log as `passthrough`. The token is not in the box. |
 | `TestACLOpensWeb` | An `http_access allow` for inbound, vendor, or probe does not open the web. `container_out` and `container_tls` do. |
@@ -69,12 +69,7 @@ In-process. No Docker habitat.
 | `TestCreateRejectsCPUsAboveWallLimit` | `--cpus` above 32 on the strong wall, or above `runtime.NumCPU` on the weak wall, exits 2 and names the limit. No habitat is started. The check still allows 32, the host CPU count, and an omitted `--cpus`. |
 | `TestCreateRejectsRootfsOnWeakWall` | `create --wall weak` with `--rootfs` exits 2, says the Docker wall rejects it, and creates no file. |
 | `TestExt4Regular` | A root file is accepted only when it is a regular file with ext4 magic `0xEF53` at offset `0x438`. A directory, a symlink, a missing path, and a non-ext4 file are rejected. The check does not change an accepted file. |
-| `TestCreateRejectsDataOnWeakWall` | `create --wall weak` with `--data` exits 2. |
-| `TestCreateRejectsBadDataFlag` | On the strong wall, `--data` with no file, or a value that starts with `-`, exits 2 and creates no file. A `--data` path containing `:` exits 2 and creates no file. |
-| `TestEnsureDataDisk` | An existing `--data` file is accepted only when it is a regular file with ext4 magic `0xEF53` at offset `0x438`. A directory, a non-ext4 file, and a path containing `:` are rejected. The colon path is not created. An accepted file is not resized. |
-| `TestDataDiskLock` | Taking the data-disk lock fails with "in use" when another flock already holds the lock file. It also fails with "in use" in a second process while the first call still holds the lock. |
-| `TestRefusedDataDiskLeavesNoLock` | A non-ext4 file or a directory passed as `--data` is refused before the lock is taken: no `FILE.lock` is created and the file is unchanged. A valid ext4 file still gets its lock. |
-| `TestDataMountFailureIncludesGuestReason` | The data-mount failure error includes the tail of the guest serial log (the mount error and `DATA_MOUNT_FAIL`), not the whole log. |
+| `TestCreateRejectsDataDisk` | `create --data` and `create --data-size` exit 2 on both walls, create no file, and say the strong wall has no data disk. |
 | `TestVersionCommand` | `version` exits 0 and prints `supervisor.Version`. |
 | `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the build image Dockerfile (`supervisor/build-image/Dockerfile`). |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
@@ -119,7 +114,7 @@ In-process. No Docker habitat.
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
 | `TestInhabitantHTTPSStaysCommented` | The inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcScriptsDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-scripts/` directory there. |
-| `TestExtract` | The same two scripts extract executable. The entrypoint contains the marker `fc-scripts` (a string in the Firecracker scripts, not a name for the container). The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). fc-init starts `sshd` after the guest address and `/run/sshd` (mode 0755) and before the inhabitant, and only when `[ -x /usr/sbin/sshd ]`. The scripts do not build a vsock terminal. `DATA_MOUNT_FAIL` exits before the inhabitant. A second extract leaves the entrypoint mtime unchanged. |
+| `TestExtract` | The same two scripts extract executable. The entrypoint contains the marker `fc-scripts` (a string in the Firecracker scripts, not a name for the container). The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). fc-init starts `sshd` after the guest address and `/run/sshd` (mode 0755) and before the inhabitant, and only when `[ -x /usr/sbin/sshd ]`. The scripts do not build a vsock terminal. A second extract leaves the entrypoint mtime unchanged. |
 | `TestGateCAFallsThroughToCurl` | The fc-init gate CA fetch runs against a fake busybox without wget: curl is tried next under timeout 3 and writes the CA to both paths. With no curl, the only output is `fc-init: could not fetch the gate CA`. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
@@ -150,12 +145,6 @@ Porter tests compare argv. They do not exec `claude`, `grok`, or `opencode`.
 A command run through `attach` prints a pty name under `/dev/pts` and `stty size` of 40 rows by 100 columns, the size set on the operator's pty before the call. The operator pty is then resized to 24 by 80 and the process receives `SIGWINCH`. A later `stty size` in that same command prints 24 by 80.
 
 That command exits. A second attach runs `tmux new-session -d` with a command that writes `alive` and keeps sleeping. A third attach runs `tmux has-session` and prints that file. `var/<id>/io.jsonl` is still empty.
-
-### Data disk
-
-`tests/data-disk` `TestDataDiskSurvivesDestroy`. Needs Docker and `/dev/kvm`. Strong wall, `--no-inbound`, a 32 MiB sparse ext4 file. The first boot writes `/data/marker`. A second `create` with that file while the first habitat is running is refused. After `destroy` the file is still there, mode `0600`. `e2fsck -p` then a read-only mount with `noexec,nosuid,nodev` shows the marker and refuses to run a program from the disk. A new `create --data` of the same file sees the marker.
-
-`TestDataDiskMountFailure`. Needs Docker and `/dev/kvm`. A file with ext4 magic `0xEF53` at offset `0x438` and no valid superblock makes create fail. The create error contains `DATA_MOUNT_FAIL` and the guest's `/dev/vdb` mount error. No container for that id is left. The inhabitant does not write `/data/marker` on the root disk.
 
 ### Backup
 
