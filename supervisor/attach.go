@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -93,10 +94,21 @@ func loadRunning(root, id string) (running, error) {
 func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
 	args := []string{"exec", "-i"}
 	tty := isTTY(in)
+	var token string
 	if tty {
+		var raw [16]byte
+		if _, err := rand.Read(raw[:]); err != nil {
+			return 1, fmt.Errorf("attach: token: %w", err)
+		}
+		token = hex.EncodeToString(raw[:])
 		args = append(args, "-t")
 	}
 	args = append(args, box)
+	if token != "" {
+		// $0 is the token, so the operator argv and its exit status stay
+		// as given. Inspect can see the token. It is not written to the I/O log.
+		args = append(args, "sh", "-c", `exec "$@"`, token)
+	}
 	args = append(args, argv...)
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = in
@@ -120,10 +132,9 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 		}
 		if execID == "" {
 			var err error
-			execID, err = oneNewExecID(box, before)
+			execID, err = oneNewExecID(box, before, token)
 			if errors.Is(err, errSkipResize) {
-				// Two TTY attaches in one window are not distinguishable
-				// from ExecIDs. Keep both sessions and skip the API resize.
+				// This session cannot be named. Keep it and skip the API resize.
 				skip = true
 				return nil
 			}
@@ -296,12 +307,17 @@ func dockerExecIDs(box string) (map[string]struct{}, error) {
 	return ids, nil
 }
 
-// errSkipResize means another exec started in the same window, so ExecIDs
-// cannot name this session. The attach still runs. The API resize is skipped.
-// A single new id is still resized.
+// errSkipResize means this session's exec cannot be named, so the API
+// resize is skipped. The attach still runs. With no token, more than one
+// new id is ambiguous. With a token, more than one new exec carries it.
+// A single named id is still resized.
 var errSkipResize = errors.New("attach: skip resize")
 
-func oneNewExecID(box string, before map[string]struct{}) (string, error) {
+// errExecNotFound is an exec inspect 404. That exec has already exited
+// and is not this session.
+var errExecNotFound = errors.New("attach: exec not found")
+
+func oneNewExecID(box string, before map[string]struct{}, token string) (string, error) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		ids, err := dockerExecIDs(box)
@@ -313,6 +329,18 @@ func oneNewExecID(box string, before map[string]struct{}) (string, error) {
 		for id := range ids {
 			if _, ok := before[id]; ok {
 				continue
+			}
+			if token != "" {
+				ok, err := execHasToken(id, token)
+				if errors.Is(err, errExecNotFound) {
+					continue
+				}
+				if err != nil {
+					return "", err
+				}
+				if !ok {
+					continue
+				}
 			}
 			fresh = id
 			n++
@@ -328,6 +356,66 @@ func oneNewExecID(box string, before map[string]struct{}) (string, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func execHasToken(id, token string) (bool, error) {
+	sock, err := dockerSocket()
+	if err != nil {
+		return false, err
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return false, fmt.Errorf("attach: docker socket: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	req := fmt.Sprintf("GET /exec/%s/json HTTP/1.0\r\nHost: docker\r\n\r\n", id)
+	if _, err := io.WriteString(conn, req); err != nil {
+		return false, fmt.Errorf("attach: exec inspect: %w", err)
+	}
+	br := bufio.NewReader(conn)
+	status, err := br.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("attach: exec inspect: %w", err)
+	}
+	if strings.Contains(status, " 404 ") {
+		return false, errExecNotFound
+	}
+	if !strings.Contains(status, " 200 ") {
+		rest, _ := io.ReadAll(io.LimitReader(br, 1024))
+		return false, fmt.Errorf("attach: exec inspect: %s", strings.TrimSpace(status+string(rest)))
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return false, fmt.Errorf("attach: exec inspect: %w", err)
+		}
+		if line == "\r\n" || line == "\n" {
+			break
+		}
+	}
+	body, err := io.ReadAll(io.LimitReader(br, 1<<20))
+	if err != nil {
+		return false, fmt.Errorf("attach: exec inspect: %w", err)
+	}
+	var parsed struct {
+		ProcessConfig struct {
+			Entrypoint string   `json:"entrypoint"`
+			Arguments  []string `json:"arguments"`
+		} `json:"ProcessConfig"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false, fmt.Errorf("attach: exec inspect: %w", err)
+	}
+	if strings.Contains(parsed.ProcessConfig.Entrypoint, token) {
+		return true, nil
+	}
+	for _, arg := range parsed.ProcessConfig.Arguments {
+		if strings.Contains(arg, token) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func dockerSocket() (string, error) {

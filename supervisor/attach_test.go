@@ -1136,7 +1136,7 @@ func TestResizeDockerExec(t *testing.T) {
 		}
 		<-done
 	}()
-	execID, err := oneNewExecID(name, before)
+	execID, err := oneNewExecID(name, before, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1312,4 +1312,216 @@ while [ "$i" -lt 150 ]; do
   sleep 0.1
 done
 echo RESIZE_DONE
+`
+
+// TestWeakAttachIgnoresForeignExec starts a foreign TTY exec before this
+// session's docker CLI. The old ExecIDs diff resizes that foreign exec and
+// leaves this session at its initial size. The wrapper does not exec docker,
+// so the CLI cannot apply SIGWINCH itself.
+func TestWeakAttachIgnoresForeignExec(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	real, err := exec.LookPath("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(real) {
+		real, err = filepath.Abs(real)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	// Sleep only this session's exec, and touch ready first, so the foreign
+	// exec can register before the real CLI starts. oneNewExecID waits 10s.
+	wrapper := "#!/bin/sh\n" +
+		"trap '' WINCH\n" +
+		"PATH=" + shellQuote(os.Getenv("PATH")) + "\n" +
+		"export PATH\n" +
+		`if [ "$1" = exec ]; then` + "\n" +
+		"touch " + shellQuote(ready) + "\n" +
+		"sleep 3\n" +
+		"fi\n" +
+		shellQuote(real) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	name := "htm-foreign-" + newTestID(t)
+	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
+	if _, err := Docker(30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
+		t.Fatal(err)
+	}
+	master, slave, err := openTestPTY(40, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	fmaster, fslave, err := openTestPTY(10, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fmaster.Close()
+	defer fslave.Close()
+	if row, col := termSize(slave); row != 40 || col != 100 {
+		t.Fatalf("pty %d %d", row, col)
+	}
+	if row, col := termSize(fslave); row != 10 || col != 20 {
+		t.Fatalf("foreign pty %d %d", row, col)
+	}
+
+	sig := make(chan os.Signal, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	errCh := make(chan error, 1)
+	go func() {
+		code, aerr := attachDocker(name, []string{"sh", "-c", weakResizeScript}, slave, slave, slave, sig, stop)
+		if aerr == nil && code != 0 {
+			aerr = fmt.Errorf("attach status %d", code)
+		}
+		errCh <- aerr
+	}()
+
+	readyDeadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		select {
+		case aerr := <-errCh:
+			t.Fatalf("attach ended before its exec: %v", aerr)
+		default:
+		}
+		if time.Now().After(readyDeadline) {
+			t.Fatal("docker exec did not reach the wrapper")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	fcmd := exec.Command(real, "exec", "-it", name, "sh", "-c", foreignSizeScript)
+	fcmd.Stdin = fslave
+	fcmd.Stdout = fslave
+	fcmd.Stderr = fslave
+	if err := fcmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = fcmd.Wait() }()
+	t.Cleanup(func() {
+		if fcmd.Process != nil {
+			_ = fcmd.Process.Kill()
+		}
+	})
+
+	_ = syscall.SetNonblock(int(master.Fd()), true)
+	_ = syscall.SetNonblock(int(fmaster.Fd()), true)
+	var buf, fbuf bytes.Buffer
+	drain := func(f *os.File, dst *bytes.Buffer) {
+		tmp := make([]byte, 256)
+		for {
+			_ = f.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+			n, rerr := f.Read(tmp)
+			if n > 0 {
+				dst.Write(tmp[:n])
+			}
+			if n == 0 || rerr != nil {
+				return
+			}
+		}
+	}
+	seenForeign := false
+	foreignDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(foreignDeadline) {
+		drain(fmaster, &fbuf)
+		ids, err := dockerExecIDs(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) > 0 {
+			seenForeign = true
+			break
+		}
+		select {
+		case aerr := <-errCh:
+			t.Fatalf("attach ended before the foreign exec: %v\n%s", aerr, fbuf.String())
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !seenForeign {
+		t.Fatalf("foreign exec did not register\n%s", fbuf.String())
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	var sawInitial, signaled, confirmed time.Time
+	resized := false
+	foreignAtResize := 0
+	for time.Now().Before(deadline) {
+		drain(master, &buf)
+		drain(fmaster, &fbuf)
+		out := buf.String()
+		fout := fbuf.String()
+		if strings.Contains(fout, "17 91") {
+			t.Fatalf("foreign exec was resized\n%s\nsession:\n%s", fout, out)
+		}
+		select {
+		case aerr := <-errCh:
+			if aerr != nil || !strings.Contains(out, "SIZE=17 91") || strings.Contains(fout, "17 91") || !strings.Contains(fout, "FOREIGN=10 20") {
+				t.Fatalf("resize output: %v\n%s\nforeign:\n%s", aerr, out, fout)
+			}
+			return
+		default:
+		}
+		if !resized && strings.Contains(out, "SIZE=40 100") {
+			if sawInitial.IsZero() {
+				// The CLI copies the window once, after the exec id exists.
+				// Wait that out, then change the local pty. No SIGWINCH is
+				// delivered to docker.
+				sawInitial = time.Now()
+			}
+			if time.Since(sawInitial) >= 800*time.Millisecond {
+				setWinsize(master, 17, 91)
+				setWinsize(slave, 17, 91)
+				if row, col := termSize(slave); row != 17 || col != 91 {
+					t.Fatalf("local size %d %d", row, col)
+				}
+				select {
+				case sig <- syscall.SIGWINCH:
+				case <-time.After(2 * time.Second):
+					t.Fatalf("resize callback was not waiting\n%s\nforeign:\n%s", out, fout)
+				}
+				resized = true
+				signaled = time.Now()
+				foreignAtResize = strings.Count(fout, "FOREIGN=10 20")
+			}
+		}
+		if resized && strings.Contains(out, "SIZE=17 91") {
+			if confirmed.IsZero() {
+				confirmed = time.Now()
+			}
+			if time.Since(confirmed) >= time.Second {
+				fout = fbuf.String()
+				if foreignAtResize == 0 || strings.Count(fout, "FOREIGN=10 20") <= foreignAtResize || strings.Contains(fout, "17 91") {
+					t.Fatalf("foreign exec was resized\n%s\nsession:\n%s", fout, out)
+				}
+				return
+			}
+		}
+		if resized && time.Since(signaled) >= 3*time.Second && !strings.Contains(out, "SIZE=17 91") {
+			t.Fatalf("resize output:\n%s\nforeign:\n%s", out, fout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("resize output:\n%s\nforeign:\n%s", buf.String(), fbuf.String())
+}
+
+const foreignSizeScript = `i=0
+while [ "$i" -lt 200 ]; do
+  echo FOREIGN=$(stty size)
+  i=$((i+1))
+  sleep 0.1
+done
 `
