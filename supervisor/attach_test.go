@@ -1188,3 +1188,128 @@ func TestResizeDockerExec(t *testing.T) {
 		t.Fatalf("stopped exec: %v", stopped)
 	}
 }
+
+// TestWeakAttachResize is the weak-wall callback in attachDocker, not the
+// docker CLI. waitSignal also signals that process, and the CLI resizes on
+// SIGWINCH, which is why TestAttachTTY still passes when the callback does
+// not. The docker on PATH is a shell that does not exec, so the signal stops
+// there. stty size moves only when the callback calls resizeDockerExec.
+func TestWeakAttachResize(t *testing.T) {
+	if _, err := Docker(15*time.Second, "info"); err != nil {
+		t.Fatal(err)
+	}
+	real, err := exec.LookPath("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(real) {
+		real, err = filepath.Abs(real)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	wrapper := "#!/bin/sh\n" +
+		"trap '' WINCH\n" +
+		"PATH=" + shellQuote(os.Getenv("PATH")) + "\n" +
+		"export PATH\n" +
+		shellQuote(real) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	name := "htm-wresize-" + newTestID(t)
+	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
+	if _, err := Docker(30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
+		t.Fatal(err)
+	}
+	master, slave, err := openTestPTY(40, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	if row, col := termSize(slave); row != 40 || col != 100 {
+		t.Fatalf("pty %d %d", row, col)
+	}
+
+	sig := make(chan os.Signal, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	errCh := make(chan error, 1)
+	go func() {
+		code, aerr := attachDocker(name, []string{"sh", "-c", weakResizeScript}, slave, slave, slave, sig, stop)
+		if aerr == nil && code != 0 {
+			aerr = fmt.Errorf("attach status %d", code)
+		}
+		errCh <- aerr
+	}()
+
+	_ = syscall.SetNonblock(int(master.Fd()), true)
+	var buf bytes.Buffer
+	tmp := make([]byte, 256)
+	deadline := time.Now().Add(20 * time.Second)
+	var sawInitial, signaled time.Time
+	resized := false
+	for time.Now().Before(deadline) {
+		for {
+			_ = master.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+			n, rerr := master.Read(tmp)
+			if n > 0 {
+				buf.Write(tmp[:n])
+			}
+			if n == 0 || rerr != nil {
+				break
+			}
+		}
+		out := buf.String()
+		select {
+		case aerr := <-errCh:
+			if aerr != nil || !strings.Contains(out, "SIZE=17 91") {
+				t.Fatalf("resize output: %v\n%s", aerr, out)
+			}
+			return
+		default:
+		}
+		if !resized && strings.Contains(out, "SIZE=40 100") {
+			if sawInitial.IsZero() {
+				// The CLI copies the window once, after the exec id exists.
+				// Wait that out, then change the local pty. No SIGWINCH is
+				// delivered to docker.
+				sawInitial = time.Now()
+			}
+			if time.Since(sawInitial) >= 800*time.Millisecond {
+				setWinsize(master, 17, 91)
+				setWinsize(slave, 17, 91)
+				if row, col := termSize(slave); row != 17 || col != 91 {
+					t.Fatalf("local size %d %d", row, col)
+				}
+				select {
+				case sig <- syscall.SIGWINCH:
+				case <-time.After(2 * time.Second):
+					t.Fatalf("resize callback was not waiting\n%s", out)
+				}
+				resized = true
+				signaled = time.Now()
+			}
+		}
+		if resized && strings.Contains(out, "SIZE=17 91") {
+			return
+		}
+		if resized && time.Since(signaled) >= 3*time.Second {
+			t.Fatalf("resize output:\n%s", out)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("resize output:\n%s", buf.String())
+}
+
+const weakResizeScript = `i=0
+while [ "$i" -lt 150 ]; do
+  echo SIZE=$(stty size)
+  i=$((i+1))
+  sleep 0.1
+done
+echo RESIZE_DONE
+`
