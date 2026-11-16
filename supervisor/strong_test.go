@@ -101,9 +101,9 @@ func TestWaitGuestUname(t *testing.T) {
 	})
 }
 
-func TestFcHelperDirExtractsWithoutTree(t *testing.T) {
+func TestFcScriptsDirExtractsWithoutTree(t *testing.T) {
 	root := t.TempDir()
-	dir, err := fcHelperDir(root)
+	dir, err := fcScriptsDir(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestFcHelperDirExtractsWithoutTree(t *testing.T) {
 			t.Fatalf("%s: size=%d mode=%v", p, st.Size(), st.Mode())
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "firecracker-helper")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "firecracker-scripts")); !os.IsNotExist(err) {
 		t.Fatalf("extract wrote into tree path: %v", err)
 	}
 }

@@ -32,7 +32,7 @@ func TestDataDiskSurvivesDestroy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer supervisor.DestroyStrong(first.ID)
-	serial := waitSerial(t, first.Helper, "DATA_READY")
+	serial := waitSerial(t, first.FirecrackerContainer, "DATA_READY")
 	if !strings.Contains(serial, "DATA_MARKER=missing") {
 		t.Fatalf("first boot did not create the marker\n%s", serial)
 	}
@@ -64,7 +64,7 @@ func TestDataDiskSurvivesDestroy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer supervisor.DestroyStrong(second.ID)
-	serial = waitSerial(t, second.Helper, "DATA_MARKER=persisted")
+	serial = waitSerial(t, second.FirecrackerContainer, "DATA_MARKER=persisted")
 	if !strings.Contains(serial, "DATA_READY") {
 		t.Fatalf("second boot\n%s", serial)
 	}
@@ -168,12 +168,12 @@ func start(t *testing.T, root, acl, disk string) (*supervisor.StrongInstance, er
 	return inst, nil
 }
 
-func waitSerial(t *testing.T, helper, needle string) string {
+func waitSerial(t *testing.T, fcContainer, needle string) string {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	var serial string
 	for time.Now().Before(deadline) {
-		serial, _ = supervisor.Docker(10*time.Second, "logs", helper)
+		serial, _ = supervisor.Docker(10*time.Second, "logs", fcContainer)
 		if strings.Contains(serial, needle) {
 			return serial
 		}

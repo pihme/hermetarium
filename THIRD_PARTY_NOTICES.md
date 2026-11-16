@@ -4,7 +4,7 @@ Hermetarium itself is licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Th
 
 ## Compiled into the `hermetarium` and `porter` binaries
 
-Both binaries use only the Go standard library (`go.mod` has no requirements). The Firecracker scripts in `firecracker-helper/` are this project's own code, embedded in the `hermetarium` binary.
+Both binaries use only the Go standard library (`go.mod` has no requirements). The Firecracker scripts in `firecracker-scripts/` are this project's own code, embedded in the `hermetarium` binary.
 
 ### Go standard library and runtime
 

@@ -2,7 +2,7 @@
 #   Go modules -> fix(deps): patch release of hermetarium (go.mod is a release path)
 #   GitHub Actions -> ci(deps); example/inhabitant base images -> chore(deps): no release,
 #   because examples/ and inhabitants/ are not part of any released artifact
-#   supervisor/helper (the image the supervisor pulls) -> fix(deps): patch release
+#   supervisor/build-image (the build image the supervisor pulls) -> fix(deps): patch release
 #   Nix lock (nix/reference-env/flake.lock) -> fix(deps): patch release of hermetarium and
 #   porter, because the release job builds both binaries with its Go toolchain, so the
 #   lock is a release input (and a release path of both in .github/scripts/release.py)
@@ -66,7 +66,7 @@ updates:
   # binary reads these FROM lines, so a bump is fix(deps): a patch release.
   - package-ecosystem: docker
     directories:
-      - /supervisor/helper
+      - /supervisor/build-image
       - /supervisor/squid
     schedule:
       interval: weekly
@@ -79,7 +79,7 @@ updates:
       prefix: fix
       include: scope
     groups:
-      helper-image-minor-and-patch:
+      build-image-minor-and-patch:
         update-types: [minor, patch]
   # All Nix shells in one block and one group: one bundled PR per run.
   # Add every extra shell (nix/<name>/flake.lock) under `directories:`.

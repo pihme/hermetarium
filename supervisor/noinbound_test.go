@@ -206,10 +206,10 @@ func TestNoInboundGatePort(t *testing.T) {
 			if inst.InboundURL != "" {
 				t.Fatalf("inbound url %q", inst.InboundURL)
 			}
-			helper := "htm-fc-" + id
-			assertNoPublishedPorts(t, helper, "htm-gate-"+id)
-			assertSquidListensOnInbound(t, helper)
-			assertGatewayInbound(t, helper, false)
+			fcContainer := "htm-fc-" + id
+			assertNoPublishedPorts(t, fcContainer, "htm-gate-"+id)
+			assertSquidListensOnInbound(t, fcContainer)
+			assertGatewayInbound(t, fcContainer, false)
 		})
 		t.Run("published", func(t *testing.T) {
 			id := newTestID(t)
@@ -221,9 +221,9 @@ func TestNoInboundGatePort(t *testing.T) {
 			if inst.InboundURL == "" {
 				t.Fatal("inbound url empty")
 			}
-			helper := "htm-fc-" + id
-			assertInboundPublished(t, helper)
-			assertGatewayInbound(t, helper, true)
+			fcContainer := "htm-fc-" + id
+			assertInboundPublished(t, fcContainer)
+			assertGatewayInbound(t, fcContainer, true)
 		})
 	})
 }
@@ -409,20 +409,20 @@ func assertURLSaysNone(t *testing.T, id string) {
 	}
 }
 
-func waitGuestCmd(t *testing.T, helper, want string) {
+func waitGuestCmd(t *testing.T, fcContainer, want string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	var logs string
 	for time.Now().Before(deadline) {
-		logs = helperLogs(helper)
+		logs = containerLogs(fcContainer)
 		if strings.Contains(logs, "FC_CMD=") {
 			if !strings.Contains(logs, want) {
 				t.Fatalf("guest command %q does not contain %q", logs, want)
 			}
 			return
 		}
-		if !helperRunning(helper) {
-			t.Fatalf("helper exited\n%s", logs)
+		if !containerRunning(fcContainer) {
+			t.Fatalf("Firecracker container exited\n%s", logs)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

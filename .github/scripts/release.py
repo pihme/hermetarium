@@ -49,7 +49,7 @@ COMPONENTS = [
         "tag_prefix": "hermetarium/v",
         "paths": [
             "supervisor/",
-            "firecracker-helper/",
+            "firecracker-scripts/",
             "go.mod",
             "Makefile",
             "nix/reference-env/flake.lock",

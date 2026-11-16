@@ -1,4 +1,4 @@
-package fchelper
+package fcscripts
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 //go:embed entrypoint.sh pack-oci.sh
 var Files embed.FS
 
-// Extract writes the helper scripts into destDir. Unchanged files keep their mtime
+// Extract writes the Firecracker scripts into destDir. Unchanged files keep their mtime
 // so packed rootfs caches can still key off pack-oci.sh.
 func Extract(destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {

@@ -31,11 +31,11 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	helpers, err := fcHelperDir(root)
+	scripts, err := fcScriptsDir(root)
 	if err != nil {
 		return "", err
 	}
-	script := filepath.Join(helpers, "pack-oci.sh")
+	script := filepath.Join(scripts, "pack-oci.sh")
 	if rootfsFresh(dest, script, sizeMB) {
 		return dest, nil
 	}
@@ -127,7 +127,7 @@ func habitatRootfsPath(dir string) string {
 //
 // The bytes go to rootfs.ext4.partial and are renamed into place. Opening
 // the destination with O_TRUNC would follow a symlink onto the cache, and
-// would shrink a disk the helper already has open.
+// would shrink a disk the Firecracker container already has open.
 func habitatRootfs(dir, cached string) (string, error) {
 	dest := habitatRootfsPath(dir)
 	partial := dest + ".partial"

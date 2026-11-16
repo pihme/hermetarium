@@ -165,7 +165,7 @@ func waitMarker(t *testing.T, wall, id, marker string) string {
 		if wall == "weak" {
 			logs, _ = Docker(10*time.Second, "logs", "htm-box-"+id)
 		} else {
-			logs = helperLogs("htm-fc-" + id)
+			logs = containerLogs("htm-fc-" + id)
 		}
 		if strings.Contains(logs, marker) {
 			return logs
@@ -174,8 +174,8 @@ func waitMarker(t *testing.T, wall, id, marker string) string {
 		if wall != "weak" {
 			name = "htm-fc-" + id
 		}
-		if !helperRunning(name) && wall != "weak" {
-			t.Fatalf("helper exited\n%s", logs)
+		if !containerRunning(name) && wall != "weak" {
+			t.Fatalf("Firecracker container exited\n%s", logs)
 		}
 		time.Sleep(300 * time.Millisecond)
 	}

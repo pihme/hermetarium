@@ -13,16 +13,16 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 ## How to work here
 
 - Reference environment: `nix/reference-env` (Go and GNU make) is binding for build and test. Run `nix develop ./nix/reference-env -c make test`. `flake.lock` is committed; Dependabot updates it as `fix(deps):`, which cuts a patch release of hermetarium and porter: CI builds both release binaries inside `nix/reference-env` with its Go toolchain, so the Nix lock is a release input. KVM for the strong-wall tests is a host device, not part of this shell.
-- Layout is **one directory per process**: `supervisor/`, `firecracker-helper/`, plus `examples/` (stand-in loops), `inhabitants/` (official CLIs), `porter/` (HTTP adapter for those CLIs), and `tests/`. Each example/inhabitant is a pair: Dockerfile plus `squid.conf` for the wall.
+- Layout is **one directory per process**: `supervisor/`, `firecracker-scripts/`, plus `examples/` (stand-in loops), `inhabitants/` (official CLIs), `porter/` (HTTP adapter for those CLIs), and `tests/`. Each example/inhabitant is a pair: Dockerfile plus `squid.conf` for the wall.
 - **Supervisor is Go**: native binary, module `github.com/pihme/hermetarium`, stdlib-first, `os/exec` Docker/Firecracker/Squid. Do not import their SDKs unless exec is proven insufficient. Do not rewrite the supervisor in TypeScript, Rust, JVM, .NET, or a WASM-only runtime.
 - **Logged path is Squid**, spawned as a sibling (GPLv2 stays in Squid; do not link it). Policy is a **per-habitat ACL file**. Parked: `external_acl_type`, Envoy/xDS, OPA, replacing Squid.
 - CLI name is `hermetarium` in full, never `herm`.
-- Firecracker scripts are embedded. The directory is still `firecracker-helper/`. Squid is a local image built from `supervisor/squid/Dockerfile` (public `ubuntu/squid` plus Ubuntu `squid-openssl`). `create --acl FILE` copies that Squid config into the instance dir and mounts it. Wall configs live next to the habitat Dockerfile (`examples/*/squid.conf`, `inhabitants/*/squid.conf`). Data dir is `HERMETARIUM_ROOT`, else this checkout, else XDG. Probe and vendor-mock are test sidecars.
+- Firecracker scripts are embedded. The directory is `firecracker-scripts/`. Squid is a local image built from `supervisor/squid/Dockerfile` (public `ubuntu/squid` plus Ubuntu `squid-openssl`). `create --acl FILE` copies that Squid config into the instance dir and mounts it. Wall configs live next to the habitat Dockerfile (`examples/*/squid.conf`, `inhabitants/*/squid.conf`). Data dir is `HERMETARIUM_ROOT`, else this checkout, else XDG. Probe and vendor-mock are test sidecars.
 - **Versions:** two semver artifacts, tagged independently. [Conventional Commits](https://www.conventionalcommits.org/): `feat:` minor, `fix:`/`perf:` patch, `feat!:`/`fix!:` or a `BREAKING CHANGE:` footer major (minor while the version is 0.x); `docs:`, `test:`, `chore:`, `ci:` do not bump. A commit only bumps the artifact whose paths it touches:
 
   | Artifact | Tag | Bumped when the commit touches |
   | --- | --- | --- |
-  | hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-helper/`, `go.mod`, `Makefile`, `nix/reference-env/flake.lock` |
+  | hermetarium | `hermetarium/vX.Y.Z` | `supervisor/`, `firecracker-scripts/`, `go.mod`, `Makefile`, `nix/reference-env/flake.lock` |
   | porter | `porter/vX.Y.Z` | `porter/`, `nix/reference-env/flake.lock` |
 
   Docs, tests, examples and inhabitants alone do not bump. After CI on a push to `main`, `.github/scripts/release.py` creates the GitHub Release and attaches a linux-amd64 binary.

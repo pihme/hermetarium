@@ -22,7 +22,7 @@ If you run the command from another folder, set `HERMETARIUM_ROOT` to this repos
 export HERMETARIUM_ROOT=/path/to/hermetarium
 ```
 
-The Firecracker scripts are inside the `hermetarium` binary. The directory in this checkout is `firecracker-helper/`. Squid is an image Docker pulls. Away from a checkout, a habitat's files live in `~/.local/share/hermetarium/var/` and the cache lives in `~/.cache/hermetarium`.
+The Firecracker scripts are inside the `hermetarium` binary. The directory in this checkout is `firecracker-scripts/`. Squid is an image Docker pulls. Away from a checkout, a habitat's files live in `~/.local/share/hermetarium/var/` and the cache lives in `~/.cache/hermetarium`.
 
 You need Docker and Go 1.24 or newer. The strong wall also needs Linux, `/dev/kvm`, and x86_64.
 

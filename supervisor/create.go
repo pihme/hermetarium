@@ -11,8 +11,9 @@ type CreateOpts struct {
 	Image string
 	ACL   string // host path to squid.conf; copied into the instance dir and mounted
 
-	// AfterGate runs in the gate/helper netns after Squid's network exists
-	// and before the inhabitant is reachable. Tests use it for probe/mock sidecars.
+	// AfterGate runs in the gate or Firecracker container netns after Squid's
+	// network exists and before the inhabitant is reachable. Tests use it for
+	// probe/mock sidecars.
 	AfterGate func(id, netns string) error
 
 	MemMiB int
@@ -30,7 +31,7 @@ type CreateOpts struct {
 	NoInbound bool
 
 	// TestLabel is applied as hermetarium.test=<value> to containers this
-	// create starts (gate, box, DNS, Firecracker helper). Empty for the
+	// create starts (gate, box, DNS, Firecracker container). Empty for the
 	// operator CLI; tests set it so cleanup is scoped to one test.
 	TestLabel string
 }

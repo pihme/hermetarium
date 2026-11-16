@@ -52,8 +52,8 @@ func TestHabitatRootfsIsPrivate(t *testing.T) {
 	if sameInode(t, first, cache) || sameInode(t, second, cache) || sameInode(t, first, second) {
 		t.Fatalf("rootfs files share an inode")
 	}
-	assertHelperBind(t, root, cache, first)
-	assertHelperBind(t, root, cache, second)
+	assertFirecrackerContainerBind(t, root, cache, first)
+	assertFirecrackerContainerBind(t, root, cache, second)
 	for _, path := range []string{first, second} {
 		sum, err := sha256File(path)
 		if err != nil {
@@ -102,21 +102,21 @@ func TestHabitatRootfsIsPrivate(t *testing.T) {
 	if got, err := sha256File(cache); err != nil || got != cacheSum {
 		t.Fatalf("cache changed after later create: %v %s", err, got)
 	}
-	assertHelperBind(t, root, cache, third)
+	assertFirecrackerContainerBind(t, root, cache, third)
 }
 
-func assertHelperBind(t *testing.T, root, cache, copied string) {
+func assertFirecrackerContainerBind(t *testing.T, root, cache, copied string) {
 	t.Helper()
 	dir := filepath.Dir(copied)
 	if copied != habitatRootfsPath(dir) || filepath.Dir(dir) != VarDir(root) {
-		t.Fatalf("helper bind source %s is not var/<id>/rootfs.ext4", copied)
+		t.Fatalf("Firecracker container bind source %s is not var/<id>/rootfs.ext4", copied)
 	}
 	vol := strongRootfsVolume(dir)
 	if vol != copied+":/opt/rootfs.ext4" {
-		t.Fatalf("helper bind %s, copy %s", vol, copied)
+		t.Fatalf("Firecracker container bind %s, copy %s", vol, copied)
 	}
 	if copied == cache || vol == cache+":/opt/rootfs.ext4" {
-		t.Fatalf("helper bind is the cache %s", vol)
+		t.Fatalf("Firecracker container bind is the cache %s", vol)
 	}
 }
 
@@ -168,7 +168,7 @@ func TestHabitatRootfsReplacesSymlink(t *testing.T) {
 	if _, err := os.Lstat(dest + ".partial"); !os.IsNotExist(err) {
 		t.Fatalf("partial left: %v", err)
 	}
-	assertHelperBind(t, root, cache, got)
+	assertFirecrackerContainerBind(t, root, cache, got)
 }
 
 func TestHabitatRootfsFailureKeepsDest(t *testing.T) {
@@ -380,10 +380,10 @@ func TestDropUnmountedRootfs(t *testing.T) {
 	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
 	dropUnmountedRootfs(present, filepath.Dir(live.priv))
 	if b, err := os.ReadFile(live.priv); err != nil || string(b) != "priv" {
-		t.Fatalf("private rootfs while helper exists: %v %q", err, b)
+		t.Fatalf("private rootfs while the Firecracker container exists: %v %q", err, b)
 	}
 	if b, err := os.ReadFile(live.partial); err != nil || string(b) != "part" {
-		t.Fatalf("partial rootfs while helper exists: %v %q", err, b)
+		t.Fatalf("partial rootfs while the Firecracker container exists: %v %q", err, b)
 	}
 	live.unchanged(t)
 }

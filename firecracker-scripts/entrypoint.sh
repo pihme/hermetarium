@@ -1,16 +1,16 @@
 #!/bin/sh
-# Strong-wall helper: TAP + Firecracker. Squid is a sibling in this netns.
+# Firecracker scripts: TAP + Firecracker. Squid is a sibling in this netns.
 set -eu
 # A reused id keeps this file. Clear it before Squid's pid can appear, or
 # Firecracker would start on the previous boot's listener.
 mkdir -p /log
 rm -f /log/dns.ready
-test -c /dev/kvm || { echo "fc-helper: no /dev/kvm" >&2; exit 1; }
-test -c /dev/net/tun || { echo "fc-helper: no /dev/net/tun" >&2; exit 1; }
+test -c /dev/kvm || { echo "fc-scripts: no /dev/kvm" >&2; exit 1; }
+test -c /dev/net/tun || { echo "fc-scripts: no /dev/net/tun" >&2; exit 1; }
 # create returns, so this process holds the lock until the habitat stops.
 if [ -e /opt/data.lock ]; then
   exec 9<>/opt/data.lock
-  flock -n 9 || { echo "fc-helper: data disk in use" >&2; exit 1; }
+  flock -n 9 || { echo "fc-scripts: data disk in use" >&2; exit 1; }
   : > /log/data.claimed
 fi
 
@@ -62,7 +62,7 @@ while [ "$i" -lt 200 ]; do
   sleep 0.1
   i=$((i + 1))
 done
-test -f /log/squid.pid || { echo "fc-helper: squid.pid missing" >&2; exit 1; }
+test -f /log/squid.pid || { echo "fc-scripts: squid.pid missing" >&2; exit 1; }
 # squid.pid is written before gatedns listens. Do not boot on that alone.
 i=0
 while [ "$i" -lt 200 ]; do
@@ -72,7 +72,7 @@ while [ "$i" -lt 200 ]; do
   sleep 0.1
   i=$((i + 1))
 done
-test -f /log/dns.ready || { echo "fc-helper: /log/dns.ready missing" >&2; exit 1; }
+test -f /log/dns.ready || { echo "fc-scripts: /log/dns.ready missing" >&2; exit 1; }
 
 cp /opt/firecracker /tmp/firecracker
 chmod +x /tmp/firecracker

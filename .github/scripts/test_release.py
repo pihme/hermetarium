@@ -60,7 +60,7 @@ class DiffNoteLinesTest(unittest.TestCase):
 
     def test_indented_note_kept(self) -> None:
         self.write("supervisor/a.go", "package supervisor\n\nfunc f() {\n\t// Release-Notes: tab note\n}\n")
-        self.write("firecracker-helper/x.sh", "f() {\n    #  Release-Notes:   spaced   note \n}\n")
+        self.write("firecracker-scripts/x.sh", "f() {\n    #  Release-Notes:   spaced   note \n}\n")
         self.assertEqual(sorted(self.notes(self.commit("fix: b"))), ["spaced note", "tab note"])
 
     def test_moved_note_ignored(self) -> None:

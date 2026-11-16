@@ -63,8 +63,8 @@ func TestCPUs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(helperLogs(inst.Helper), "CPUS=4") {
-			waitGuestCPUs(t, inst.Helper, "CPUS=4")
+		if !strings.Contains(containerLogs(inst.FirecrackerContainer), "CPUS=4") {
+			waitGuestCPUs(t, inst.FirecrackerContainer, "CPUS=4")
 		}
 	})
 }
@@ -82,20 +82,20 @@ func cpuQuota(out string) int {
 	return quota / period
 }
 
-func waitGuestCPUs(t *testing.T, helper, want string) {
+func waitGuestCPUs(t *testing.T, fcContainer, want string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	var logs string
 	for time.Now().Before(deadline) {
-		logs = helperLogs(helper)
+		logs = containerLogs(fcContainer)
 		if strings.Contains(logs, want) {
 			return
 		}
 		if strings.Contains(logs, "CPUS=") && !strings.Contains(logs, want) {
 			t.Fatalf("guest CPUs %q", logs)
 		}
-		if !helperRunning(helper) {
-			t.Fatalf("helper exited\n%s", logs)
+		if !containerRunning(fcContainer) {
+			t.Fatalf("Firecracker container exited\n%s", logs)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

@@ -102,7 +102,7 @@ esac
 	t.Run("strong", func(t *testing.T) {
 		t.Setenv("SSH_DIAG", refused)
 		id := "nossh"
-		putRunning(id, `{"wall":"strong","helper":"htm-fc-nossh"}`+"\n")
+		putRunning(id, `{"wall":"strong","firecrackerContainer":"htm-fc-nossh"}`+"\n")
 		if _, err := writeAttachKey(root, id); err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +119,7 @@ esac
 		msg := "ssh: connect to host 172.16.0.2 port 22: Connection timed out"
 		t.Setenv("SSH_DIAG", msg)
 		id := "notime"
-		putRunning(id, `{"wall":"strong","helper":"htm-fc-notime"}`+"\n")
+		putRunning(id, `{"wall":"strong","firecrackerContainer":"htm-fc-notime"}`+"\n")
 		if _, err := writeAttachKey(root, id); err != nil {
 			t.Fatal(err)
 		}
@@ -227,23 +227,23 @@ func TestAttachKeyOutsideGate(t *testing.T) {
 			t.Fatalf("%s still has the vsock terminal", name)
 		}
 	}
-	ep, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "entrypoint.sh"))
+	ep, err := os.ReadFile(filepath.Join("..", "firecracker-scripts", "entrypoint.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "pack-oci.sh"))
+	pack, err := os.ReadFile(filepath.Join("..", "firecracker-scripts", "pack-oci.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(ep), "vsock") || strings.Contains(string(pack), "vsock") || strings.Contains(string(pack), "fc-attach") {
-		t.Fatal("helper scripts still build the vsock terminal")
+		t.Fatal("Firecracker scripts still build the vsock terminal")
 	}
 	src, err := os.ReadFile("strong.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(src), `attachKeyDir(root, id)+":`) {
-		t.Fatal("private key is mounted into the helper")
+		t.Fatal("private key is mounted into the Firecracker container")
 	}
 	att, err := os.ReadFile("attach.go")
 	if err != nil {
@@ -301,7 +301,7 @@ func TestAttachGuestStderr(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("attach code %d\nstdout:\n%s\nstderr:\n%s\n%s", code, stdout, stderr, helperLogs("htm-fc-"+id))
+			t.Fatalf("attach code %d\nstdout:\n%s\nstderr:\n%s\n%s", code, stdout, stderr, containerLogs("htm-fc-"+id))
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -326,7 +326,7 @@ func TestDebianSshdPrivsep(t *testing.T) {
 	if _, err := Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
 	}
-	pack, err := os.ReadFile(filepath.Join("..", "firecracker-helper", "pack-oci.sh"))
+	pack, err := os.ReadFile(filepath.Join("..", "firecracker-scripts", "pack-oci.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,7 +845,7 @@ func setWinsize(f *os.File, row, col uint16) {
 
 func habitatLogs(wall, id, dir string) string {
 	if wall == "strong" {
-		return helperLogs("htm-fc-"+id) + extraFC(&StrongInstance{Dir: dir})
+		return containerLogs("htm-fc-"+id) + extraFC(&StrongInstance{Dir: dir})
 	}
 	out, _ := Docker(10*time.Second, "logs", "htm-box-"+id)
 	return out
