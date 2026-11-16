@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed entrypoint.sh pack-oci.sh
+//go:embed entrypoint.sh pack-oci.sh gate-cert.sh
 var Files embed.FS
 
 // Extract writes the Firecracker scripts into destDir. Unchanged files keep their mtime

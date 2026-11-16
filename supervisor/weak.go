@@ -114,11 +114,14 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	if err := lockGate(gate, sub.Gate, opts.NoInbound); err != nil {
+	// One script, same bytes the strong helper runs. Failure must not start the box.
+	if err := applyGateRules(gate, dir, sub.Gate, sub.CIDR, https, opts.NoInbound); err != nil {
 		return nil, err
 	}
-	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
-		return nil, err
+	if https {
+		if err := serveGateCA(id, gate, sub.Gate, opts.TestLabel, dir); err != nil {
+			return nil, err
+		}
 	}
 	if err := startGateDNS(root, id, gate, gate, sub.Gate, opts.TestLabel, conf); err != nil {
 		return nil, err
@@ -147,7 +150,11 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		boxArgs = append(boxArgs, "--cpus", strconv.Itoa(opts.CPUs))
 	}
 	if https {
-		boxArgs = append(boxArgs, mitmBoxDockerArgs(dir)...)
+		mitmArgs, err := mitmBoxDockerArgs(root, dir)
+		if err != nil {
+			return nil, err
+		}
+		boxArgs = append(boxArgs, mitmArgs...)
 	}
 	boxArgs = append(boxArgs, TestLabelArgs(opts.TestLabel)...)
 	boxArgs = append(boxArgs, opts.Image)
@@ -162,7 +169,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		return nil, err
 	}
 	if https {
-		if err := InstallBoxTrust(box); err != nil {
+		if err := installGateCert(box); err != nil {
 			return nil, err
 		}
 	}
@@ -201,6 +208,7 @@ func DestroyWeak(id string) error {
 	DockerIgnore("rm", "-fv", "htm-box-"+id)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
+	removeGateCA(id)
 	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("network", "rm", "htm-"+id)

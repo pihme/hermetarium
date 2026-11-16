@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ var fcPin = fcSHA256
 
 const strongGuestIP = "172.16.0.2"
 const strongGateIP = "172.16.0.1"
+const strongGateCIDR = "172.16.0.0/24"
 
 type StrongInstance struct {
 	ID                   string `json:"id"`
@@ -272,6 +274,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg
+	if ACLWantsHTTPS(conf) {
+		bootArgs += " hermetarium.ca=http://" + strongGateIP + ":" + strconv.Itoa(GateCAPort) + "/ca.pem"
+	}
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
@@ -316,6 +321,10 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	fcArgs = append(fcArgs, inboundPublish(opts.NoInbound)...)
 	// The entrypoint accepts tcp/18081 from the bridge gateway unless
 	// this is set. The gate file is copied unchanged and may still listen there.
+	fcArgs = append(fcArgs, "-e", "GATE_IP="+strongGateIP, "-e", "GUEST_IP="+strongGuestIP, "-e", "GATE_CIDR="+strongGateCIDR, "-e", "GATE_PREFIX=24")
+	if ACLWantsHTTPS(conf) {
+		fcArgs = append(fcArgs, "-e", "GATE_HTTPS=1")
+	}
 	if opts.NoInbound {
 		fcArgs = append(fcArgs, "-e", "NO_INBOUND=1")
 	}
@@ -323,12 +332,21 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", strongRootfsVolume(dir),
+	)
+	if err := writeGateRules(dir); err != nil {
+		return nil, err
+	}
+	fcArgs = append(fcArgs,
 		"-v", entrypoint+":/entrypoint.sh:ro",
 		"-v", dir+":/log",
 	)
 	fcArgs = append(fcArgs, TestLabelArgs(opts.TestLabel)...)
 	fcArgs = append(fcArgs, NetToolsImage, "/entrypoint.sh")
 	if _, err := Docker(30*time.Second, fcArgs...); err != nil {
+		return nil, err
+	}
+	if err := waitGateRules(dir, fcContainer); err != nil {
+		endStrong(id, dir)
 		return nil, err
 	}
 
@@ -341,8 +359,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		endStrong(id, dir)
 		return nil, err
 	}
-	// squid.pid starts Firecracker before WaitSquid returns. Joining a
-	// Firecracker container that has already exited hides the boot error.
+	// Firecracker starts only after squid.pid and dns.ready. DNS stays down
+	// until the certificate server is up, so the guest cannot fetch the CA
+	// before it is served. A container that has already exited hides the boot error.
 	inboundTimeout := 40 * time.Second
 	if !containerRunning(fcContainer) {
 		err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
@@ -350,6 +369,16 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		})
 		_ = DestroyStrong(id)
 		return nil, err
+	}
+	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
+		endStrong(id, dir)
+		return nil, err
+	}
+	if ACLWantsHTTPS(conf) {
+		if err := serveGateCA(id, fcContainer, strongGateIP, opts.TestLabel, dir); err != nil {
+			endStrong(id, dir)
+			return nil, err
+		}
 	}
 	if err := startGateDNS(root, id, fcContainer, gate, strongGateIP, opts.TestLabel, conf); err != nil {
 		if !containerRunning(fcContainer) {
@@ -360,11 +389,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
-		endStrong(id, dir)
-		return nil, err
-	}
-
 	// No inbound port, so the serial line is the signal the guest reached
 	// user space.
 	if opts.NoInbound {
@@ -523,6 +547,7 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
+	removeGateCA(id)
 	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)

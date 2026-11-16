@@ -52,13 +52,23 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "umount") {
 		t.Fatal("pack-oci.sh mounts the root disk")
 	}
-	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
-		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
+	if !strings.Contains(string(b), ". /gate-cert.sh") {
+		t.Fatal("pack-oci.sh does not use the shared gate certificate install")
+	}
+	cert, err := os.ReadFile(filepath.Join(dir, "gate-cert.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cert), "/bin/busybox wget") || !strings.Contains(string(cert), "timeout 3 curl") {
+		t.Fatal("gate-cert.sh fetch must not call curl without a timeout")
 	}
 	if strings.Contains(string(b), "vsock") || strings.Contains(string(b), "fc-attach") {
 		t.Fatal("pack-oci.sh still builds a vsock terminal")
 	}
 	init := fcInitScript(t, string(b))
+	if strings.Contains(init, "update-ca-certificates") {
+		t.Fatal("fc-init carries its own certificate install")
+	}
 	pts := strings.Index(init, "/dev/pts")
 	ip := strings.Index(init, "172.16.0.2/24")
 	priv := strings.Index(init, "mkdir -p /root/.ssh /var/empty /run/sshd")
@@ -166,11 +176,11 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 	if err := Extract(dir); err != nil {
 		t.Fatal(err)
 	}
-	pack, err := os.ReadFile(filepath.Join(dir, "pack-oci.sh"))
+	snippetB, err := os.ReadFile(filepath.Join(dir, "gate-cert.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	snippet := gateCASnippet(t, string(pack))
+	snippet := string(snippetB)
 
 	t.Run("curl", func(t *testing.T) {
 		root := t.TempDir()
@@ -248,32 +258,6 @@ func fcInitScript(t *testing.T, pack string) string {
 	return rest[:j]
 }
 
-func gateCASnippet(t *testing.T, pack string) string {
-	t.Helper()
-	const start = "cat > /rootfs/fc-init << 'EOF'\n"
-	i := strings.Index(pack, start)
-	if i < 0 {
-		t.Fatal("pack-oci.sh has no fc-init heredoc")
-	}
-	rest := pack[i+len(start):]
-	j := strings.Index(rest, "\nEOF\n")
-	if j < 0 {
-		t.Fatal("pack-oci.sh fc-init heredoc is not closed")
-	}
-	init := rest[:j]
-	const mark = "mkdir -p /etc/ssl /usr/local/share/ca-certificates\n"
-	k := strings.Index(init, mark)
-	if k < 0 {
-		t.Fatal("fc-init has no gate CA fetch")
-	}
-	fetch := init[k:]
-	end := strings.Index(fetch, "\ncmd=$(cat /fc-cmd)\n")
-	if end < 0 {
-		t.Fatal("fc-init gate CA fetch does not stop before /fc-cmd")
-	}
-	return fetch[:end+1]
-}
-
 func runGateCA(t *testing.T, root, bin, snippet string) (string, string) {
 	t.Helper()
 	ssl := filepath.Join(root, "ssl")
@@ -302,6 +286,7 @@ func runGateCA(t *testing.T, root, bin, snippet string) (string, string) {
 		"PATH=" + bin,
 		"LOG=" + logPath,
 		"CA_BODY=" + fakeCA,
+		"GATE_CA_URL=http://172.16.0.1:3131/ca.pem",
 		"HOME=" + root,
 	}
 	var stdout, stderr bytes.Buffer

@@ -14,6 +14,7 @@ const ProbeHost = "probe.hermetarium.test"
 const ProbePort = 18080
 const SquidPort = 3128
 const HTTPSInterceptPort = 3130
+const GateCAPort = 3131
 const InboundPort = 18081
 
 const BusyboxImage = "busybox:1.36.1"

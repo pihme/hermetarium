@@ -139,32 +139,21 @@ func MITMTrustEnv() []string {
 	}
 }
 
-func mitmBoxDockerArgs(dir string) []string {
+// mitmBoxDockerArgs mounts the certificate and the one install script.
+// The image entrypoint is PID 1, so the file has to be there before the
+// process starts; gate-cert.sh then adds it to the trust store.
+func mitmBoxDockerArgs(root, dir string) ([]string, error) {
+	scripts, err := fcScriptsDir(root)
+	if err != nil {
+		return nil, err
+	}
 	cert := filepath.Join(dir, "mitm", "ca.pem")
-	args := []string{"-v", cert + ":" + MITMCertPath + ":ro"}
+	args := []string{
+		"-v", cert + ":" + MITMCertPath + ":ro",
+		"-v", filepath.Join(scripts, "gate-cert.sh") + ":/gate-cert.sh:ro",
+	}
 	for _, e := range MITMTrustEnv() {
 		args = append(args, "-e", e)
 	}
-	return args
-}
-
-// InstallBoxTrust copies the mounted certificate into the system trust store
-// so tools that ignore the environment variables still accept it.
-func InstallBoxTrust(container string) error {
-	script := `set -eu
-src=/etc/ssl/hermetarium-mitm.crt
-test -f "$src"
-mkdir -p /usr/local/share/ca-certificates
-cp "$src" /usr/local/share/ca-certificates/hermetarium-mitm.crt
-if command -v update-ca-certificates >/dev/null 2>&1; then
-  update-ca-certificates
-elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-  cat "$src" >> /etc/ssl/certs/ca-certificates.crt
-fi
-`
-	_, err := Docker(30*time.Second, "exec", container, "sh", "-c", script)
-	if err != nil {
-		return fmt.Errorf("install gate certificate: %w", err)
-	}
-	return nil
+	return args, nil
 }

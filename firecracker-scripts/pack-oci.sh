@@ -96,9 +96,11 @@ printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetari
 # The image that wants a terminal brings sshd. The public key is per habitat,
 # on the kernel command line, so one cached rootfs can boot many habitats.
 b64=
+ca=
 for tok in $(cat /proc/cmdline); do
   case $tok in
     hermetarium.pub=*) b64=${tok#hermetarium.pub=} ;;
+    hermetarium.ca=*) ca=${tok#hermetarium.ca=} ;;
   esac
 done
 case $b64 in
@@ -143,45 +145,20 @@ elif command -v ping >/dev/null 2>&1 && ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; 
 else
   echo LEAK_FAIL
 fi
-# Port 3131 serves the gate CA only when HTTPS is open. busybox wget
-# speaks plain HTTP. Linux 6.1 has entropy at boot, so curl is safe, and
-# timeout 3 still bounds the call.
-mkdir -p /etc/ssl /usr/local/share/ca-certificates
-ca=/etc/ssl/hermetarium-mitm.crt
-ca_url=http://172.16.0.1:3131/ca.pem
-fetched=0
-if [ -x /bin/busybox ]; then
-  if /bin/busybox timeout 3 /bin/busybox wget -q -T 2 -O "$ca" "$ca_url"; then
-    fetched=1
-  fi
-fi
-# A busybox with no wget or timeout applet must not hide curl.
-if [ "$fetched" -eq 0 ] && command -v timeout >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
-  if timeout 3 curl -fsS --connect-timeout 1 --max-time 2 -o "$ca" "$ca_url"; then
-    fetched=1
-  fi
-fi
-if [ "$fetched" -eq 1 ]; then
-  cp "$ca" /usr/local/share/ca-certificates/hermetarium-mitm.crt
-  if command -v update-ca-certificates >/dev/null 2>&1; then
-    update-ca-certificates >/dev/null 2>&1 || true
-  elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-    cat "$ca" >> /etc/ssl/certs/ca-certificates.crt
-  fi
-  export SSL_CERT_FILE="$ca"
-  export NODE_EXTRA_CA_CERTS="$ca"
-  export REQUESTS_CA_BUNDLE="$ca"
-  export CURL_CA_BUNDLE="$ca"
-  export GIT_SSL_CAINFO="$ca"
-  export PIP_CERT="$ca"
-else
-  echo "fc-init: could not fetch the gate CA"
+# Create passes hermetarium.ca only when HTTPS interception is on.
+# gate-cert.sh is the same install the weak wall executes.
+if [ -n "$ca" ]; then
+  GATE_CA_URL=$ca
+  # shellcheck disable=SC1091
+  . /gate-cert.sh
 fi
 cmd=$(cat /fc-cmd)
 echo "FC_CMD=$cmd"
 exec $cmd
 EOF
 chmod +x /rootfs/fc-init
+cp /gate-cert.sh /rootfs/gate-cert.sh
+chmod +x /rootfs/gate-cert.sh
 truncate -s "${SIZE_MB}M" /out/rootfs.ext4
 # Do not allocate the journal or inode tables; a large --disk must stay sparse.
 mke2fs -t ext4 -F -d /rootfs -E lazy_itable_init=1,lazy_journal_init=1 /out/rootfs.ext4 >/dev/null
