@@ -516,6 +516,105 @@ func TestTCPConnDeadline(t *testing.T) {
 	}
 }
 
+// countListener counts a connection when its handler enters the first read.
+// Accept is too early: the query can be answered before those connections
+// have taken their slots.
+type countListener struct {
+	net.Listener
+	reads *atomic.Int32
+}
+
+func (l *countListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &countConn{Conn: c, reads: l.reads}, nil
+}
+
+type countConn struct {
+	net.Conn
+	reads *atomic.Int32
+	once  sync.Once
+}
+
+func (c *countConn) Read(b []byte) (int, error) {
+	c.once.Do(func() { c.reads.Add(1) })
+	return c.Conn.Read(b)
+}
+
+func TestIdleTCPDoesNotStallUDP(t *testing.T) {
+	g := &gateDNS{
+		open:    false,
+		gate:    net.ParseIP("172.16.0.1").To4(),
+		names:   map[string]struct{}{"probe.hermetarium.test": {}},
+		slots:   make(chan struct{}, maxInflight),
+		log:     newLog(t),
+		tcpWait: 5 * time.Second,
+	}
+	udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reads atomic.Int32
+	go g.serveUDP(udp)
+	go g.serveTCP(&countListener{Listener: raw, reads: &reads})
+	t.Cleanup(func() {
+		udp.Close()
+		raw.Close()
+	})
+
+	idle := make([]net.Conn, 0, maxInflight)
+	for i := 0; i < maxInflight; i++ {
+		c, err := net.Dial("tcp", raw.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		idle = append(idle, c)
+	}
+	t.Cleanup(func() {
+		for _, c := range idle {
+			c.Close()
+		}
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for reads.Load() < maxInflight && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := reads.Load(); got != maxInflight {
+		t.Fatalf("handlers reading %d idle connections, want %d", got, maxInflight)
+	}
+
+	// Far under the 5s TCP deadline the idle connections are held for.
+	const prompt = time.Second
+	client, err := net.DialUDP("udp4", nil, udp.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(prompt))
+	start := time.Now()
+	if _, err := client.Write(dnsQuery("probe.hermetarium.test", 1)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4096)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatalf("udp answer was not prompt (%s): %v", time.Since(start), err)
+	}
+	if time.Since(start) > prompt {
+		t.Fatalf("udp answer took %s", time.Since(start))
+	}
+	resp := buf[:n]
+	if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
+		t.Fatalf("udp answer len %d", len(resp))
+	}
+}
+
 func TestRotateReopenRestoresName(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dns.jsonl")
