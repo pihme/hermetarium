@@ -173,6 +173,7 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 }
 
 func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err error) {
+	defer func() { takeGateReady(id) }()
 	// A bad root file fails before any habitat directory or container.
 	if opts.Rootfs != "" {
 		if err := ext4Regular(opts.Rootfs); err != nil {
@@ -307,10 +308,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	}
 
 	gate := "htm-gate-" + id
-	if err := runAfterGate(opts, id, fcContainer); err != nil {
-		endStrong(id, dir)
-		return nil, err
-	}
 	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + fcContainer}); err != nil {
 		endStrong(id, dir)
 		return nil, err
@@ -335,6 +332,13 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			endStrong(id, dir)
 			return nil, err
 		}
+	}
+	// Squid is listening. DNS is what lets the entrypoint boot Firecracker,
+	// so a sidecar started here shares a netns where the gate is up and the
+	// guest has not started.
+	if err := runGateReady(root, id, fcContainer); err != nil {
+		endStrong(id, dir)
+		return nil, err
 	}
 	if err := startGateDNS(root, id, fcContainer, gate, plan.Gate, opts.TestLabel, conf); err != nil {
 		if !containerRunning(fcContainer) {

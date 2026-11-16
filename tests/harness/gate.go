@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/pihme/hermetarium/supervisor"
 )
@@ -18,23 +17,18 @@ const (
 	GrokLivePeer   = "api.x.ai parent 443 0 no-query no-digest originserver ssl tls-cafile=/etc/ssl/certs/ca-certificates.crt"
 )
 
-func StartProbe(root, id, netns, label string) error {
+func StartProbe(root, id, label string) error {
 	if err := supervisor.EnsureImageExists(supervisor.BusyboxImage); err != nil {
 		return err
 	}
 	probeDir := filepath.Join(root, "tests", "probe")
-	args := []string{
-		"run", "-d", "--name", "htm-probe-" + id,
-		"--network", "container:" + netns,
-		"-v", probeDir + ":/probe:ro",
-	}
+	args := []string{"-v", probeDir + ":/probe:ro"}
 	args = append(args, supervisor.TestLabelArgs(label)...)
 	args = append(args, supervisor.BusyboxImage, "httpd", "-f", "-p", "0.0.0.0:18080", "-h", "/probe")
-	_, err := supervisor.Docker(30*time.Second, args...)
-	return err
+	return supervisor.JoinGate(id, "htm-probe-"+id, args...)
 }
 
-func StartVendorMock(root, id, netns, label string) error {
+func StartVendorMock(root, id, label string) error {
 	bin, err := ensureVendorMock(root)
 	if err != nil {
 		return err
@@ -43,31 +37,28 @@ func StartVendorMock(root, id, netns, label string) error {
 		return err
 	}
 	args := []string{
-		"run", "-d", "--name", "htm-mock-" + id,
-		"--network", "container:" + netns,
 		"-e", "MOCK_EXPECT_KEY=" + TestVendorKey,
 		"-v", bin + ":/usr/local/bin/vendor-mock:ro",
 	}
 	args = append(args, supervisor.TestLabelArgs(label)...)
 	args = append(args, supervisor.AlpineImage, "/usr/local/bin/vendor-mock")
-	_, err = supervisor.Docker(30*time.Second, args...)
-	return err
+	return supervisor.JoinGate(id, "htm-mock-"+id, args...)
 }
 
-func extras(root string, probe, mock bool, label string) func(id, netns string) error {
-	return func(id, netns string) error {
+func registerSidecars(root, id, label string, probe, mock bool) {
+	supervisor.OnGateReady(id, func(string, string) error {
 		if probe {
-			if err := StartProbe(root, id, netns, label); err != nil {
+			if err := StartProbe(root, id, label); err != nil {
 				return err
 			}
 		}
 		if mock {
-			if err := StartVendorMock(root, id, netns, label); err != nil {
+			if err := StartVendorMock(root, id, label); err != nil {
 				return err
 			}
 		}
 		return nil
-	}
+	})
 }
 
 func ensureVendorMock(root string) (string, error) {
@@ -88,7 +79,6 @@ func echoOpts(root, label string) supervisor.CreateOpts {
 	return supervisor.CreateOpts{
 		Image:     EchoImage,
 		ACL:       filepath.Join(root, "examples", "echo", "squid.conf"),
-		AfterGate: extras(root, true, false, label),
 		TestLabel: label,
 		MemMiB:    128,
 		DiskMB:    256,
@@ -103,7 +93,6 @@ func agentdOpts(root, label string, mock bool) (supervisor.CreateOpts, error) {
 	return supervisor.CreateOpts{
 		Image:     AgentdImage,
 		ACL:       acl,
-		AfterGate: extras(root, false, mock, label),
 		TestLabel: label,
 		MemMiB:    128,
 		DiskMB:    256,
@@ -154,7 +143,6 @@ func inhabitantOpts(root, name, label string, mock bool) (supervisor.CreateOpts,
 	return supervisor.CreateOpts{
 		Image:     image,
 		ACL:       acl,
-		AfterGate: extras(root, false, mock, label),
 		TestLabel: label,
 		MemMiB:    2048,
 		DiskMB:    2048,

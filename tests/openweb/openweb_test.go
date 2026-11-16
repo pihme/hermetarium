@@ -87,12 +87,12 @@ func TestOpenWeb(t *testing.T) {
 				t.Fatal(err)
 			}
 			label := supervisor.TrackTestContainers(t)
+			supervisor.OnGateReady(id, func(string, string) error {
+				return startGitHubMock(mockBin, id, report, label)
+			})
 			opts := supervisor.CreateOpts{
 				Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
 				TestLabel: label,
-				AfterGate: func(hid, netns string) error {
-					return startGitHubMock(mockBin, hid, netns, report, label)
-				},
 			}
 			var dir string
 			if wall == "weak" {
@@ -261,13 +261,11 @@ func buildMock(t *testing.T, root string) string {
 	return bin
 }
 
-func startGitHubMock(bin, id, netns, report, label string) error {
+func startGitHubMock(bin, id, report, label string) error {
 	if err := supervisor.EnsureImageExists(supervisor.AlpineImage); err != nil {
 		return err
 	}
 	args := []string{
-		"run", "-d", "--name", "htm-mock-" + id,
-		"--network", "container:" + netns,
 		"-e", "MOCK_REPORT=/report/got",
 		"-e", "CERT_DIR=/report",
 		"-v", bin + ":/usr/local/bin/github-mock:ro",
@@ -275,8 +273,7 @@ func startGitHubMock(bin, id, netns, report, label string) error {
 	}
 	args = append(args, supervisor.TestLabelArgs(label)...)
 	args = append(args, supervisor.AlpineImage, "/usr/local/bin/github-mock")
-	_, err := supervisor.Docker(30*time.Second, args...)
-	return err
+	return supervisor.JoinGate(id, "htm-mock-"+id, args...)
 }
 
 func writeOriginCert(dir string) error {

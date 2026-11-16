@@ -68,12 +68,12 @@ func TestModelGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			label := supervisor.TrackTestContainers(t)
+			supervisor.OnGateReady(id, func(string, string) error {
+				return startModelMock(root, id, report, peerPort, label)
+			})
 			opts := supervisor.CreateOpts{
 				Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
 				TestLabel: label,
-				AfterGate: func(hid, netns string) error {
-					return startModelMock(root, hid, netns, report, peerPort, label)
-				},
 			}
 			if wall == "weak" {
 				t.Cleanup(func() { _ = supervisor.DestroyWeak(id) })
@@ -175,7 +175,7 @@ exec sleep 3600
 	return image
 }
 
-func startModelMock(root, id, netns, report, port, label string) error {
+func startModelMock(root, id, report, port, label string) error {
 	bin := filepath.Join(report, "vendor-mock")
 	cmd := exec.Command("go", "build", "-o", bin, "./tests/vendormock")
 	cmd.Dir = root
@@ -187,8 +187,6 @@ func startModelMock(root, id, netns, report, port, label string) error {
 		return err
 	}
 	args := []string{
-		"run", "-d", "--name", "htm-mock-" + id,
-		"--network", "container:" + netns,
 		"-e", "MOCK_EXPECT_KEY=" + modelKey,
 		"-e", "MOCK_REPORT=/report/got",
 		"-e", "LISTEN=:" + port,
@@ -197,8 +195,7 @@ func startModelMock(root, id, netns, report, port, label string) error {
 	}
 	args = append(args, supervisor.TestLabelArgs(label)...)
 	args = append(args, supervisor.AlpineImage, "/usr/local/bin/vendor-mock")
-	_, err := supervisor.Docker(30*time.Second, args...)
-	return err
+	return supervisor.JoinGate(id, "htm-mock-"+id, args...)
 }
 
 func assertBoxHasNoKey(t *testing.T, id string) {

@@ -14,6 +14,7 @@ import (
 )
 
 func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
+	defer func() { takeGateReady(id) }()
 	if opts.Rootfs != "" {
 		return nil, fmt.Errorf("the Docker wall rejects --rootfs")
 	}
@@ -80,10 +81,11 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 			return nil, err
 		}
 	}
-	if err := startGateDNS(root, id, gate, gate, plan.Gate, opts.TestLabel, conf); err != nil {
+	// Sidecars share this netns only after Squid is listening.
+	if err := runGateReady(root, id, gate); err != nil {
 		return nil, err
 	}
-	if err := runAfterGate(opts, id, gate); err != nil {
+	if err := startGateDNS(root, id, gate, gate, plan.Gate, opts.TestLabel, conf); err != nil {
 		return nil, err
 	}
 
