@@ -350,7 +350,8 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	// No inbound port, so the serial line is the signal the guest reached
-	// user space.
+	// user space. fc-init prints it only after the certificate install, so
+	// a failed install cannot look like a booted habitat.
 	if opts.NoInbound {
 		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 			return containerLogs(fcContainer), containerRunning(fcContainer)

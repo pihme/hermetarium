@@ -78,10 +78,14 @@ func TestExtract(t *testing.T) {
 	priv := strings.Index(init, "mkdir -p /root/.ssh /var/empty /run/sshd")
 	mode := strings.Index(init, "chmod 755 /run/sshd")
 	start := strings.Index(init, "/usr/sbin/sshd -f /fc-sshd.conf")
-	uname := strings.Index(init, "GUEST_UNAME=")
+	uname := strings.Index(init, "echo \"GUEST_UNAME=")
+	certAt := strings.Index(init, ". /gate-cert.sh || exit 1")
 	execAt := strings.LastIndex(init, "\nexec $cmd")
 	if pts < 0 || ip < 0 || priv < 0 || mode < 0 || start < 0 || uname < 0 || execAt < 0 || !(pts < ip && ip < priv && priv < mode && mode < start && start < uname && uname < execAt) {
 		t.Fatal("sshd must start after the guest address and /run/sshd, and before the inhabitant")
+	}
+	if certAt < 0 || certAt > uname {
+		t.Fatal("GUEST_UNAME= must follow a successful gate certificate install")
 	}
 	if !strings.Contains(init, `[ -x /usr/sbin/sshd ]`) {
 		t.Fatal("sshd must be skipped when the image has no server")

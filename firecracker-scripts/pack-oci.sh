@@ -150,7 +150,6 @@ END
     echo "fc-init: sshd did not start"
   fi
 fi
-echo "GUEST_UNAME=$(uname -r)"
 if [ -x /bin/busybox ] && /bin/busybox ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
   echo LEAK_OK
 elif command -v ping >/dev/null 2>&1 && ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
@@ -161,11 +160,14 @@ fi
 # Create passes hermetarium.ca only when HTTPS interception is on.
 # gate-cert.sh is the same install the weak wall executes. fc-init has no
 # set -e, so a failed install has to exit before the inhabitant starts.
+# Create treats the uname line as a booted guest. Printing it first would
+# write instance.json, then panic=1 reboot-loops this guest on exit 1.
 if [ -n "$ca" ]; then
   GATE_CA_URL="$ca"
   # shellcheck disable=SC1091
   . /gate-cert.sh || exit 1
 fi
+echo "GUEST_UNAME=$(uname -r)"
 cmd=$(cat /fc-cmd)
 echo "FC_CMD=$cmd"
 exec $cmd
