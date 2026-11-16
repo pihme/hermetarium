@@ -2,7 +2,7 @@
 
 A host script and a systemd user timer. They back up one running habitat with [Restic](https://restic.net/). The habitat keeps running. The script freezes `/data` through `hermetarium attach` for the read, then unfreezes it.
 
-Restic reads a disk file over more than one write. A read of the live file is not one moment, so the script does not do that. The habitat image needs `fsfreeze` (util-linux). Debian images already have it. An Alpine image needs `apk add util-linux`.
+Restic reads a disk file over more than one write. A read of the live file is not one moment, so the script does not do that. The habitat image needs `fsfreeze`, `setsid`, and `flock` (util-linux). Debian images already have them. An Alpine image needs `apk add util-linux`.
 
 A strong-wall habitat also needs an SSH server at `/usr/sbin/sshd` so attach can freeze the disk. For example `apk add openssh util-linux` or `apt-get install openssh-server`.
 
@@ -20,7 +20,9 @@ A strong-wall habitat also needs an SSH server at `/usr/sbin/sshd` so attach can
 - `var/<id>/squid.conf`, the gate file. It holds the model key.
 - `var/<id>/mitm/ca.key`, the gate's private key.
 
-The script refuses a data disk or a journal path that is one of those files, or a directory that contains them.
+The script refuses a data disk or a journal path that is one of those files, a hard link to one of them, or a directory that contains one of them, including by a hard link or a nested mount. That includes another habitat's `var/<id>/squid.conf` and `var/<id>/mitm/ca.key` under the same data directory. It also refuses `/` and any directory that contains `var/`.
+
+The running helper must be this habitat. `htm-fc-<id>` is used only when its `/log` mount is `var/<id>` under `HERMETARIUM_ROOT`. A different root that also has `var/<id>/squid.conf` is not this habitat.
 
 ## Settings
 
@@ -44,12 +46,13 @@ GIT_WARDEN_JOURNAL=/srv/opencode.journal
 | `RESTIC_PASSWORD_FILE` | File whose contents are the repository password. Required unless `RESTIC_PASSWORD` is set. |
 | `RESTIC_PASSWORD` | Password in the environment. Prefer the file. |
 | `HERMETARIUM_BACKUP_SCRIPT` | Absolute path of this script. Required. The timer runs this and nothing else. |
-| `PATH` | Command search path for the timer. Required to contain `restic`. The user manager does not use a login PATH. |
+| `PATH` | Command search path for the timer. Required to contain `restic` and `timeout`. The user manager does not use a login PATH. |
 | `HERMETARIUM_ID` | Habitat id. Required. The habitat must be running. |
 | `HERMETARIUM_DATA_DISK` | Host path passed to `create --data`. Required. It must be the disk that habitat has mounted. |
 | `GIT_WARDEN_JOURNAL` | File or directory of Git Warden's journal for this habitat. Required. |
 | `HERMETARIUM_ROOT` | Data directory. Optional. Same rule as the `hermetarium` command. Not the script path. |
 | `HERMETARIUM` | `hermetarium` binary. Optional. Otherwise `PATH`, then `$HERMETARIUM_ROOT/bin/hermetarium`. |
+| `HERMETARIUM_FREEZE_SECONDS` | Longest `restic backup` may keep `/data` frozen. Optional. Default 900. At most 21600 (6 hours). The guest unfreezes `/data` 30 seconds after that bound, measured from when the freeze returns, if this script did not. |
 
 This repository does not install Git Warden and does not define a journal format. Point `GIT_WARDEN_JOURNAL` at the journal you keep for that habitat.
 
@@ -59,7 +62,7 @@ Initialize the repository once, with those settings:
 restic init
 ```
 
-`backup.env` sets `HERMETARIUM_BACKUP_SCRIPT` and a `PATH` that contains `restic`. The systemd user manager does not use a login `PATH`. An empty `HERMETARIUM_ROOT` is not a script path.
+`backup.env` sets `HERMETARIUM_BACKUP_SCRIPT` and a `PATH` that contains `restic` and `timeout`. The systemd user manager does not use a login `PATH`. An empty `HERMETARIUM_ROOT` is not a script path.
 
 `chmod 600` the restic password file and `backup.env`. `backup.env` contains the password when `RESTIC_PASSWORD` is set.
 
@@ -74,7 +77,7 @@ systemctl --user enable --now hermetarium-backup.timer
 
 `loginctl enable-linger` keeps the timer running when you are logged out.
 
-If the script is killed while `/data` is frozen, unfreeze it:
+`restic backup` is stopped after `HERMETARIUM_FREEZE_SECONDS` (default 900, at most 6 hours). The script unfreezes `/data` then. The guest timer starts when the freeze returns. If the script is killed first, the guest unfreezes `/data` 30 seconds after that bound, so SIGKILL does not leave the disk frozen. To unfreeze it sooner:
 
 ```bash
 hermetarium attach YOUR_ID -- fsfreeze -u /data

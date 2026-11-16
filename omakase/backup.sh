@@ -4,7 +4,8 @@
 # key are not in that set.
 #
 # A restic read of the disk file takes longer than one write. Freeze /data
-# in the guest for the whole read so the image is one moment.
+# in the guest for the read so the image is one moment. The freeze is bounded:
+# restic is stopped, and the guest thaws /data even if this process is killed.
 set -eu
 
 die() {
@@ -32,28 +33,64 @@ data_root() {
   fi
 }
 
-# True when backing up $1 would store the gate file or the gate private key.
-is_secret() {
-  target=$(realpath "$1")
-  squid=$(realpath "$inst/squid.conf")
-  if [ "$target" = "$squid" ]; then
+# 0 when $1 is $2 or a path inside $2. "/" contains every path.
+# case "/"/* is "//*" and matches nothing, so the root is its own test.
+path_under() {
+  if [ "$2" = / ] || [ "$1" = "$2" ]; then
     return 0
   fi
-  if [ -f "$inst/mitm/ca.key" ]; then
-    key=$(realpath "$inst/mitm/ca.key")
-    if [ "$target" = "$key" ]; then
+  case "$1" in
+    "$2"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# 0 when directory $1 holds a regular file with one of the device:inode
+# values in the remaining arguments. Do not follow symlinks or read bytes.
+# No -xdev: restic backup crosses filesystems, so a nested mount is archived.
+# A match counts only after find itself succeeds. A failed walk is that
+# error, not a gate-file refusal, and it still stops before restic backup.
+dir_holds_inode() {
+  dir=$1
+  shift
+  list=$(find -P "$dir" -type f -printf '%D:%i\n') || die "could not walk $dir"
+  for ino in "$@"; do
+    case "
+$list
+" in
+      *"
+$ino
+"*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# True when backing up $1 would store a gate file or a gate private key.
+# Every habitat under this root counts. A hard link counts even from another
+# directory. "/" and any ancestor of var/ contain them.
+is_secret() {
+  target=$(realpath "$1")
+  var_dir=$(realpath "$root/var")
+  if path_under "$var_dir" "$target"; then
+    return 0
+  fi
+  # Device and inode are digits, so splitting this list is the comparison.
+  inos=
+  for secret in "$root"/var/*/squid.conf "$root"/var/*/mitm/ca.key; do
+    [ -e "$secret" ] || continue
+    # -ef follows the inode, so a hard link is the same file as the path.
+    if [ "$target" -ef "$secret" ]; then
       return 0
     fi
-  fi
-  if [ -d "$target" ]; then
-    case "$squid" in
-      "$target"/*) return 0 ;;
-    esac
-    if [ -n "${key:-}" ]; then
-      case "$key" in
-        "$target"/*) return 0 ;;
-      esac
+    if [ -d "$target" ] && path_under "$(realpath "$secret")" "$target"; then
+      return 0
     fi
+    ino=$(stat -c '%d:%i' "$secret") || return 0
+    inos="$inos $ino"
+  done
+  if [ -d "$target" ] && [ -n "$inos" ] && dir_holds_inode "$target" $inos; then
+    return 0
   fi
   return 1
 }
@@ -82,8 +119,32 @@ fi
 if [ ! -e "$GIT_WARDEN_JOURNAL" ]; then
   die "GIT_WARDEN_JOURNAL does not exist"
 fi
+# Leading zeros would be octal in $(( )). Reject a value that cannot be a
+# short bound before any $(( )) or [ -gt ]: bash wraps a huge integer and
+# dash errors. 6 hours is the longest freeze.
+freeze_seconds=${HERMETARIUM_FREEZE_SECONDS:-900}
+case "$freeze_seconds" in
+  *[!0-9]*) die "HERMETARIUM_FREEZE_SECONDS must be a number of seconds" ;;
+  ????????????????????*) die "HERMETARIUM_FREEZE_SECONDS is too large" ;;
+esac
+while [ -n "$freeze_seconds" ] && [ "${freeze_seconds#0}" != "$freeze_seconds" ]; do
+  freeze_seconds=${freeze_seconds#0}
+done
+[ -n "$freeze_seconds" ] || freeze_seconds=0
+case "$freeze_seconds" in
+  ??????????*) die "HERMETARIUM_FREEZE_SECONDS is too large" ;;
+esac
+if [ "$freeze_seconds" -eq 0 ]; then
+  die "HERMETARIUM_FREEZE_SECONDS must be at least 1"
+fi
+if [ "$freeze_seconds" -gt 21600 ]; then
+  die "HERMETARIUM_FREEZE_SECONDS is too large"
+fi
 if ! command -v restic >/dev/null 2>&1; then
   die "restic is not on PATH"
+fi
+if ! command -v timeout >/dev/null 2>&1; then
+  die "timeout is not on PATH"
 fi
 if ! command -v docker >/dev/null 2>&1; then
   die "docker is not on PATH"
@@ -126,6 +187,14 @@ fi
 if ! mounted=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/opt/data.ext4"}}{{.Source}}{{end}}{{end}}' "htm-fc-$HERMETARIUM_ID"); then
   die "cannot inspect htm-fc-$HERMETARIUM_ID"
 fi
+# The helper name is only the habitat id. A different HERMETARIUM_ROOT can
+# hold var/<id>/squid.conf and would otherwise be the secret check's root.
+if ! logdir=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/log"}}{{.Source}}{{end}}{{end}}' "htm-fc-$HERMETARIUM_ID"); then
+  die "cannot inspect htm-fc-$HERMETARIUM_ID"
+fi
+if [ -z "$logdir" ] || [ ! -d "$logdir" ] || [ "$(realpath "$logdir")" != "$(realpath "$inst")" ]; then
+  die "htm-fc-$HERMETARIUM_ID is not habitat $HERMETARIUM_ID under $root"
+fi
 if [ -z "$mounted" ]; then
   die "habitat $HERMETARIUM_ID has no data disk mounted"
 fi
@@ -144,12 +213,23 @@ done
 # attach closes stdin with SIGHUP. That can kill fsfreeze before /data is frozen.
 hold_dir=$(mktemp -d)
 frozen=0
+freeze_ok=0
+thaw_token=
 
-# frozen stays 1 until fsfreeze -u returns zero. A failed thaw is retried.
+# Under one guest lock: if this run still owns the token, thaw and consume it.
+# The sleeper re-reads the token under that same lock before fsfreeze -u.
+# A token already consumed is success, so a backstop that thawed first is
+# not reported as "stayed frozen", and a newer freeze is left alone.
+release_script=$(cat <<'END'
+flock -x /tmp/hermetarium-thaw.lock sh -c 'cur=$(cat /tmp/hermetarium-thaw.current 2>/dev/null || true); if [ "$cur" != "$1" ]; then exit 0; fi; fsfreeze -u /data || exit 1; printf "done\n" > /tmp/hermetarium-thaw.current' sh "$1"
+END
+)
+
+# frozen stays 1 until this run's freeze is released. A failed thaw is retried.
 thaw() {
   attempt=1
   while [ "$attempt" -le 5 ]; do
-    if "$bin" attach "$HERMETARIUM_ID" -- fsfreeze -u /data <&3 >&2; then
+    if "$bin" attach "$HERMETARIUM_ID" -- sh -c "$release_script" sh "$thaw_token" <&3 >&2; then
       frozen=0
       return 0
     fi
@@ -164,7 +244,9 @@ thaw() {
 cleanup() {
   rc=${1:-$?}
   trap - EXIT INT TERM
-  if [ "$frozen" = 1 ]; then
+  # Thaw only when the guest reported that fsfreeze -f succeeded.
+  # A matching token is not that report.
+  if [ "$frozen" = 1 ] && [ "$freeze_ok" = 1 ]; then
     thaw || echo "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data" >&2
   fi
   exec 3>&- 2>/dev/null || true
@@ -179,6 +261,14 @@ hold_fifo=$hold_dir/stdin
 mkfifo "$hold_fifo"
 exec 3<>"$hold_fifo"
 
+# Past timeout -k 10. A wrapped add would sleep less than freeze_seconds
+# and thaw while restic is still running. Abort before the freeze.
+guest_seconds=$((freeze_seconds + 30))
+if [ "$guest_seconds" -le "$freeze_seconds" ]; then
+  die "HERMETARIUM_FREEZE_SECONDS is too large"
+fi
+thaw_token=$(date +%s)-$$
+
 # ssh client errors and a missing fsfreeze happen before fsfreeze -f.
 # A later failure may mean the guest froze /data and attach still failed.
 ssh_never_ran() {
@@ -190,24 +280,92 @@ ssh_never_ran() {
     "$1"
 }
 
+# Armed only after fsfreeze -f returns, so a slow freeze cannot eat the cushion.
+# setsid -f is proved first: busybox setsid has no -f, and freezing before that
+# leaves /data frozen with no sleeper. The token is published under the same
+# lock, only after fsfreeze -f returns 0, by rename so a crash cannot truncate
+# the previous owner. A failed freeze does not touch that file.
+# The spliced quotes are one script: sleep, then re-read the token under the
+# lock and thaw. setsid -f returns at once; the child survives a host SIGKILL.
+# Guest status: 1 freeze did not stick, 2 froze and the sleeper did not arm,
+# 3 froze and the thaw under this lock failed.
+freeze_script=$(cat <<'END'
+sync
+command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }
+command -v flock >/dev/null 2>&1 || { echo "flock is not installed in this habitat" >&2; exit 1; }
+command -v setsid >/dev/null 2>&1 || { echo "setsid is not installed in this habitat" >&2; exit 1; }
+setsid -f true </dev/null >/dev/null 2>&1 || {
+  echo "could not arm the thaw timer" >&2
+  exit 1
+}
+token=$1
+seconds=$2
+mkdir -p /tmp
+thaw_file=/tmp/hermetarium-thaw.current
+lock=/tmp/hermetarium-thaw.lock
+flock -x "$lock" sh -c '
+if ! fsfreeze -f /data; then
+  exit 1
+fi
+# Same directory: mv is rename(2). The previous owner stays if this crashes.
+tmp="$2.$$"
+if printf "%s\n" "$1" > "$tmp" && mv -f "$tmp" "$2"; then
+  exit 0
+fi
+rm -f "$tmp"
+if fsfreeze -u /data; then
+  echo "could not arm the thaw timer" >&2
+  exit 1
+fi
+echo "data disk stayed frozen" >&2
+exit 3
+' sh "$token" "$thaw_file" || exit $?
+setsid -f sh -c 'sleep "$1"; flock -x "$2" sh -c '"'"'cur=$(cat "$2" 2>/dev/null || true); if [ "$cur" = "$1" ]; then fsfreeze -u /data && printf "done\n" > "$2"; fi'"'"' sh "$3" "$4"' sh "$seconds" "$lock" "$token" "$thaw_file" </dev/null >/dev/null 2>&1 || exit 2
+END
+)
+
+# The guest can freeze /data and still have attach return an error.
+# frozen stays 1 only when this run may have frozen. freeze_ok is the
+# guest's report that fsfreeze -f succeeded; a token match is not.
+frozen=1
 freeze_log=$hold_dir/freeze.err
-if ! "$bin" attach "$HERMETARIUM_ID" -- sh -c 'sync; command -v fsfreeze >/dev/null 2>&1 || { echo "fsfreeze is not installed in this habitat" >&2; exit 1; }; fsfreeze -f /data' <&3 >"$freeze_log" 2>&1; then
+rc=0
+"$bin" attach "$HERMETARIUM_ID" -- sh -c "$freeze_script" sh "$thaw_token" "$guest_seconds" <&3 >"$freeze_log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
   cat "$freeze_log" >&2
   if ssh_never_ran "$freeze_log"; then
+    frozen=0
     if grep -q "Connection refused" "$freeze_log"; then
       die "could not freeze /data (the habitat image needs an SSH server at /usr/sbin/sshd)"
     fi
     die "could not freeze /data (attach did not run fsfreeze)"
   fi
   if grep -q "fsfreeze is not installed" "$freeze_log"; then
+    frozen=0
     die "could not freeze /data (fsfreeze is not installed in this habitat)"
   fi
-  frozen=1
+  # 2: fsfreeze -f succeeded, setsid did not. The text is the thaw timer.
+  if [ "$rc" -eq 2 ]; then
+    freeze_ok=1
+    die "could not arm the thaw timer"
+  fi
+  # Publish failed and the thaw under this lock failed. The guest line is the signal.
+  if grep -q "data disk stayed frozen" "$freeze_log"; then
+    frozen=0
+    die "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data"
+  fi
+  # setsid -f failed before the freeze. Nothing was frozen.
+  if grep -q "could not arm the thaw timer" "$freeze_log"; then
+    frozen=0
+    exit 1
+  fi
   die "could not freeze /data (the habitat image needs fsfreeze from util-linux)"
 fi
-frozen=1
+freeze_ok=1
 
-restic backup --json --tag hermetarium \
+# -k so a restic that ignores TERM cannot hold the freeze. The guest timer
+# started when the freeze returned and stays past this kill wait.
+timeout -k 10 "$freeze_seconds" restic backup --json --tag hermetarium \
   "$inst/io.jsonl" \
   "$inst/access.log" \
   "$journal" \
