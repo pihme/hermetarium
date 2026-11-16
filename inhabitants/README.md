@@ -8,7 +8,7 @@ An inhabitant lives in its own container. [Squid](https://www.squid-cache.org/) 
 | [grok-build](grok-build/README.md) | Grok Build | xAI, `api.x.ai` | tested | tested |
 | [opencode](opencode/README.md) | OpenCode | the upstream you name, `model.hermetarium.test` | smoke | not in the suite |
 
-Claude Code and Grok Build have been run on both walls by hand, with a real key: a question, then a second question that continues the conversation. The automated tests use a stand-in model and do not cover that. OpenCode is optional. Its smoke is the Docker wall and a pretend model, with no paid key. Echo and agentd stay the images for the wall, egress, and log tests.
+Claude Code and Grok Build have been run on both walls by hand, with a real key: a question, then a second question that continues the conversation. The automated tests use a stand-in model and do not cover that. OpenCode is optional. Its smoke is the Docker wall and a pretend model, with no paid key. Echo and agentd stay the images for the wall, egress, and log tests. The terminal setup that boots the OpenCode image on the strong wall is `omakase/opencode-tui/`.
 
 ## Who is who
 

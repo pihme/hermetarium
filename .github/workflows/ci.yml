@@ -32,6 +32,8 @@ jobs:
             pkgs: ./tests/model
           - name: openweb
             pkgs: ./tests/openweb
+          - name: opencode-tui
+            pkgs: ./tests/opencode-tui
           - name: backup
             pkgs: ./tests/backup
           - name: unit

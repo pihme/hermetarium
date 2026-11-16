@@ -8,6 +8,8 @@ Inside the box, OpenCode may run commands and edit files without stopping to ask
 
 The picture of the gate is in the [inhabitants README](../README.md). In that picture the model is whatever OpenAI-compatible endpoint you name. The box calls `http://model.hermetarium.test/v1`.
 
+This image is also what [omakase/opencode-tui](../../omakase/opencode-tui/README.md) boots on the strong wall. That setup does not publish Porter's port. You attach, and OpenCode runs in `tmux`. The image has `tmux`, an SSH server at `/usr/sbin/sshd`, `git`, `rg`, and the usual build tools for that.
+
 Free OpenCode Zen models, such as `opencode/big-pickle`, need no key. This image does not use them, and this gate file does not open a path to them. The smoke path with no paid key is a pretend model on the gate.
 
 ## squid.conf
