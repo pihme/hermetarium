@@ -111,7 +111,10 @@ esac
 			t.Fatal(err)
 		}
 		got := strings.TrimSpace(stderr)
-		want := "attach: this image has no SSH server at /usr/sbin/sshd; strong-wall attach needs one (see USAGE)"
+		want := "attach: nothing listens on port 22 in the guest: the image has no SSH server at /usr/sbin/sshd, or it did not start (see USAGE)"
+		if AttachPort22Closed != want {
+			t.Fatalf("AttachPort22Closed=%q", AttachPort22Closed)
+		}
 		if code != 1 || stdout != "" || got != want {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}

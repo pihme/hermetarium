@@ -335,6 +335,7 @@ if [ "$rc" -ne 0 ]; then
   cat "$freeze_log" >&2
   if ssh_never_ran "$freeze_log"; then
     frozen=0
+    # Unreachable for a current strong-wall attach, which rewrites this text; an older hermetarium binary still prints Connection refused.
     if grep -q "Connection refused" "$freeze_log"; then
       die "could not freeze /data (the habitat image needs an SSH server at /usr/sbin/sshd)"
     fi

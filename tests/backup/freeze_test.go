@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestFreezeReports(t *testing.T) {
 	writeExe(t, filepath.Join(bin, "restic"), "#!/bin/sh\nexit 0\n")
 	writeDockerStub(t, filepath.Join(bin, "docker"))
 	herm := filepath.Join(root, "hermetarium")
-	writeExe(t, herm, `#!/bin/sh
+	writeExe(t, herm, fmt.Sprintf(`#!/bin/sh
 if [ "$1" = logs ]; then
   exit 0
 fi
@@ -64,7 +65,7 @@ case " $* " in
 esac
 case "$ATTACH_MODE" in
   refused)
-    echo "attach: this image has no SSH server at /usr/sbin/sshd; strong-wall attach needs one (see USAGE)" >&2
+    echo %q >&2
     ;;
   timeout)
     echo "attach: ssh: connect to host 172.16.0.2 port 22: Connection timed out" >&2
@@ -92,7 +93,7 @@ case "$ATTACH_MODE" in
     ;;
 esac
 exit 1
-`)
+`, supervisor.AttachPort22Closed))
 
 	run := func(t *testing.T, mode string) string {
 		t.Helper()
@@ -137,4 +138,67 @@ exit 1
 			t.Fatalf("thaw failure missing\n%s", out)
 		}
 	})
+}
+
+// TestFreezeReportsAttachNeedle reads the backup.sh grep for the rewritten
+// strong-wall refusal. That needle has to be inside the attach error, or a
+// reword sends the freeze to "needs fsfreeze". The sentence is not copied here.
+func TestFreezeReportsAttachNeedle(t *testing.T) {
+	checkout, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(checkout, "omakase", "backup.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	needle, err := rewrittenAttachGrep(string(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(supervisor.AttachPort22Closed, needle) {
+		t.Fatalf("backup.sh grep %q is not in the attach error %q", needle, supervisor.AttachPort22Closed)
+	}
+}
+
+// rewrittenAttachGrep is the grep -q needle whose die names an SSH server,
+// other than the older "Connection refused" branch.
+func rewrittenAttachGrep(script string) (string, error) {
+	lines := strings.Split(script, "\n")
+	var found string
+	for i, line := range lines {
+		needle, ok := quotedGrepQ(line)
+		if !ok || needle == "Connection refused" {
+			continue
+		}
+		end := i + 4
+		if end > len(lines) {
+			end = len(lines)
+		}
+		if !strings.Contains(strings.Join(lines[i:end], "\n"), "needs an SSH server") {
+			continue
+		}
+		if found != "" {
+			return "", fmt.Errorf("more than one attach grep in backup.sh")
+		}
+		found = needle
+	}
+	if found == "" {
+		return "", fmt.Errorf("backup.sh has no grep for the rewritten attach error")
+	}
+	return found, nil
+}
+
+func quotedGrepQ(line string) (string, bool) {
+	const mark = `grep -q "`
+	i := strings.Index(line, mark)
+	if i < 0 {
+		return "", false
+	}
+	rest := line[i+len(mark):]
+	j := strings.IndexByte(rest, '"')
+	if j < 0 {
+		return "", false
+	}
+	return rest[:j], true
 }
