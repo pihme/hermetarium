@@ -34,17 +34,6 @@ const (
 // binary can be rejected without downloading the release asset.
 var fcPin = fcSHA256
 
-type StrongInstance struct {
-	ID                   string `json:"id"`
-	Wall                 string `json:"wall"`
-	FirecrackerContainer string `json:"firecrackerContainer"`
-	InboundURL           string `json:"inboundUrl"`
-	NoInbound            bool   `json:"noInbound"`
-	LogPath              string `json:"logPath"`
-	SerialPath           string `json:"serialPath"`
-	Dir                  string `json:"dir"`
-}
-
 func cacheFile(root, name string) (string, error) {
 	dir := CacheDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -196,12 +185,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	if err := containerFree(fcContainer); err != nil {
 		return nil, err
 	}
-	if err := EnsureImageExists(opts.Image); err != nil {
-		return nil, err
-	}
-	if err := EnsureNetTools(root); err != nil {
-		return nil, err
-	}
 	firecracker, kernel, err := EnsureStrongAssets(root)
 	if err != nil {
 		return nil, err
@@ -214,14 +197,8 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			return nil, err
 		}
 	}
-	dir, err := InstanceDir(root, id)
+	dir, conf, https, err := prepareHabitat(root, id, opts)
 	if err != nil {
-		return nil, err
-	}
-	if err := InstallACL(dir, opts.ACL); err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
 		return nil, err
 	}
 	src := cached
@@ -244,21 +221,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	}()
 	logPath := filepath.Join(dir, "io.jsonl")
 	serialPath := filepath.Join(dir, "serial.log")
-	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
-		return nil, err
-	}
-	conf, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
-	if err != nil {
-		return nil, err
-	}
-	if ACLWantsHTTPS(conf) {
-		if err := PrepareMITM(dir); err != nil {
-			return nil, err
-		}
-		if err := InitMITMDB(root, dir); err != nil {
-			return nil, err
-		}
-	}
 	scripts, err := fcScriptsDir(root)
 	if err != nil {
 		return nil, err
@@ -271,7 +233,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	}
 	plan := StrongPlan()
 	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg + " " + plan.KernelArgs()
-	if ACLWantsHTTPS(conf) {
+	if https {
 		bootArgs += " hermetarium.ca=" + plan.CAURL()
 	}
 	vm := map[string]any{
@@ -319,7 +281,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	// The entrypoint accepts tcp/18081 from the bridge gateway unless
 	// this is set. The gate file is copied unchanged and may still listen there.
 	fcArgs = append(fcArgs, "-e", "GATE_IP="+plan.Gate, "-e", "GUEST_IP="+plan.Guest, "-e", "GATE_CIDR="+plan.CIDR, "-e", "GATE_PREFIX="+strconv.Itoa(plan.Prefix))
-	if ACLWantsHTTPS(conf) {
+	if https {
 		fcArgs = append(fcArgs, "-e", "GATE_HTTPS=1")
 	}
 	if opts.NoInbound {
@@ -330,9 +292,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", strongRootfsVolume(dir),
 	)
-	if err := writeGateRules(dir); err != nil {
-		return nil, err
-	}
 	fcArgs = append(fcArgs,
 		"-v", entrypoint+":/entrypoint.sh:ro",
 		"-v", dir+":/log",
@@ -371,7 +330,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		endStrong(id, dir)
 		return nil, err
 	}
-	if ACLWantsHTTPS(conf) {
+	if https {
 		if err := serveGateCA(id, fcContainer, plan.Gate, opts.TestLabel, dir); err != nil {
 			endStrong(id, dir)
 			return nil, err
@@ -402,15 +361,12 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", FirecrackerContainer: fcContainer, InboundURL: url, NoInbound: opts.NoInbound,
+		ID: id, Wall: "strong", FirecrackerContainer: fcContainer, Gate: gate,
+		GateIP: plan.Gate, BoxIP: plan.Guest,
+		InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
-	b, err := json.MarshalIndent(inst, "", "  ")
-	if err != nil {
-		endStrong(id, dir)
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
+	if err := writeInstance(inst); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}

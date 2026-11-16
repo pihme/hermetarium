@@ -2,12 +2,10 @@ package supervisor
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,24 +19,17 @@ var errNoInbound = errors.New("this habitat has no inbound address")
 var errEmptyInboundURL = errors.New("instance metadata has an empty inbound URL")
 
 func InboundURLFromDir(dir string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+	inst, err := readInstanceFile(dir)
 	if err != nil {
 		return "", err
 	}
-	var meta struct {
-		InboundURL string `json:"inboundUrl"`
-		NoInbound  bool   `json:"noInbound"`
-	}
-	if err := json.Unmarshal(b, &meta); err != nil {
-		return "", err
-	}
-	if meta.NoInbound {
+	if inst.NoInbound {
 		return "", errNoInbound
 	}
-	if meta.InboundURL == "" {
+	if inst.InboundURL == "" {
 		return "", errEmptyInboundURL
 	}
-	return meta.InboundURL, nil
+	return inst.InboundURL, nil
 }
 
 func LoadInboundURL(root, id string) (string, error) {

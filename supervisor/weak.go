@@ -3,7 +3,6 @@ package supervisor
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -14,58 +13,16 @@ import (
 	"time"
 )
 
-type WeakInstance struct {
-	ID         string `json:"id"`
-	Wall       string `json:"wall"`
-	Network    string `json:"network"`
-	Gate       string `json:"gate"`
-	Box        string `json:"box"`
-	GateIP     string `json:"gateIp"`
-	BoxIP      string `json:"boxIp"`
-	InboundURL string `json:"inboundUrl"`
-	NoInbound  bool   `json:"noInbound"`
-	LogPath    string `json:"logPath"`
-	Dir        string `json:"dir"`
-}
-
 func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if opts.Rootfs != "" {
 		return nil, fmt.Errorf("the Docker wall rejects --rootfs")
 	}
-	if err := EnsureImageExists(opts.Image); err != nil {
-		return nil, err
-	}
-	if err := EnsureNetTools(root); err != nil {
-		return nil, err
-	}
-	dir, err := InstanceDir(root, id)
+	dir, conf, https, err := prepareHabitat(root, id, opts)
 	if err != nil {
 		return nil, err
 	}
 	plan := WeakPlan(id)
-	if err := InstallACL(dir, opts.ACL); err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
-		return nil, err
-	}
 	logPath := filepath.Join(dir, "io.jsonl")
-	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
-		return nil, err
-	}
-	conf, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
-	if err != nil {
-		return nil, err
-	}
-	https := ACLWantsHTTPS(conf)
-	if https {
-		if err := PrepareMITM(dir); err != nil {
-			return nil, err
-		}
-		if err := InitMITMDB(root, dir); err != nil {
-			return nil, err
-		}
-	}
 	network := "htm-" + id
 	gate := "htm-gate-" + id
 	box := "htm-box-" + id
@@ -183,11 +140,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		GateIP: plan.Gate, BoxIP: plan.Guest, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, Dir: dir,
 	}
-	b, err := json.MarshalIndent(inst, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
+	if err := writeInstance(inst); err != nil {
 		return nil, err
 	}
 	cleanup = false
@@ -835,18 +788,6 @@ func forgetSameBridgeLocked(bridge string, forceOwned bool) error {
 		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)
 	}
 	return nil
-}
-
-func LoadWeak(root, id string) (*WeakInstance, error) {
-	b, err := os.ReadFile(filepath.Join(VarDir(root), id, "instance.json"))
-	if err != nil {
-		return nil, err
-	}
-	var inst WeakInstance
-	if err := json.Unmarshal(b, &inst); err != nil {
-		return nil, err
-	}
-	return &inst, nil
 }
 
 func SyncInstanceLog(dir string) error {

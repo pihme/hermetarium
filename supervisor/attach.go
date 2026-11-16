@@ -77,18 +77,11 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 }
 
 func loadRunning(root, id string) (running, error) {
-	var inst running
-	b, err := os.ReadFile(filepath.Join(VarDir(root), id, "instance.json"))
+	inst, err := loadInstance(root, id)
 	if err != nil {
-		return inst, err
+		return running{}, err
 	}
-	if err := json.Unmarshal(b, &inst); err != nil {
-		return inst, err
-	}
-	if inst.Dir == "" {
-		inst.Dir = filepath.Join(VarDir(root), id)
-	}
-	return inst, nil
+	return running{Wall: inst.Wall, Box: inst.Box, FirecrackerContainer: inst.FirecrackerContainer, Dir: inst.Dir}, nil
 }
 
 func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {

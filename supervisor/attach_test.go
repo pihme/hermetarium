@@ -959,14 +959,27 @@ func TestAttachDestroyRemovesKey(t *testing.T) {
 	}
 	id := newTestID(t)
 	dir := attachKeyDir(root, id)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	instDir := filepath.Join(VarDir(root), id)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+		_ = os.RemoveAll(instDir)
+	})
 	if _, err := writeAttachKey(root, id); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "id_ed25519")); err != nil {
 		t.Fatal(err)
 	}
-	_ = Run([]string{"destroy", id})
+	// destroy reads the wall. A missing record must not enter both teardowns.
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInstance(&Instance{ID: id, Wall: "strong", FirecrackerContainer: "htm-fc-" + id, Dir: instDir}); err != nil {
+		t.Fatal(err)
+	}
+	if code := Run([]string{"destroy", id}); code != 0 {
+		t.Fatalf("destroy exited %d", code)
+	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("attach key dir remains: %v", err)
 	}

@@ -140,12 +140,20 @@ func Run(args []string) int {
 			return 2
 		}
 		id := rest[0]
-		dir := filepath.Join(VarDir(root), id)
-		if err := SyncInstanceLog(dir); err != nil {
+		inst, err := loadInstance(root, id)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		recs, err := ReadIoLog(filepath.Join(dir, "io.jsonl"))
+		if err := SyncInstanceLog(inst.Dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		logPath := inst.LogPath
+		if logPath == "" {
+			logPath = filepath.Join(inst.Dir, "io.jsonl")
+		}
+		recs, err := ReadIoLog(logPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -160,11 +168,8 @@ func Run(args []string) int {
 			usage()
 			return 2
 		}
-		id := rest[0]
-		weakErr := DestroyWeak(id)
-		endStrong(id, filepath.Join(VarDir(root), id))
-		if weakErr != nil {
-			fmt.Fprintln(os.Stderr, weakErr)
+		if err := Destroy(root, rest[0]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
 		return 0
