@@ -1,6 +1,6 @@
 # Backup
 
-A host script and a systemd user timer. They back up one running habitat with [Restic](https://restic.net/). The habitat keeps running. The script pauses the Firecracker container `htm-fc-<id>` for the read, then unpauses that same container. It does not restart the container. A restart kills Firecracker.
+A host script and a systemd user timer. They back up one running habitat with [Restic](https://restic.net/). The script pauses the Firecracker container `htm-fc-<id>` and the guest for the restic read, then unpauses that same container. The habitat continues without a restart. A restart kills Firecracker. While the container is paused, `url` and `attach` to that habitat do not answer. The pause bound defaults to 900 seconds (`HERMETARIUM_PAUSE_SECONDS`, at most 21600).
 
 ## What is backed up
 
@@ -85,10 +85,13 @@ docker unpause htm-fc-YOUR_ID
 restic restore latest --target /tmp/restore
 ```
 
+The snapshot is the host root file at the pause instant, without a guest freeze. In-flight guest writes may be missing. The restored ext4 may need journal replay. Run `e2fsck -p` on the restored file before `create --rootfs`. Exit status 1 means `e2fsck` changed the filesystem.
+
 `create --wall strong --rootfs FILE` copies that ext4 file, keeping holes, to `var/<id>/rootfs.ext4` and boots the copy. With `--rootfs` set, Hermetarium does not pack `--image` into the root disk. `--image` and `--acl` stay required. The file must be a regular file with ext4 magic. The Docker wall rejects `--rootfs`. `destroy` deletes the copy and leaves `FILE`.
 
 ```bash
 ROOT=/tmp/restore/path/to/var/YOUR_ID/rootfs.ext4
+e2fsck -p "$ROOT" || test $? -le 1
 hermetarium create --wall strong --rootfs "$ROOT" --image IMAGE --acl ACL
 ```
 
