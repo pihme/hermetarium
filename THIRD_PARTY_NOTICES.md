@@ -4,7 +4,7 @@ Hermetarium itself is licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Th
 
 ## Compiled into the `hermetarium` and `porter` binaries
 
-Both binaries use only the Go standard library (`go.mod` has no requirements). The Firecracker helper scripts in `firecracker-helper/` are this project's own code, embedded in the `hermetarium` binary.
+Both binaries use only the Go standard library (`go.mod` has no requirements). The Firecracker scripts in `firecracker-helper/` are this project's own code, embedded in the `hermetarium` binary.
 
 ### Go standard library and runtime
 
@@ -45,7 +45,7 @@ Hermetarium doesn't contain these. The supervisor runs them as separate processe
 
 | Program | License | Used by |
 | --- | --- | --- |
-| [Docker](https://www.docker.com/) / [runc](https://github.com/opencontainers/runc) | Apache-2.0 | Weak wall; also runs the Squid container and the Firecracker helper container |
+| [Docker](https://www.docker.com/) / [runc](https://github.com/opencontainers/runc) | Apache-2.0 | Weak wall; also runs the gate and the Firecracker container |
 | [Squid](https://www.squid-cache.org/), base image in `supervisor/squid/Dockerfile`, Ubuntu package `squid-openssl` | GPL-2.0-or-later | The only network path of a habitat. `create` builds `hermetarium-squid:local` from that base. Runs as a sibling process; Hermetarium does not link it |
 | [Firecracker](https://github.com/firecracker-microvm/firecracker) v1.16.1 | Apache-2.0 | Strong wall; downloaded from its GitHub release into the cache dir on the first strong `create` or `make test` |
 

@@ -46,7 +46,7 @@ never_direct allow all
 
 The model host still uses its own path, and your key stays on that path. This opens plain HTTP, port 80.
 
-To let the container download packages and open ordinary sites over HTTPS, edit the same copy. Squid decrypts those calls. The log names the site and the path. The page body stays out of the log. The assistant sets no proxy and installs no certificate. When you start the habitat, Hermetarium puts the gate's certificate into the container. The private key stays on the gate. The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
+To let the container download packages and open ordinary sites over HTTPS, edit the same copy. Squid decrypts those calls. The log names the site and the path. The page body stays out of the log. The inhabitant sets no proxy and installs no certificate. When you start the habitat, Hermetarium puts the gate's certificate into the container. The private key stays on the gate. The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
 
 Comment these lines in. Remove the `#` at the start of each one. In the file they are marked `OPEN-HTTPS`.
 
@@ -77,7 +77,7 @@ Build Hermetarium:
 make build
 ```
 
-Build the small helper that carries your question to Claude, then build the image:
+Build porter, which carries your question to Claude, then build the image:
 
 ```bash
 go build -o inhabitants/claude-code/porter ./porter

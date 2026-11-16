@@ -40,7 +40,7 @@ Two walls can hold that container. The container image is the same on both. A we
 
 <a id="getting-started"></a>
 
-From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container receives `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`. The host itself needs no sudo.
+From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. The Firecracker container receives `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`. The host itself needs no sudo.
 
 From source:
 
@@ -159,7 +159,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 ## Layout
 
 - `supervisor/` — the `hermetarium` program
-- `firecracker-helper/` — scripts for the strong wall, packed inside the binary
+- `firecracker-helper/` — the Firecracker scripts, packed inside the binary
 - `porter/` — the small program that carries a question to Claude or Grok
 - `inhabitants/` — Claude Code and Grok Build, plus the shared gate README
 - `examples/` — echo, and the agentd stand-in

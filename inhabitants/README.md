@@ -1,6 +1,6 @@
 # Inhabitants
 
-An inhabitant is a coding assistant in its own container. [Squid](https://www.squid-cache.org/) is the gate in front of that container. The two `squid.conf` files share one shape. Each file names a different model company.
+An inhabitant lives in its own container. [Squid](https://www.squid-cache.org/) is the gate in front of that container. The two `squid.conf` files share one shape. Each file names a different model company.
 
 | Folder | Hermetarium runs | Vendor is | Docker | Firecracker |
 | --- | --- | --- | --- | --- |
@@ -11,7 +11,7 @@ Both inhabitants have been run on both walls by hand, with a real key: a questio
 
 ## Who is who
 
-**Hermetarium** is the container `create` starts. In `squid.conf` that container is the peer named `inhabitant`. The assistant inside listens on port 8080.
+**Habitat** is what `create` starts: the image on a wall, with the gate in front of it. In `squid.conf` the image is the peer named `inhabitant`. The inhabitant listens on port 8080. Hermetarium is the product, not that container.
 
 **Vendor** is the model company's API. In `squid.conf` that API is the peer named `vendor`. The container does not call the company by its real name. It calls a stand-in host (`claude.hermetarium.test` or `grok.hermetarium.test`). Squid is the one that connects to the real API.
 
@@ -29,28 +29,28 @@ The two trips through Squid are the same gate.
 
 ## How the gate reaches the Internet
 
-The assistant must not reach the Internet. Squid must. Both walls do this with the network, not with a rule inside the assistant. The assistant is root, so a rule inside it would not hold.
+The inhabitant must not reach the Internet. Squid must. Both walls do this with the network, not with a rule inside the inhabitant. The inhabitant is root, so a rule inside it would not hold.
 
 A private address such as `10.98.0.3` cannot talk to the Internet by itself. The host has to rewrite the source address to its own on the way out, and rewrite the reply on the way back. That rewrite is NAT (network address translation). Without it, packets leave and no reply can come back, so the connection hangs. Without NAT, a program cannot get out. With NAT, any program on that network can.
 
 **Docker wall.**
 
 ```
-   assistant ──▶ gate (Squid) ──▶ Docker's default bridge ──NAT──▶ Internet
+   inhabitant ──▶ gate (Squid) ──▶ Docker's default bridge ──NAT──▶ Internet
         └──────────────┘
         habitat network: --internal, no NAT
 ```
 
 - Each habitat gets its own network, `htm-<id>`. It is created `--internal`, so Docker drops all traffic between that network and the outside. No NAT is applied to it.
-- The assistant sits only on that network. Its default route points at the gate.
+- The inhabitant sits only on that network. Its default route points at the gate.
 - The gate sits on that network and also on Docker's default bridge. The default bridge does NAT. That is the only way out, and Squid is the only program in the gate that uses it.
-- In the gate, forwarding is switched off (`iptables -P FORWARD DROP`). Web calls from the assistant's own subnet (port 80, and 443 if you open HTTPS) are redirected into Squid. Anything else the assistant sends dies in the gate.
-- The assistant has `NET_ADMIN` and may change its own routes. Pointing its default route at the host bridge reaches nothing, because the network is internal.
+- In the gate, forwarding is switched off (`iptables -P FORWARD DROP`). Web calls from the inhabitant's own subnet (port 80, and 443 if you open HTTPS) are redirected into Squid. Anything else the inhabitant sends dies in the gate.
+- The inhabitant has `NET_ADMIN` and may change its own routes. Pointing its default route at the host bridge reaches nothing, because the network is internal.
 - The gate has an address on the default bridge, and Squid listens on all addresses. So the gate also drops everything arriving from the bridge (`iptables -P INPUT DROP`). It accepts only the habitat network, loopback, replies, and, unless you passed `--no-inbound`, your question on port 18081 from the bridge gateway, where the published port arrives. Another container on the default bridge cannot connect to Squid, so it cannot borrow your key. The habitat side is matched by network interface, not address, because a container can forge an address.
 
-You need no firewall change on the host. Do not add a masquerade rule for the habitat networks: it would be the only thing that could let an assistant out.
+You need no firewall change on the host. Do not add a masquerade rule for the habitat networks: it would be the only thing that could let an inhabitant out.
 
-**Firecracker wall.** The virtual machine sits on a TAP device inside a helper container. Squid runs in the same container. The helper forwards nothing (`FORWARD DROP`) and has no NAT rule for the TAP device, and web calls from the machine are redirected into Squid. It also drops everything arriving on its Docker bridge address, except your question on port 18081 from the bridge gateway when inbound is published, so other containers cannot reach Squid. The machine cannot get out, and Squid reaches the Internet through the helper's own Docker network.
+**Firecracker wall.** The microVM sits on a TAP device inside the Firecracker container. The gate is a second container and joins that container's network namespace. The names and the ids are in [Usage](../USAGE.md#two-walls). The Firecracker container forwards nothing (`FORWARD DROP`) and has no NAT rule for the TAP device, and web calls from the machine are redirected into Squid. It also drops everything arriving on its Docker bridge address, except your question on port 18081 from the bridge gateway when inbound is published, so other containers cannot reach Squid. The machine cannot get out, and Squid reaches the Internet through the Firecracker container's own Docker network.
 
 ## What every squid.conf shares
 
@@ -107,4 +107,4 @@ cache_peer_access vendor allow vendorhost
 cache_peer_access vendor deny all
 ```
 
-The container's plain HTTP to the rest of the web is present as comments marked `OPEN-IN` and `OPEN-OUT`. Ordinary HTTPS is the block marked `OPEN-HTTPS`. Squid decrypts those calls, and the assistant does not set a proxy. The gate is an OpenSSL Squid.  Each inhabitant README says which lines to comment in and which to comment out.
+The container's plain HTTP to the rest of the web is present as comments marked `OPEN-IN` and `OPEN-OUT`. Ordinary HTTPS is the block marked `OPEN-HTTPS`. Squid decrypts those calls, and the inhabitant does not set a proxy. The gate is an OpenSSL Squid.  Each inhabitant README says which lines to comment in and which to comment out.
