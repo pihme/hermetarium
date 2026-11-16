@@ -28,8 +28,6 @@ jobs:
             pkgs: ./tests/inhabitants
           - name: guest-docker
             pkgs: ./tests/guest-docker
-          - name: data-disk
-            pkgs: ./tests/data-disk
           - name: model
             pkgs: ./tests/model
           - name: openweb

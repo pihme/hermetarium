@@ -29,8 +29,8 @@ type WeakInstance struct {
 }
 
 func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
-	if opts.DataPath != "" {
-		return nil, fmt.Errorf("--data applies only to --wall strong")
+	if opts.Rootfs != "" {
+		return nil, fmt.Errorf("the Docker wall rejects --rootfs")
 	}
 	if err := EnsureImageExists(opts.Image); err != nil {
 		return nil, err

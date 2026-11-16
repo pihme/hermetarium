@@ -20,10 +20,10 @@ type CreateOpts struct {
 	DiskMB int
 	CPUs   int // 0 means the wall default: one guest CPU, no Docker quota
 
-	// DataPath is a host file attached as a second disk on the strong wall.
-	// DataMiB is used only when that file does not exist yet.
-	DataPath string
-	DataMiB  int
+	// Rootfs is a host ext4 file. On the strong wall it is copied, keeping
+	// holes, to var/<id>/rootfs.ext4 and booted instead of a fresh pack of
+	// Image. Empty means pack Image. The Docker wall rejects it.
+	Rootfs string
 
 	// NoInbound publishes no host port, does not wait for port 8080, and
 	// does not accept the inbound port from the bridge gateway. The strong

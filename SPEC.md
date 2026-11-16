@@ -53,7 +53,7 @@ The words to use, and the ones to avoid, are in [GLOSSARY.md](GLOSSARY.md).
 
 ## 6. Walls
 
-**Same image.** Isolation is the wall. Both walls boot the **same OCI image**: same root filesystem, same inhabitant process (that image’s entrypoint/CMD). The strong wall is not a second, smaller guest world. How Firecracker gets a disk from the OCI image (export to ext4, or equivalent) is an implementation detail of that wall.
+**Same image.** Isolation is the wall. Both walls boot the **same OCI image**: same root filesystem, same inhabitant process (that image’s entrypoint/CMD). The strong wall is not a second, smaller guest world. How Firecracker gets a disk from the OCI image (export to ext4, or equivalent) is an implementation detail of that wall. `create --wall strong --rootfs FILE` uses that file as the strong wall's root disk instead of a fresh pack of that image. `--image` and `--acl` are still required. `destroy` deletes the copy and leaves `FILE`.
 
 | Wall | Mechanism | Kernel | Typical supervisor |
 | --- | --- | --- | --- |

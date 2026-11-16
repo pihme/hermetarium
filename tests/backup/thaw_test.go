@@ -11,9 +11,9 @@ import (
 	"github.com/pihme/hermetarium/supervisor"
 )
 
-// restic backup fails after the freeze. The main path never reaches thaw.
-// A later WRITE_n means the EXIT trap unfroze /data.
-func TestBackupThawOnResticFailure(t *testing.T) {
+// restic backup fails after the pause. The script fails, and a later WRITE_n
+// means the EXIT trap unpaused the Firecracker container.
+func TestBackupUnpauseOnResticFailure(t *testing.T) {
 	if _, err := supervisor.Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,6 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 	cli := buildCLI(t, checkout)
 	root := checkout
 
-	disk := filepath.Join(t.TempDir(), "disk.ext4")
 	acl := filepath.Join(t.TempDir(), "squid.conf")
 	echo, err := os.ReadFile(filepath.Join(checkout, "examples", "echo", "squid.conf"))
 	if err != nil {
@@ -55,7 +54,6 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 	hab, err := supervisor.CreateStrong(root, id, supervisor.WithTestLabel(t, supervisor.CreateOpts{
 		Image: backupImage, ACL: acl, NoInbound: true,
 		MemMiB: 128, DiskMB: 256,
-		DataPath: disk, DataMiB: 32,
 	}))
 	if err != nil {
 		_ = supervisor.DestroyStrong(id)
@@ -82,7 +80,6 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 		"HERMETARIUM_ROOT=" + root,
 		"HERMETARIUM=" + cli,
 		"HERMETARIUM_ID=" + id,
-		"HERMETARIUM_DATA_DISK=" + disk,
 		"GIT_WARDEN_JOURNAL=" + journal,
 		"RESTIC_REPOSITORY=" + repo,
 		"RESTIC_PASSWORD_FILE=" + password,
@@ -102,7 +99,6 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 		"HERMETARIUM_ROOT=" + root,
 		"HERMETARIUM=" + cli,
 		"HERMETARIUM_ID=" + id,
-		"HERMETARIUM_DATA_DISK=" + disk,
 		"GIT_WARDEN_JOURNAL=" + journal,
 		"RESTIC_REPOSITORY=" + repo,
 		"RESTIC_PASSWORD_FILE=" + password,
@@ -117,7 +113,11 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 		t.Fatalf("backup.sh exited 0\n%s", out)
 	}
 	if _, statErr := os.Stat(stamp); statErr != nil {
-		t.Fatalf("restic backup did not run after the freeze\n%s", out)
+		t.Fatalf("restic backup did not run after the pause\n%s", out)
+	}
+	state, _ := supervisor.Docker(10*time.Second, "inspect", "-f", "{{.State.Status}} {{.State.Paused}}", hab.FirecrackerContainer)
+	if strings.TrimSpace(state) != "running false" {
+		t.Fatalf("Firecracker container not running after a failed backup: %q\n%s", state, out)
 	}
 
 	returned, _ := supervisor.Docker(10*time.Second, "logs", hab.FirecrackerContainer)

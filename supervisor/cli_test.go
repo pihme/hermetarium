@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -38,16 +40,24 @@ func TestResolveCreate(t *testing.T) {
 	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--disk", "nope"}); err == nil {
 		t.Fatal("expected --disk to reject a non-integer")
 	}
-	withData, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"})
-	if err != nil || withData.DataPath != "/tmp/disk.ext4" || withData.DataMiB != 1024 {
-		t.Fatalf("data defaults %+v %v", withData, err)
+	for _, args := range [][]string{
+		{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"},
+		{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data-size", "64"},
+	} {
+		_, err := ResolveCreate(args)
+		if err == nil || !strings.Contains(err.Error(), "the strong wall has no data disk") {
+			t.Fatalf("%v: %v", args, err)
+		}
 	}
-	sizedData, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4", "--data-size", "64"})
-	if err != nil || sizedData.DataMiB != 64 {
-		t.Fatalf("data size %+v %v", sizedData, err)
+	withRoot, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--rootfs", "/tmp/root.ext4"})
+	if err != nil || withRoot.Rootfs != "/tmp/root.ext4" {
+		t.Fatalf("rootfs %+v %v", withRoot, err)
 	}
-	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data-size", "64"}); err == nil {
-		t.Fatal("expected --data-size to require --data")
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--rootfs"}); err == nil {
+		t.Fatal("expected --rootfs to require a file")
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--rootfs", "-root.ext4"}); err == nil {
+		t.Fatal("expected --rootfs to reject a flag")
 	}
 	if ex.CPUs != 0 {
 		t.Fatalf("default cpus %d", ex.CPUs)
@@ -144,25 +154,112 @@ func TestCreateRejectsCPUsAboveWallLimit(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsDataOnWeakWall(t *testing.T) {
-	code := Run([]string{"create", "--wall", "weak", "--image", "hermetarium/echo:dev", "--acl", "/tmp/acl.conf", "--data", "/tmp/disk.ext4"})
+func TestCreateRejectsRootfsOnWeakWall(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	code := Run([]string{"create", "--wall", "weak", "--image", "img", "--acl", "acl.conf", "--rootfs", "root.ext4"})
+	w.Close()
+	os.Stderr = old
+	b, _ := io.ReadAll(r)
 	if code != 2 {
-		t.Fatalf("code=%d", code)
+		t.Fatalf("code=%d stderr=%q", code, b)
+	}
+	if !bytes.Contains(b, []byte("the Docker wall rejects --rootfs")) {
+		t.Fatalf("stderr %q", b)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("created %v", entries)
 	}
 }
 
-func TestCreateRejectsBadDataFlag(t *testing.T) {
+func TestExt4Regular(t *testing.T) {
+	dir := t.TempDir()
+	if err := ext4Regular(dir); err == nil || !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("directory: %v", err)
+	}
+	missing := filepath.Join(dir, "missing")
+	if err := ext4Regular(missing); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("missing: %v", err)
+	}
+	bad := filepath.Join(dir, "not-ext4")
+	if err := os.WriteFile(bad, []byte("not a filesystem"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(bad); err == nil || !strings.Contains(err.Error(), "not ext4") {
+		t.Fatalf("non-ext4: %v", err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(bad, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(link); err == nil || !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("symlink: %v", err)
+	}
+	good := filepath.Join(dir, "ok.ext4")
+	f, err := os.OpenFile(good, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{0x53, 0xEF}, 0x438); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(good); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(good); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("ext4 check changed the file")
+	}
+}
+
+func TestCreateRejectsDataDisk(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	cases := [][]string{
+		{"create", "--wall", "weak", "--image", "img", "--acl", "acl.conf", "--data", "disk.ext4"},
+		{"create", "--wall", "weak", "--image", "img", "--acl", "acl.conf", "--data-size", "64"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "disk.ext4"},
 		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data"},
 		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "--mem"},
-		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "-disk.ext4"},
-		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data", "disk:ext4"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data-size", "64"},
+		{"create", "--wall", "strong", "--image", "img", "--acl", "acl.conf", "--data-size"},
 	}
 	for _, args := range cases {
-		if code := Run(args); code != 2 {
-			t.Fatalf("%v code=%d", args, code)
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := os.Stderr
+		os.Stderr = w
+		code := Run(args)
+		w.Close()
+		os.Stderr = old
+		b, _ := io.ReadAll(r)
+		if code != 2 || !bytes.Contains(b, []byte("the strong wall has no data disk")) {
+			t.Fatalf("%v code=%d stderr=%q", args, code, b)
 		}
 	}
 	entries, err := os.ReadDir(dir)

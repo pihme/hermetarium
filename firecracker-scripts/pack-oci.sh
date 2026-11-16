@@ -46,7 +46,7 @@ mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
 mount -t tmpfs tmpfs /run 2>/dev/null || true
 mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
 # virtio-rng (VM config "entropy") shows up as virtio_rng.N. Wait briefly:
-# the misc node can lag devtmpfs the same way /dev/vdb does.
+# the misc node can lag devtmpfs.
 rng=missing
 i=0
 while [ "$i" -lt 50 ]; do
@@ -67,31 +67,8 @@ elif /bin/busybox timeout 2 /fc-getrandom; then
 else
   echo GUEST_GETRANDOM_FAIL
 fi
-# hermetarium.data=1 means create --data. The node can lag devtmpfs.
-if grep -q 'hermetarium.data=1' /proc/cmdline 2>/dev/null; then
-  i=0
-  while [ "$i" -lt 50 ]; do
-    if [ -b /dev/vdb ]; then
-      break
-    fi
-    sleep 0.1
-    i=$((i + 1))
-  done
-  mkdir -p /data
-  # destroy powers the machine off. sync makes a finished write durable.
-  # Do not start the inhabitant when the disk will not mount.
-  if ! mount -t ext4 -o sync,noatime /dev/vdb /data; then
-    echo DATA_MOUNT_FAIL
-    # panic=1 drops the tty buffer when PID 1 exits. Stay up past the
-    # host's 200ms poll so the mount error is in the Firecracker container log.
-    # destroy stops the Firecracker container; create does not wait out this sleep.
-    sleep 1
-    exit 1
-  fi
-  echo DATA_MOUNT_OK
-fi
-# Same shell, after a successful data mount, so the daemon inherits the image
-# environment. Before the network wait and before the inhabitant.
+# Same shell, so the daemon inherits the image environment. Before the
+# network wait and before the inhabitant.
 if [ -f /fc-env ]; then
   set -a
   # shellcheck disable=SC1091

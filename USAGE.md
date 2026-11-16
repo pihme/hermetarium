@@ -73,22 +73,12 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--cpus N` works on both walls. The strong wall gives the guest that many processors, from 1 to 32. The Docker wall sets that CPU quota (`--cpus`), from 1 up to the host's CPU count. A value outside that range is rejected before a virtual machine or container starts. Leave it off and the guest has one processor, and the Docker wall has no quota.
 
-`--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. An existing file that is not ext4 is refused. If the guest cannot mount the data disk, create fails and the habitat is removed. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
-
-Hermetarium keeps a lock beside that file, named `FILE.lock`. A refused file gets no lock. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.
+`--rootfs FILE` is the strong wall's root disk instead of a fresh pack of `--image`. The file must already be a regular file with ext4 magic. Hermetarium copies it, keeping holes, to `var/<id>/rootfs.ext4` and boots the copy. `--image` and `--acl` are still required. `destroy` deletes the copy and leaves `FILE`. The Docker wall rejects `--rootfs`. A backup snapshot is that host root file at the pause instant, without a guest freeze. In-flight guest writes may be missing. The restored ext4 may need journal replay. Run `e2fsck -p` on the restored file before `create --rootfs`. Exit status 1 means `e2fsck` changed the filesystem.
 
 ```bash
-rm FILE FILE.lock
+e2fsck -p FILE || test $? -le 1
+./bin/hermetarium create --wall strong --rootfs FILE --image IMAGE --acl ACL
 ```
-
-To read the file on the host, stop the habitat first. `destroy` powers the machine off. Check the filesystem, then mount it read-only:
-
-```bash
-sudo e2fsck -p FILE || test $? -le 1
-sudo mount -o loop,ro,noexec,nosuid,nodev FILE /mnt
-```
-
-`e2fsck -p` replays the journal and applies other safe fixes. Exit status 1 means it changed the filesystem, and the read-only mount should still run. `noexec,nosuid,nodev` keeps a program stored on the disk from running while you read it. Unmount the file before the next `create --data`.
 
 Ask where it is listening:
 
@@ -307,7 +297,7 @@ Start it. The command prints an id: `YOUR_ID`.
 
 Take the Claude install from one folder and Grok's model address from another, or skip porter and put your own program on port 8080. The wall cares that something listens.
 
-The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another base is fine when it keeps the contract above: root, port 8080, `ip`, the stand-in model address, and a stand-in key. A strong-wall terminal or backup freeze also needs an SSH server at `/usr/sbin/sshd` (see above); an image that only uses the weak wall does not.
+The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another base is fine when it keeps the contract above: root, port 8080, `ip`, the stand-in model address, and a stand-in key. A strong-wall terminal needs an SSH server at `/usr/sbin/sshd` (see above). A backup does not: it pauses the Firecracker container and does not freeze the guest. An image that only uses the weak wall does not need that server.
 
 **Docker in Docker.** Start from an image that can run Docker, such as `docker:29-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. On the strong wall the guest init mounts cgroup2 at `/sys/fs/cgroup`, plus `/dev/pts`, `/dev/shm`, and `/run`. This kernel rejects at least one cgroup controller, so the stock `docker:29-dind` entrypoint loops. Enable controllers one at a time, as `tests/guest-docker/start.sh` does, or start `dockerd` directly. This kernel has no `CONFIG_IP_NF_RAW`, so set `DOCKER_INSECURE_NO_IPTABLES_RAW=1` in the image. Give the machine room with `--mem` and `--disk`.
 

@@ -7,12 +7,6 @@ mkdir -p /log
 rm -f /log/dns.ready
 test -c /dev/kvm || { echo "fc-scripts: no /dev/kvm" >&2; exit 1; }
 test -c /dev/net/tun || { echo "fc-scripts: no /dev/net/tun" >&2; exit 1; }
-# create returns, so this process holds the lock until the habitat stops.
-if [ -e /opt/data.lock ]; then
-  exec 9<>/opt/data.lock
-  flock -n 9 || { echo "fc-scripts: data disk in use" >&2; exit 1; }
-  : > /log/data.claimed
-fi
 
 ip tuntap add tap0 mode tap
 ip addr add 172.16.0.1/24 dev tap0
