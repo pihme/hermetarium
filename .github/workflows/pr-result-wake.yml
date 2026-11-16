@@ -41,8 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     # Several PR pipelines finishing for the same commit within the window give one wake (the last one).
+    # Failed runs on the default branch get one wake per workflow, so CI and Pages failing on the same commit
+    # both arrive.
     concurrency:
-      group: pr-result-wake-${{ github.repository }}-${{ github.event.workflow_run.head_sha }}
+      group: pr-result-wake-${{ github.repository }}-${{ github.event.workflow_run.head_sha }}-${{ github.event.workflow_run.event == 'pull_request' && 'pr' || github.event.workflow_run.name }}
       cancel-in-progress: true
     steps:
       - name: Find the PR (or the failed default-branch run) and POST one wake
