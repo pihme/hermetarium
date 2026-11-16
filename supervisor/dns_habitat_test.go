@@ -86,7 +86,7 @@ func TestGateDNS(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					dir, gate = inst.Dir, strongGateIP
+					dir, gate = inst.Dir, StrongPlan().Gate
 				}
 				logs := waitMarker(t, wall, id, "DNS_DONE")
 				ns := markerValue(logs, "DNS_NS")

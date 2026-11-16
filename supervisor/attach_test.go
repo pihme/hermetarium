@@ -338,6 +338,8 @@ func TestDebianSshdPrivsep(t *testing.T) {
 		t.Fatal("fc-init does not create /run/sshd before sshd")
 	}
 	conf := sshdConfFromInit(t, init)
+	// sshd -t needs an address. The guest fills this from the plan.
+	conf = strings.ReplaceAll(conf, "$guest", "172.16.0.2")
 	script := "set -eu\n" +
 		"export DEBIAN_FRONTEND=noninteractive\n" +
 		"apt-get update -qq\n" +
@@ -381,7 +383,7 @@ func fcInitFromPack(t *testing.T, pack string) string {
 
 func sshdConfFromInit(t *testing.T, init string) string {
 	t.Helper()
-	const start = "cat > /fc-sshd.conf << 'END'\n"
+	const start = "cat > /fc-sshd.conf << END\n"
 	i := strings.Index(init, start)
 	if i < 0 {
 		t.Fatal("fc-init has no sshd config")

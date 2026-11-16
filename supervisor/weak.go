@@ -42,7 +42,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	sub := SubnetForID(id)
+	plan := WeakPlan(id)
 	if err := InstallACL(dir, opts.ACL); err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		// --internal makes Docker block every route out of this network, so
 		// the box cannot leave even with NET_ADMIN. The gate also joins the
 		// default bridge below, which is the only path to the Internet.
-		"network", "create", "--driver", "bridge", "--internal", "--subnet", sub.CIDR,
+		"network", "create", "--driver", "bridge", "--internal", "--subnet", plan.CIDR,
 		network,
 	); err != nil {
 		return nil, err
@@ -103,27 +103,27 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	if err := runSquid(root, gate, dir, opts.TestLabel, append([]string{
 		"--network", "bridge",
-		"--add-host", "inhabitant:" + sub.Box,
+		"--add-host", "inhabitant:" + plan.Guest,
 		"--sysctl", "net.ipv4.ip_forward=1",
 	}, inboundPublish(opts.NoInbound)...)); err != nil {
 		return nil, err
 	}
-	if _, err := Docker(30*time.Second, "network", "connect", "--ip", sub.Gate, network, gate); err != nil {
+	if _, err := Docker(30*time.Second, "network", "connect", "--ip", plan.Gate, network, gate); err != nil {
 		return nil, err
 	}
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
 	// One script, same bytes the strong helper runs. Failure must not start the box.
-	if err := applyGateRules(gate, dir, sub.Gate, sub.CIDR, https, opts.NoInbound); err != nil {
+	if err := applyGateRules(gate, dir, plan.Gate, plan.CIDR, https, opts.NoInbound); err != nil {
 		return nil, err
 	}
 	if https {
-		if err := serveGateCA(id, gate, sub.Gate, opts.TestLabel, dir); err != nil {
+		if err := serveGateCA(id, gate, plan.Gate, opts.TestLabel, dir); err != nil {
 			return nil, err
 		}
 	}
-	if err := startGateDNS(root, id, gate, gate, sub.Gate, opts.TestLabel, conf); err != nil {
+	if err := startGateDNS(root, id, gate, gate, plan.Gate, opts.TestLabel, conf); err != nil {
 		return nil, err
 	}
 	if err := runAfterGate(opts, id, gate); err != nil {
@@ -133,18 +133,17 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	// Docker keeps 127.0.0.11 on an --internal network and answers outside
 	// names with SERVFAIL. Mount the gate resolver before the image command.
 	resolv := filepath.Join(dir, "resolv.conf")
-	if err := os.WriteFile(resolv, []byte("nameserver "+sub.Gate+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(resolv, []byte("nameserver "+plan.Gate+"\n"), 0o644); err != nil {
 		return nil, err
 	}
 	boxArgs := []string{
 		"run", "-d", "--name", box,
-		"--network", network, "--ip", sub.Box,
+		"--network", network, "--ip", plan.Guest,
 		"--cap-add", "NET_ADMIN",
 		"-v", resolv + ":/etc/resolv.conf:ro",
-		"--add-host", ProbeHost + ":" + sub.Gate,
 	}
-	for _, h := range VendorHosts() {
-		boxArgs = append(boxArgs, "--add-host", h+":"+sub.Gate)
+	for _, h := range plan.Names {
+		boxArgs = append(boxArgs, "--add-host", h+":"+plan.Gate)
 	}
 	if opts.CPUs > 0 {
 		boxArgs = append(boxArgs, "--cpus", strconv.Itoa(opts.CPUs))
@@ -164,7 +163,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	// resolv.conf is mounted read-only. This only installs the default route.
 	if _, err := Docker(15*time.Second,
 		"exec", box, "sh", "-c",
-		"ip route replace default via "+sub.Gate+" || ip route add default via "+sub.Gate,
+		"ip route replace default via "+plan.Gate+" || ip route add default via "+plan.Gate,
 	); err != nil {
 		return nil, err
 	}
@@ -181,7 +180,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	inst := &WeakInstance{
 		ID: id, Wall: "weak", Network: network, Gate: gate, Box: box,
-		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url, NoInbound: opts.NoInbound,
+		GateIP: plan.Gate, BoxIP: plan.Guest, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")

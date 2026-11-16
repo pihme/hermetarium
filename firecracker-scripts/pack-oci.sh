@@ -75,6 +75,77 @@ if [ -f /fc-env ]; then
   . /fc-env
   set +a
 fi
+# Address plan is on the kernel command line. Create is the only writer.
+# A token that is not an address must not reach the shell.
+ipv4() {
+  old=$IFS
+  set -f
+  IFS=.
+  set -- $1
+  IFS=$old
+  set +f
+  [ $# -eq 4 ] || return 1
+  for o do
+    case $o in
+      ''|*[!0-9]*) return 1 ;;
+    esac
+    [ ${#o} -le 3 ] || return 1
+    n=$o
+    while [ "${n#0}" != "$n" ]; do n=${n#0}; done
+    [ -n "$n" ] || n=0
+    [ "$n" -le 255 ] || return 1
+  done
+}
+hostnames() {
+  old=$IFS
+  set -f
+  IFS=,
+  set -- $1
+  IFS=$old
+  set +f
+  [ $# -ge 1 ] || return 1
+  for h do
+    case $h in
+      ''|*[!A-Za-z0-9.-]*|.*|*.|-*|*-|*..*) return 1 ;;
+    esac
+  done
+}
+b64=
+ca=
+gate=
+guest=
+prefix=
+names=
+for tok in $(cat /proc/cmdline); do
+  case $tok in
+    hermetarium.pub=*) b64=${tok#hermetarium.pub=} ;;
+    hermetarium.ca=*) ca=${tok#hermetarium.ca=} ;;
+    hermetarium.gate=*) gate=${tok#hermetarium.gate=} ;;
+    hermetarium.guest=*) guest=${tok#hermetarium.guest=} ;;
+    hermetarium.prefix=*) prefix=${tok#hermetarium.prefix=} ;;
+    hermetarium.names=*) names=${tok#hermetarium.names=} ;;
+  esac
+done
+case $b64 in
+  *[!A-Za-z0-9+/=]*|"") b64="" ;;
+esac
+case $ca in
+  *[!A-Za-z0-9:/._-]*) ca="" ;;
+esac
+if ! ipv4 "$gate" || ! ipv4 "$guest" || ! hostnames "$names"; then
+  echo "fc-init: gate address missing"
+  exit 1
+fi
+case $prefix in
+  ''|*[!0-9]*) echo "fc-init: gate address missing"; exit 1 ;;
+esac
+n=$prefix
+while [ "${n#0}" != "$n" ]; do n=${n#0}; done
+[ -n "$n" ] || n=0
+if [ "$n" -lt 1 ] || [ "$n" -gt 32 ]; then
+  echo "fc-init: gate address missing"
+  exit 1
+fi
 IP=/sbin/ip
 [ -x "$IP" ] || IP="ip"
 $IP link set lo up 2>/dev/null || true
@@ -87,25 +158,15 @@ while [ "$i" -lt 30 ]; do
   i=$((i + 1))
 done
 $IP link set eth0 up 2>/dev/null || true
-$IP addr add 172.16.0.2/24 dev eth0 2>/dev/null || true
-$IP route add default via 172.16.0.1 2>/dev/null || true
+$IP addr add "$guest/$prefix" dev eth0 2>/dev/null || true
+$IP route add default via "$gate" 2>/dev/null || true
 # The image ships an empty resolv.conf, and this guest's hosts file has no localhost.
-printf 'nameserver 172.16.0.1\n' > /etc/resolv.conf
+printf 'nameserver %s\n' "$gate" > /etc/resolv.conf
 printf '127.0.0.1 localhost\n' >> /etc/hosts
-printf '172.16.0.1 probe.hermetarium.test claude.hermetarium.test grok.hermetarium.test model.hermetarium.test\n' >> /etc/hosts
+list=$(printf '%s' "$names" | tr ',' ' ')
+printf '%s %s\n' "$gate" "$list" >> /etc/hosts
 # The image that wants a terminal brings sshd. The public key is per habitat,
 # on the kernel command line, so one cached rootfs can boot many habitats.
-b64=
-ca=
-for tok in $(cat /proc/cmdline); do
-  case $tok in
-    hermetarium.pub=*) b64=${tok#hermetarium.pub=} ;;
-    hermetarium.ca=*) ca=${tok#hermetarium.ca=} ;;
-  esac
-done
-case $b64 in
-  *[!A-Za-z0-9+/=]*|"") b64="" ;;
-esac
 if [ -n "$b64" ] && [ -x /usr/sbin/sshd ]; then
   # The tmpfs on /run hides the directory Debian's sshd requires.
   mkdir -p /root/.ssh /var/empty /run/sshd
@@ -116,8 +177,8 @@ if [ -n "$b64" ] && [ -x /usr/sbin/sshd ]; then
   if [ -x /usr/bin/ssh-keygen ]; then
     /usr/bin/ssh-keygen -A >/dev/null 2>&1 || true
   fi
-  cat > /fc-sshd.conf << 'END'
-ListenAddress 172.16.0.2
+  cat > /fc-sshd.conf << END
+ListenAddress $guest
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -148,7 +209,7 @@ fi
 # Create passes hermetarium.ca only when HTTPS interception is on.
 # gate-cert.sh is the same install the weak wall executes.
 if [ -n "$ca" ]; then
-  GATE_CA_URL=$ca
+  GATE_CA_URL="$ca"
   # shellcheck disable=SC1091
   . /gate-cert.sh
 fi

@@ -74,10 +74,7 @@ func TestOpenWeb(t *testing.T) {
 			}
 			// Squid refuses an intercepted name whose address is not the
 			// destination the box connected to. The box uses the gate address.
-			gateIP := supervisor.SubnetForID(id).Gate
-			if wall == "strong" {
-				gateIP = "172.16.0.1"
-			}
+			gateIP := supervisor.PlanFor(wall, id).Gate
 			hosts := gateIP + " pinned.example api.github.com other.example\n"
 			if err := os.WriteFile(filepath.Join(instDir, "hosts"), []byte(hosts), 0o644); err != nil {
 				t.Fatal(err)

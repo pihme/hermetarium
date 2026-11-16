@@ -36,10 +36,6 @@ type CreateOpts struct {
 	TestLabel string
 }
 
-func VendorHosts() []string {
-	return []string{ClaudeHost, GrokHost, ModelHost}
-}
-
 func memMiB(o CreateOpts) int {
 	if o.MemMiB > 0 {
 		return o.MemMiB

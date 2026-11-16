@@ -39,6 +39,9 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "vsock") {
 		t.Fatal("entrypoint.sh still builds a vsock terminal")
 	}
+	if strings.Contains(string(b), "172.16.0.1") || strings.Contains(string(b), "probe.hermetarium.test") {
+		t.Fatal("entrypoint.sh carries a gate address or a stand-in name")
+	}
 	b, err = os.ReadFile(pack)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +73,7 @@ func TestExtract(t *testing.T) {
 		t.Fatal("fc-init carries its own certificate install")
 	}
 	pts := strings.Index(init, "/dev/pts")
-	ip := strings.Index(init, "172.16.0.2/24")
+	ip := strings.Index(init, `addr add "$guest/$prefix"`)
 	priv := strings.Index(init, "mkdir -p /root/.ssh /var/empty /run/sshd")
 	mode := strings.Index(init, "chmod 755 /run/sshd")
 	start := strings.Index(init, "/usr/sbin/sshd -f /fc-sshd.conf")
@@ -85,8 +88,11 @@ func TestExtract(t *testing.T) {
 	if strings.Count(init, ". /fc-env") != 1 {
 		t.Fatal("/fc-env sourced more than once")
 	}
-	if !strings.Contains(string(b), "nameserver 172.16.0.1") || !strings.Contains(string(b), "127.0.0.1 localhost") {
+	if !strings.Contains(init, `nameserver %s`) || !strings.Contains(string(b), "127.0.0.1 localhost") {
 		t.Fatal("pack-oci.sh missing gate resolver or localhost")
+	}
+	if strings.Contains(string(b), "172.16.0.1") || strings.Contains(init, "probe.hermetarium.test") {
+		t.Fatal("pack-oci.sh carries a gate address or a stand-in name")
 	}
 	if !strings.Contains(string(b), "GUEST_RNG=") || !strings.Contains(string(b), "/fc-getrandom") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_OK") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_SKIPPED") {
 		t.Fatal("pack-oci.sh must record virtio-rng and a bounded getrandom")

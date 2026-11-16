@@ -209,7 +209,7 @@ func attachSSH(root, id, fcContainer string, argv []string, in, out, errOut *os.
 		"-o", "BatchMode=yes",
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=2",
-		"root@"+strongGuestIP,
+		"root@"+StrongPlan().Guest,
 		"--",
 		sshRemoteCommand(argv),
 	)

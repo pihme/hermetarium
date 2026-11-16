@@ -34,10 +34,6 @@ const (
 // binary can be rejected without downloading the release asset.
 var fcPin = fcSHA256
 
-const strongGuestIP = "172.16.0.2"
-const strongGateIP = "172.16.0.1"
-const strongGateCIDR = "172.16.0.0/24"
-
 type StrongInstance struct {
 	ID                   string `json:"id"`
 	Wall                 string `json:"wall"`
@@ -273,9 +269,10 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	if err != nil {
 		return nil, err
 	}
-	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg
+	plan := StrongPlan()
+	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg + " " + plan.KernelArgs()
 	if ACLWantsHTTPS(conf) {
-		bootArgs += " hermetarium.ca=http://" + strongGateIP + ":" + strconv.Itoa(GateCAPort) + "/ca.pem"
+		bootArgs += " hermetarium.ca=" + plan.CAURL()
 	}
 	vm := map[string]any{
 		"boot-source": map[string]any{
@@ -321,7 +318,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	fcArgs = append(fcArgs, inboundPublish(opts.NoInbound)...)
 	// The entrypoint accepts tcp/18081 from the bridge gateway unless
 	// this is set. The gate file is copied unchanged and may still listen there.
-	fcArgs = append(fcArgs, "-e", "GATE_IP="+strongGateIP, "-e", "GUEST_IP="+strongGuestIP, "-e", "GATE_CIDR="+strongGateCIDR, "-e", "GATE_PREFIX=24")
+	fcArgs = append(fcArgs, "-e", "GATE_IP="+plan.Gate, "-e", "GUEST_IP="+plan.Guest, "-e", "GATE_CIDR="+plan.CIDR, "-e", "GATE_PREFIX="+strconv.Itoa(plan.Prefix))
 	if ACLWantsHTTPS(conf) {
 		fcArgs = append(fcArgs, "-e", "GATE_HTTPS=1")
 	}
@@ -375,12 +372,12 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	if ACLWantsHTTPS(conf) {
-		if err := serveGateCA(id, fcContainer, strongGateIP, opts.TestLabel, dir); err != nil {
+		if err := serveGateCA(id, fcContainer, plan.Gate, opts.TestLabel, dir); err != nil {
 			endStrong(id, dir)
 			return nil, err
 		}
 	}
-	if err := startGateDNS(root, id, fcContainer, gate, strongGateIP, opts.TestLabel, conf); err != nil {
+	if err := startGateDNS(root, id, fcContainer, gate, plan.Gate, opts.TestLabel, conf); err != nil {
 		if !containerRunning(fcContainer) {
 			err = waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 				return containerLogs(fcContainer), containerRunning(fcContainer)
