@@ -22,20 +22,22 @@ If you run the command from another folder, set `HERMETARIUM_ROOT` to this repos
 export HERMETARIUM_ROOT=/path/to/hermetarium
 ```
 
-The Firecracker helper scripts are inside the `hermetarium` binary. Squid is an image Docker pulls. Away from a checkout, a habitat's files live in `~/.local/share/hermetarium/var/` and the cache lives in `~/.cache/hermetarium`.
+The Firecracker scripts are inside the `hermetarium` binary. The directory in this checkout is `firecracker-helper/`. Squid is an image Docker pulls. Away from a checkout, a habitat's files live in `~/.local/share/hermetarium/var/` and the cache lives in `~/.cache/hermetarium`.
 
 You need Docker and Go 1.24 or newer. The strong wall also needs Linux, `/dev/kvm`, and x86_64.
 
 ## Two walls
 
-The assistant image is the same on either wall. The wall is outside the image.
+The image is the same on either wall. The wall is outside the image.
 
 ```
    weak    a Docker container    shares this machine's kernel
    strong  its own tiny machine  needs Linux with KVM
 ```
 
-On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the container is a virtual machine with its own kernel, and root stays inside it.
+On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the Firecracker container holds a microVM with its own kernel, and root stays inside that microVM.
+
+On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-fc-<id>`) holds the TAP device, the firewall, and the microVM. The gate (`htm-gate-<id>`) is Squid. It is a second container and joins the Firecracker container's network namespace.
 
 Both walls let only the gate reach the Internet. The Docker wall puts the container on an internal network with no NAT, and gives only the gate a second path out. [How that works](inhabitants/README.md#how-the-gate-reaches-the-internet).
 
@@ -118,7 +120,7 @@ The address from `url` is how you talk to the habitat. `exec` runs a command on 
 ./bin/hermetarium exec YOUR_ID -- hostname
 ```
 
-`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`. On the Docker wall that is `docker exec` with a TTY. On the strong wall it is SSH to the guest. An image that wants that terminal includes an SSH server. `create` makes a key pair for the habitat, hands the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the helper's network namespace.
+`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`. On the Docker wall that is `docker exec` with a TTY. On the strong wall it is SSH to the guest. An image that wants that terminal includes an SSH server. `create` makes a key pair for the habitat, hands the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the Firecracker container's network namespace.
 
 ```bash
 ./bin/hermetarium attach YOUR_ID

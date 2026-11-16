@@ -40,7 +40,7 @@ Two walls can hold that container. The container image is the same on both. A we
 
 <a id="getting-started"></a>
 
-From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. Its helper container receives `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`. The host itself needs no sudo.
+From the repository folder. You need Docker and Go 1.24 or newer. The strong wall also needs a Linux machine with `/dev/kvm`, on x86_64. Firecracker is downloaded into the cache on the first strong `create`, and when `make test` reaches the strong wall. The Firecracker container receives `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`. The host itself needs no sudo.
 
 From source:
 
@@ -148,7 +148,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 
 **The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. DNS queries are in that log too: the name, the type, and the result. A TCP query is forwarded on TCP. A truncated UDP answer is fetched again on TCP, and stays truncated for a UDP client when the TCP message is larger than 512 octets. At most 32 DNS queries are in flight. They are written to `dns.jsonl`, capped at 1 MiB, with the previous file kept as `dns.jsonl.1`. A file already over that cap when gate DNS starts is rotated, not discarded, and `logs` reads both files. Message bodies stay out of the log.
 
-**Porter** (`porter/`) is a small program inside the assistant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code and Grok Build. You can skip porter and answer on 8080 yourself. The echo image does that.
+**Porter** (`porter/`) is a small program inside the inhabitant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code and Grok Build. You can skip porter and answer on 8080 yourself. The echo image does that.
 
 **Inhabitants** (`inhabitants/`) are the official assistants: Claude Code and Grok Build. They run as root. Inside the box they may run commands and edit files without stopping to ask. The wall is outside the image.
 
@@ -159,7 +159,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 ## Layout
 
 - `supervisor/` — the `hermetarium` program
-- `firecracker-helper/` — scripts for the strong wall, packed inside the binary
+- `firecracker-helper/` — the Firecracker scripts, packed inside the binary
 - `porter/` — the small program that carries a question to Claude or Grok
 - `inhabitants/` — Claude Code and Grok Build, plus the shared gate README
 - `examples/` — echo, and the agentd stand-in
@@ -167,6 +167,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 - `omakase/` — host backup of one habitat's logs and data disk
 - `docs/images/` — pictures for this page and the website
 - `var/<id>/` — one habitat's files, under `HERMETARIUM_ROOT`, this checkout, or `~/.local/share/hermetarium`
+- [GLOSSARY.md](GLOSSARY.md) — the words for a habitat and the parts around it
 
 Firecracker files land in `.cache/` inside the checkout, or in `~/.cache/hermetarium` when you run away from a checkout.
 

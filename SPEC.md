@@ -24,11 +24,11 @@ operator machine or cluster
   supervisor (Go binary)
     ├── wall (weak runc | strong Firecracker)
     └── Squid (spawned; per-habitat ACL file; access.log → I/O log)
-          └── Hermetarium = that OCI image, running
+          └── habitat (the image, running behind the wall)
                 └── inhabitant (HTTP server: echo, or a coding-agent harness)
 ```
 
-The outside network reaches the inhabitant only through Squid. The operator also has `hermetarium attach`: a terminal into a running habitat on both walls. What passes over that terminal is not in the I/O log. The weak wall terminal is `docker exec`. The strong wall terminal is SSH to the guest. An image that wants a terminal includes an SSH server, the same kind of contract as having `ip`. At `create`, Hermetarium makes a key pair for that habitat, passes the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the helper's network namespace. The inhabitant's only network route remains the gate. Escape sequences from the habitat reach the operator's terminal as they are.
+The outside network reaches the inhabitant only through Squid. The operator also has `hermetarium attach`: a terminal into a running habitat on both walls. What passes over that terminal is not in the I/O log. The weak wall terminal is `docker exec`. The strong wall terminal is SSH to the guest. An image that wants a terminal includes an SSH server, the same kind of contract as having `ip`. At `create`, Hermetarium makes a key pair for that habitat, passes the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the Firecracker container's network namespace. The inhabitant's only network route remains the gate. Escape sequences from the habitat reach the operator's terminal as they are.
 
 ## 4. What it is not
 
@@ -41,12 +41,15 @@ The outside network reaches the inhabitant only through Squid. The operator also
 
 | Term | Meaning |
 | --- | --- |
-| Hermetarium | One running habitat: image + wall + network path. |
+| Hermetarium | The product. One running instance is a habitat. |
+| Habitat | One running instance: image + wall + network path. |
 | Image | OCI image; what the inhabitant sees as Linux. |
 | Wall | Isolation around the image: **weak** (`runc`) or **strong** (Firecracker microVM). |
-| Supervisor | Control plane that boots and kills Hermetaria, owns the network path, writes the I/O log. |
+| Supervisor | Control plane that boots and kills habitats, owns the network path, writes the I/O log. |
 | Inhabitant | Agent or process that lives inside. |
 | I/O log | Record of traffic that **crosses the wall** (required). |
+
+The words to use, and the ones to avoid, are in [GLOSSARY.md](GLOSSARY.md).
 
 ## 6. Walls
 
@@ -81,7 +84,7 @@ Message bodies stay out of the log. Optional decryption of ordinary HTTPS is `OP
 
 The gate resolves names for the habitat. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate address, which is what a process started inside the habitat needs when it does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web: an uncommented `http_access allow` whose ACL is not `inbound`, `vendorhost`, `probe`, or `probe_dst`. The resolver forwards those queries to the same servers Squid uses. A query received on TCP is forwarded on TCP. A truncated UDP answer is fetched again on TCP; when that message is larger than 512 octets, the UDP client keeps the truncated answer and retries on TCP. At most 32 queries are in flight. A TCP query takes a slot only once the query has arrived, and a TCP query that arrives when the cap is full is closed. Further UDP packets are dropped. The habitat cannot resolve outside names through any resolver except the gate. Each query is an I/O log line (`protocol` `dns`, `destination` the name, `method` the type, `result` the answer) in `dns.jsonl`. That file is capped at 1 MiB, and one previous file, `dns.jsonl.1`, is kept. A file that is already over the cap when gate DNS starts is rotated, not discarded. `hermetarium logs` copies both files into the I/O log. The strong-wall guest also has `127.0.0.1 localhost` in `/etc/hosts`.
 
-**Parked (not this build):** Squid `external_acl_type` helper, Envoy/xDS, OPA/Rego, replacing Squid. ICAP on Squid is the natural plug for a later wall scanner / pseudo-artifactory.
+**Parked (not this build):** Squid `external_acl_type`, Envoy/xDS, OPA/Rego, replacing Squid. ICAP on Squid is the natural plug for a later wall scanner / pseudo-artifactory.
 
 ## 7a. Supervisor language
 
@@ -95,7 +98,7 @@ Secrets must not live in the inhabitant image, filesystem, or process environmen
 
 Secrets-in-image is decided: no. The model path stays plain HTTP inside the container. Squid opens HTTPS to the vendor and adds the key. The container does not encrypt that call.
 
-Ordinary HTTPS from the container is closed unless the gate file's `OPEN-HTTPS` lines are on. Those lines make Squid decrypt that traffic (package downloads, curl, and the like). The I/O log then records the site and the path. Message bodies stay out of the log. The private key stays on the gate. `create` installs the public certificate into the container, so the assistant sets no proxy. The gate image is OpenSSL Squid for every habitat (`supervisor/squid/Dockerfile`, tag `hermetarium-squid:local`). A client that pins its own certificate list and ignores the container trust store still rejects the gate certificate.
+Ordinary HTTPS from the container is closed unless the gate file's `OPEN-HTTPS` lines are on. Those lines make Squid decrypt that traffic (package downloads, curl, and the like). The I/O log then records the site and the path. Message bodies stay out of the log. The private key stays on the gate. `create` installs the public certificate into the container, so the inhabitant sets no proxy. The gate image is OpenSSL Squid for every habitat (`supervisor/squid/Dockerfile`, tag `hermetarium-squid:local`). A client that pins its own certificate list and ignores the container trust store still rejects the gate certificate.
 
 `examples/openweb/squid.conf` decrypts HTTPS except a short pass-through list, which keeps the site's certificate. For `api.github.com` it drops the box `Authorization` and sets the gate token from that file. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Other writes on that host are denied, including contents, Git data, deletes, and repository settings. `tls` in the I/O log is `decrypted` or `passthrough`.
 
@@ -120,7 +123,7 @@ Hermetarium does not care which program it holds. One or more inhabitants start 
 
 `hermetarium attach <id> [-- CMD]` opens a terminal in a running habitat. With no command, the shell is `sh`. The image entrypoint stays the habitat's own process. Bytes on the terminal are not in the I/O log, and the command gains no network path.
 
-On the weak wall the terminal is `docker exec` with a TTY. On the strong wall it is SSH. The image brings the SSH server. Images are reused across habitats, so the key is not baked into the image: `create` writes a key pair under `var/.attach/<id>/` on the host, and the guest init writes that public key into `authorized_keys` when it starts. The private key is mounted only into the short-lived SSH client, which shares the helper network namespace. No SSH port is published. The client does not check the guest host key (`StrictHostKeyChecking=no`, known hosts `/dev/null`). That is acceptable because the client reaches the habitat only through the helper network namespace, and there is no published port. Guest init mounts `/dev/pts` so the session has a pty. Closing the strong-wall terminal sends SIGHUP to a command that is not in `tmux`. A `tmux` session keeps running, and a later `attach` shows it. An image with no SSH server still boots. When nothing listens on port 22, `attach` on that strong-wall habitat says nothing is listening: the image has no SSH server at `/usr/sbin/sshd`, or it did not start (see USAGE). Other SSH errors stay the client's text.
+On the weak wall the terminal is `docker exec` with a TTY. On the strong wall it is SSH. The image brings the SSH server. Images are reused across habitats, so the key is not baked into the image: `create` writes a key pair under `var/.attach/<id>/` on the host, and the guest init writes that public key into `authorized_keys` when it starts. The private key is mounted only into the short-lived SSH client, which shares the Firecracker container's network namespace. No SSH port is published. The client does not check the guest host key (`StrictHostKeyChecking=no`, known hosts `/dev/null`). That is acceptable because the client reaches the habitat only through the Firecracker container's network namespace, and there is no published port. Guest init mounts `/dev/pts` so the session has a pty. Closing the strong-wall terminal sends SIGHUP to a command that is not in `tmux`. A `tmux` session keeps running, and a later `attach` shows it. An image with no SSH server still boots. When nothing listens on port 22, `attach` on that strong-wall habitat says nothing is listening: the image has no SSH server at `/usr/sbin/sshd`, or it did not start (see USAGE). Other SSH errors stay the client's text.
 
 ### 9a. Operator HTTP
 
