@@ -111,7 +111,7 @@ In-process. No Docker habitat.
 | `TestRootCheckoutFromCwd` | With the env unset, a checkout working directory is the root. Cache is `<root>/.cache`. |
 | `TestRootXDGWhenNoCheckout` | Outside a checkout, root is `$XDG_DATA_HOME/hermetarium` and cache is `$XDG_CACHE_HOME/hermetarium`. |
 | `TestCacheDirExplicitRoot` | `CacheDir` follows the root argument. |
-| `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. A bumped line is decrypted and keeps the path. A CONNECT line is `https` on the authority port. A bumped CONNECT to an IP is named from SNI and keeps that IP in `upstream`. A spliced line is passthrough, takes the destination from SNI, and keeps the upstream address from the peer or, when the peer is `-`, from the IP authority. |
+| `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. A bumped line is decrypted and keeps the path. A CONNECT line is `https` on the authority port. A bumped CONNECT to an IP is named from SNI and keeps that IP in `upstream`. A spliced line is passthrough, takes the destination from SNI, and keeps the upstream address from the peer or, when the peer is `-`, from the IP authority. A `NONE_NONE_ABORTED` CONNECT is not a policy denial, has `aborted` set, and takes the destination from SNI. |
 | `TestACLWantsHTTPS` | A commented `https_port` line leaves interception off. An active `https_port` with `ssl-bump` turns it on. |
 | `TestPrepareMITM` | `PrepareMITM` writes a CA certificate and keeps the private key out of the public directory. |
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
@@ -176,6 +176,14 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 `tests/backup` `TestFreezeReports`. Runs `omakase/backup.sh` against stub `restic`, `docker`, and `hermetarium`. No Docker daemon and no KVM. `Connection refused`, a timeout, no route, unreachable, connection reset, `Permission denied`, and a missing `fsfreeze` exit non-zero. The output does not contain `stayed frozen` or `needs fsfreeze`, and `Connection refused` contains `/usr/sbin/sshd`. When the freeze succeeds and the thaw fails, the script says the disk stayed frozen.
 
 `tests/backup` `TestBackupThawOnResticFailure`. Needs Docker and `/dev/kvm`. Same writing habitat as `TestBackupWhileWriting`. A `restic` ahead of the real binary on `PATH` exits non-zero for `backup` after the guest is frozen. The script fails, and the guest writes a later `WRITE_n`, so the EXIT trap thawed `/data`.
+
+### Denied-request mail
+
+`tests/digest` `TestDigestDeniedThenQuiet`. No Docker daemon and no KVM. `omakase/digest.sh` runs a stand-in `hermetarium logs` and a stand-in mail program. One denied request is one mail that names that destination. An allowed request and a denied inbound request are not in it. The next run, with nothing new, does not send mail.
+
+`tests/digest` `TestDigestManyAreOneMail`. No Docker daemon and no KVM. A first run with nothing denied sends nothing. Many denied requests, and one TLS handshake the client closed, then produce one mail. That mail names each destination and its count, including the pass-through host. It does not contain the request path, a key planted in that path, or a request body.
+
+`tests/digest` `TestDigestFailedMailDoesNotAdvance`. No Docker daemon and no KVM. When the mail program fails, the script exits non-zero and does not remember the denial as sent. The next run sends that one mail.
 
 ### Guest Docker
 

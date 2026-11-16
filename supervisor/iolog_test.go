@@ -20,7 +20,7 @@ func TestParseSquidLine(t *testing.T) {
 	}
 	denied := "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 GET http://example.com/ - HIER_NONE/- text/html"
 	rec, ok = ParseSquidLine(denied)
-	if !ok || rec.Allowed || rec.Destination != "example.com" {
+	if !ok || rec.Allowed || rec.Aborted || rec.Destination != "example.com" {
 		t.Fatalf("denied %+v ok=%v", rec, ok)
 	}
 	in := "1757162698.123     4 172.17.0.1 TCP_MISS/200 4 POST http://127.0.0.1:18081/ - HIER_DIRECT/10.20.0.3 text/plain 18081"
@@ -57,8 +57,29 @@ func TestParseSquidLine(t *testing.T) {
 	}
 	splicedTunnel := "1794765518.069      2 10.60.0.3 TCP_TUNNEL/200 3138 CONNECT pinned.example:443 - ORIGINAL_DST/10.60.0.2 - 443 splice pinned.example"
 	rec, ok = ParseSquidLine(splicedTunnel)
-	if !ok || !rec.Allowed || rec.Protocol != "https" || rec.Port != 443 || rec.Destination != "pinned.example" || rec.Upstream != "10.60.0.2" || rec.TLS != "passthrough" || rec.Bytes != 3138 {
+	if !ok || !rec.Allowed || rec.Aborted || rec.Protocol != "https" || rec.Port != 443 || rec.Destination != "pinned.example" || rec.Upstream != "10.60.0.2" || rec.TLS != "passthrough" || rec.Bytes != 3138 {
 		t.Fatalf("splice tunnel %+v ok=%v", rec, ok)
+	}
+	// The client closed during the handshake. Not a policy denial. The name is SNI.
+	gaveUp := "1757162700.000 1 10.20.0.3 NONE_NONE_ABORTED/000 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 443 splice pinned.example"
+	rec, ok = ParseSquidLine(gaveUp)
+	if !ok || !rec.Allowed || !rec.Aborted || rec.Destination != "pinned.example" || rec.TLS != "passthrough" || rec.Method != "CONNECT" || rec.Protocol != "https" || rec.Port != 443 {
+		t.Fatalf("gave up %+v ok=%v", rec, ok)
+	}
+	gaveDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(gaveDir, "access.log"), []byte(gaveUp+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gaveJSONL := filepath.Join(gaveDir, "io.jsonl")
+	if err := SyncAccessLog(filepath.Join(gaveDir, "access.log"), gaveJSONL); err != nil {
+		t.Fatal(err)
+	}
+	gaveRecs, err := ReadIoLog(gaveJSONL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaveRecs) != 1 || !gaveRecs[0].Aborted || !gaveRecs[0].Allowed || gaveRecs[0].Destination != "pinned.example" || gaveRecs[0].TLS != "passthrough" {
+		t.Fatalf("synced gave up %+v", gaveRecs)
 	}
 	dir := t.TempDir()
 	access := filepath.Join(dir, "access.log")

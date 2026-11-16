@@ -24,7 +24,11 @@ type Record struct {
 	Path     string `json:"path,omitempty"`
 	Result   string `json:"result,omitempty"`
 	Allowed  bool   `json:"allowed"`
-	Bytes    int    `json:"bytes,omitempty"`
+	// Aborted is set when the client closed the transaction. A CONNECT with
+	// this set is a TLS handshake the client gave up on; the destination is
+	// the SNI host name when the gate file logged it.
+	Aborted bool `json:"aborted,omitempty"`
+	Bytes   int  `json:"bytes,omitempty"`
 	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
 	TLS string `json:"tls,omitempty"`
 }
@@ -138,6 +142,7 @@ func ParseSquidLine(line string) (Record, bool) {
 		Method:      f[5],
 		Path:        path,
 		Allowed:     !strings.Contains(status, "DENIED"),
+		Aborted:     strings.Contains(status, "ABORTED"),
 		Bytes:       bytes,
 		TLS:         tlsMode,
 	}, true
