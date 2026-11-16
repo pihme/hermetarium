@@ -28,6 +28,7 @@ func TestGateFilesHardened(t *testing.T) {
 		filepath.Join(root, "examples", "openweb", "squid.conf"),
 		filepath.Join(root, "inhabitants", "claude-code", "squid.conf"),
 		filepath.Join(root, "inhabitants", "grok-build", "squid.conf"),
+		filepath.Join(root, "inhabitants", "opencode", "squid.conf"),
 	}
 	for _, path := range files {
 		b, err := os.ReadFile(path)
