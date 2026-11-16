@@ -6,7 +6,7 @@ What the suite checks in this tree today. Product rules for tests stay in [SPEC.
 
 | Command | Packages | Gate |
 | --- | --- | --- |
-| `make test` | `./supervisor` `./supervisor/gatedns` `./firecracker-helper` `./examples/...` `./porter` `./tests/...` | Merge gate. CI job `test` on push to `main`, pull request, and `workflow_dispatch`. |
+| `make test` | `./supervisor` `./supervisor/gatedns` `./firecracker-scripts` `./examples/...` `./porter` `./tests/...` | Merge gate. CI job `test` on push to `main`, pull request, and `workflow_dispatch`. |
 | `make test-live` | `./tests/agentd` `./tests/inhabitants` with `-tags live` | Optional. CI job `test-live` on `workflow_dispatch` only. |
 
 Both use `go test -count=1 -p 1 -timeout 15m -v`. Live files are `//go:build live`, so `make test` does not compile them. `make test-live` also runs the untagged tests in those two packages (agentd mock on both walls, official-CLI smoke).
@@ -74,7 +74,7 @@ In-process. No Docker habitat.
 | `TestRefusedDataDiskLeavesNoLock` | A non-ext4 file or a directory passed as `--data` is refused before the lock is taken: no `FILE.lock` is created and the file is unchanged. A valid ext4 file still gets its lock. |
 | `TestDataMountFailureIncludesGuestReason` | The data-mount failure error includes the tail of the guest serial log (the mount error and `DATA_MOUNT_FAIL`), not the whole log. |
 | `TestVersionCommand` | `version` exits 0 and prints `supervisor.Version`. |
-| `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the build image Dockerfile (`supervisor/helper/Dockerfile`). |
+| `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the build image Dockerfile (`supervisor/build-image/Dockerfile`). |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
 | `TestEnsureNetToolsStamp` | An existing nettools image is rebuilt when the Dockerfile stamp differs. A failed build restores the previous stamp, or removes it when there was none. A matching stamp skips the build. |
 | `TestGateHasNoAnonymousVolumes` | Needs Docker. The gate mounts tmpfs on `/var/log/squid` and `/var/spool/squid`, so it has no anonymous volumes. `DestroyWeak` and `DestroyStrong` remove the gate container. |
@@ -116,8 +116,8 @@ In-process. No Docker habitat.
 | `TestPrepareMITM` | `PrepareMITM` writes a CA certificate and keeps the private key out of the public directory. |
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
 | `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
-| `TestFcHelperDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-helper/` directory there. |
-| `TestExtract` | The same two scripts extract executable. The entrypoint contains the marker `fc-helper` (a string in the Firecracker scripts, not a name for the container). The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). fc-init starts `sshd` after the guest address and `/run/sshd` (mode 0755) and before the inhabitant, and only when `[ -x /usr/sbin/sshd ]`. The scripts do not build a vsock terminal. `DATA_MOUNT_FAIL` exits before the inhabitant. A second extract leaves the entrypoint mtime unchanged. |
+| `TestFcScriptsDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-scripts/` directory there. |
+| `TestExtract` | The same two scripts extract executable. The entrypoint contains the marker `fc-scripts` (a string in the Firecracker scripts, not a name for the container). The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). fc-init starts `sshd` after the guest address and `/run/sshd` (mode 0755) and before the inhabitant, and only when `[ -x /usr/sbin/sshd ]`. The scripts do not build a vsock terminal. `DATA_MOUNT_FAIL` exits before the inhabitant. A second extract leaves the entrypoint mtime unchanged. |
 | `TestGateCAFallsThroughToCurl` | The fc-init gate CA fetch runs against a fake busybox without wget: curl is tried next under timeout 3 and writes the CA to both paths. With no curl, the only output is `fc-init: could not fetch the gate CA`. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
@@ -161,7 +161,7 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 `tests/backup` `TestSecretRefusal`. Runs `omakase/backup.sh` with stand-in `restic`, `docker`, and `hermetarium` binaries. No Docker daemon and no KVM. The disk or the journal is `squid.conf`, a symlink to `squid.conf`, a `..` path that reaches `squid.conf`, `mitm/ca.key`, `var/<id>/`, `var/<id>`, `/`, another habitat's `squid.conf`, the directory that holds it, the data directory that contains `var/`, a hard link to `squid.conf`, a directory that contains only a hard link to `squid.conf`, when the filesystem allows a hard link, or a directory outside `var/` that reaches the key only through a bind mount of `mitm/`, when that mount is permitted. The script exits with the refusal and does not run `restic backup`.
 
-`tests/backup` `TestHelperNotThisRoot`. No Docker daemon and no KVM. The stand-in `docker inspect` reports a `/log` mount that is not `var/<id>` under `HERMETARIUM_ROOT`. The script refuses that Firecracker container and does not run `restic backup`.
+`tests/backup` `TestFirecrackerContainerNotThisRoot`. No Docker daemon and no KVM. The stand-in `docker inspect` reports a `/log` mount that is not `var/<id>` under `HERMETARIUM_ROOT`. The script refuses that Firecracker container and does not run `restic backup`.
 
 `tests/backup` `TestFreezeFailureIsNotStayedFrozen`. No Docker daemon and no KVM. `hermetarium attach` fails. The script reports that it could not freeze `/data`, does not run `fsfreeze -u`, and does not say the disk stayed frozen.
 

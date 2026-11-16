@@ -1,4 +1,4 @@
-package fchelper
+package fcscripts
 
 import (
 	"bytes"
@@ -30,8 +30,8 @@ func TestExtract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "fc-helper") {
-		t.Fatalf("entrypoint.sh missing fc-helper marker:\n%s", b)
+	if !strings.Contains(string(b), "fc-scripts") {
+		t.Fatalf("entrypoint.sh missing fc-scripts marker:\n%s", b)
 	}
 	if strings.Contains(string(b), "--no-seccomp") {
 		t.Fatal("entrypoint.sh disables Firecracker seccomp")

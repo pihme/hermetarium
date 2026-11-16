@@ -187,7 +187,7 @@ fi
 if ! mounted=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/opt/data.ext4"}}{{.Source}}{{end}}{{end}}' "htm-fc-$HERMETARIUM_ID"); then
   die "cannot inspect htm-fc-$HERMETARIUM_ID"
 fi
-# The helper name is only the habitat id. A different HERMETARIUM_ROOT can
+# The Firecracker container name is only the habitat id. A different HERMETARIUM_ROOT can
 # hold var/<id>/squid.conf and would otherwise be the secret check's root.
 if ! logdir=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/log"}}{{.Source}}{{end}}{{end}}' "htm-fc-$HERMETARIUM_ID"); then
   die "cannot inspect htm-fc-$HERMETARIUM_ID"

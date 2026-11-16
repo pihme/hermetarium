@@ -84,7 +84,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	}
 	defer supervisor.DestroyStrong(id)
 
-	serial := waitSerial(t, inst.Helper, "WRITE_1")
+	serial := waitSerial(t, inst.FirecrackerContainer, "WRITE_1")
 	if !strings.Contains(serial, "KNOWN_READY") {
 		t.Fatalf("writer did not start\n%s", serial)
 	}
@@ -141,7 +141,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	// Immediately, while the guest has changed only a little. A later check
 	// would let the writer run for as long as e2fsck takes.
 	second := runBackup(t, script, env)
-	returned, _ := supervisor.Docker(10*time.Second, "logs", inst.Helper)
+	returned, _ := supervisor.Docker(10*time.Second, "logs", inst.FirecrackerContainer)
 	atReturn := lastWrite(returned)
 	if atReturn < 1 {
 		t.Fatalf("no WRITE_n when backup.sh returned\n%s", returned)
@@ -190,7 +190,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	after := atReturn
 	for time.Now().Before(deadline) {
-		serial, _ = supervisor.Docker(10*time.Second, "logs", inst.Helper)
+		serial, _ = supervisor.Docker(10*time.Second, "logs", inst.FirecrackerContainer)
 		after = lastWrite(serial)
 		if after > atReturn {
 			break
@@ -379,12 +379,12 @@ func buildBackupImage(root string) error {
 	return err
 }
 
-func waitSerial(t *testing.T, helper, needle string) string {
+func waitSerial(t *testing.T, fcContainer, needle string) string {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	var serial string
 	for time.Now().Before(deadline) {
-		serial, _ = supervisor.Docker(10*time.Second, "logs", helper)
+		serial, _ = supervisor.Docker(10*time.Second, "logs", fcContainer)
 		if strings.Contains(serial, needle) {
 			return serial
 		}

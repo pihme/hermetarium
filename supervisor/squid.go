@@ -88,10 +88,11 @@ func netToolsDockerfile() string {
 	// iptables is nf_tables. iptables-legacy is the other filter hook: a drop
 	// there is invisible to nft list, and an accept in one does not cover it.
 	// openssh-client is the strong-wall attach program, in a throwaway container
-	// that shares the helper network namespace. nft deletes table ip filter
-	// only when it is the empty iptables-nft accept chains; iptables cannot.
+	// that shares the Firecracker container network namespace. nft deletes
+	// table ip filter only when it is the empty iptables-nft accept chains;
+	// iptables cannot.
 	// busybox-extras supplies /usr/sbin/httpd. Alpine busybox has no httpd
-	// applet, and the strong helper serves the gate CA with it.
+	// applet, and the Firecracker container serves the gate CA with it.
 	return "FROM " + AlpineImage + "\nRUN apk add --no-cache iptables iptables-legacy iproute2 openssh-client busybox-extras nftables\n"
 }
 

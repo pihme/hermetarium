@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-//go:embed helper/Dockerfile
-var helperDockerfile string
+//go:embed build-image/Dockerfile
+var buildImageDockerfile string
 
-// AlpineImage is the image named by helper/Dockerfile.
+// AlpineImage is the image named by build-image/Dockerfile.
 // Dependabot bumps that FROM line; this variable follows it.
-var AlpineImage = mustAlpineTag(helperDockerfile)
+var AlpineImage = mustAlpineTag(buildImageDockerfile)
 
 func mustAlpineTag(df string) string {
 	for _, line := range strings.Split(df, "\n") {
@@ -24,5 +24,5 @@ func mustAlpineTag(df string) string {
 		}
 		return tag
 	}
-	panic("supervisor/helper/Dockerfile: missing FROM")
+	panic("supervisor/build-image/Dockerfile: missing FROM")
 }

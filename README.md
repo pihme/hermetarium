@@ -159,7 +159,7 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 ## Layout
 
 - `supervisor/` — the `hermetarium` program
-- `firecracker-helper/` — the Firecracker scripts, packed inside the binary
+- `firecracker-scripts/` — the Firecracker scripts, packed inside the binary
 - `porter/` — the small program that carries a question to Claude or Grok
 - `inhabitants/` — Claude Code and Grok Build, plus the shared gate README
 - `examples/` — echo, and the agentd stand-in

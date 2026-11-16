@@ -30,10 +30,10 @@ type winsize struct {
 }
 
 type running struct {
-	Wall   string `json:"wall"`
-	Box    string `json:"box"`
-	Helper string `json:"helper"`
-	Dir    string `json:"dir"`
+	Wall                 string `json:"wall"`
+	Box                  string `json:"box"`
+	FirecrackerContainer string `json:"firecrackerContainer"`
+	Dir                  string `json:"dir"`
 }
 
 // Attach opens a terminal in a running habitat. argv defaults to sh when empty.
@@ -66,11 +66,11 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 		defer restore()
 		return attachDocker(inst.Box, argv, in, out, errOut, sig, stop)
 	case "strong":
-		helper := inst.Helper
-		if helper == "" {
-			helper = "htm-fc-" + id
+		fcContainer := inst.FirecrackerContainer
+		if fcContainer == "" {
+			fcContainer = "htm-fc-" + id
 		}
-		return attachSSH(root, id, helper, argv, in, out, errOut, sig, stop)
+		return attachSSH(root, id, fcContainer, argv, in, out, errOut, sig, stop)
 	default:
 		return 1, fmt.Errorf("attach: unknown wall %q", inst.Wall)
 	}
@@ -155,10 +155,10 @@ const noSSHServerPhrase = "no SSH server at /usr/sbin/sshd"
 const AttachPort22Closed = "attach: nothing listens on port 22 in the guest: the image has " +
 	noSSHServerPhrase + ", or it did not start (see USAGE)"
 
-// attachSSH runs ssh in a throwaway container that shares the helper network
-// namespace. Nothing publishes the guest port. The private key is mounted
-// only into that container, not into the guest.
-func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
+// attachSSH runs ssh in a throwaway container that shares the Firecracker
+// container network namespace. Nothing publishes the guest port. The private
+// key is mounted only into that container, not into the guest.
+func attachSSH(root, id, fcContainer string, argv []string, in, out, errOut *os.File, sig <-chan os.Signal, stop <-chan struct{}) (int, error) {
 	if err := EnsureNetTools(root); err != nil {
 		return 1, err
 	}
@@ -188,7 +188,7 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 		args = append(args, "-t")
 	}
 	args = append(args,
-		"--network", "container:"+helper,
+		"--network", "container:"+fcContainer,
 		"-v", key+":/key:ro",
 		"-v", logPath+":/ssh.log",
 		"--entrypoint", "ssh",

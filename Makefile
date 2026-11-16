@@ -15,7 +15,7 @@ build: gatedns
 	$(GO) build -ldflags='-s -w -X github.com/pihme/hermetarium/supervisor.Version=$(HVER)' -o bin/hermetarium ./supervisor/cmd/hermetarium
 	$(GO) build -ldflags='-s -w -X main.Version=$(PVER)' -o bin/porter ./porter
 
-TEST_PKGS ?= ./supervisor ./supervisor/gatedns ./firecracker-helper ./examples/... ./porter ./tests/...
+TEST_PKGS ?= ./supervisor ./supervisor/gatedns ./firecracker-scripts ./examples/... ./porter ./tests/...
 
 test: gatedns
 	$(GO) test $(TEST_PKGS) -count=1 -p 1 -timeout 15m -v

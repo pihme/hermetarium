@@ -63,7 +63,7 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 	}
 	defer supervisor.DestroyStrong(id)
 
-	serial := waitSerial(t, hab.Helper, "WRITE_1")
+	serial := waitSerial(t, hab.FirecrackerContainer, "WRITE_1")
 	if !strings.Contains(serial, "KNOWN_READY") {
 		t.Fatalf("writer did not start\n%s", serial)
 	}
@@ -120,7 +120,7 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 		t.Fatalf("restic backup did not run after the freeze\n%s", out)
 	}
 
-	returned, _ := supervisor.Docker(10*time.Second, "logs", hab.Helper)
+	returned, _ := supervisor.Docker(10*time.Second, "logs", hab.FirecrackerContainer)
 	atReturn := lastWrite(returned)
 	if atReturn < 1 {
 		t.Fatalf("no WRITE_n when backup.sh returned\n%s", returned)
@@ -128,7 +128,7 @@ func TestBackupThawOnResticFailure(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	after := atReturn
 	for time.Now().Before(deadline) {
-		serial, _ = supervisor.Docker(10*time.Second, "logs", hab.Helper)
+		serial, _ = supervisor.Docker(10*time.Second, "logs", hab.FirecrackerContainer)
 		after = lastWrite(serial)
 		if after > atReturn {
 			break

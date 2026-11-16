@@ -322,9 +322,9 @@ func thawLines(log string) int {
 	return n
 }
 
-// The helper name is only the habitat id. A /log mount from another root
+// The Firecracker container name is only the habitat id. A /log mount from another root
 // must not be treated as this habitat's gate file.
-func TestHelperNotThisRoot(t *testing.T) {
+func TestFirecrackerContainerNotThisRoot(t *testing.T) {
 	checkout, err := supervisor.Root()
 	if err != nil {
 		t.Fatal(err)

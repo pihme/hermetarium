@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	fchelper "github.com/pihme/hermetarium/firecracker-helper"
+	fcscripts "github.com/pihme/hermetarium/firecracker-scripts"
 )
 
 const (
@@ -39,14 +39,14 @@ const strongGuestIP = "172.16.0.2"
 const strongGateIP = "172.16.0.1"
 
 type StrongInstance struct {
-	ID         string `json:"id"`
-	Wall       string `json:"wall"`
-	Helper     string `json:"helper"`
-	InboundURL string `json:"inboundUrl"`
-	NoInbound  bool   `json:"noInbound"`
-	LogPath    string `json:"logPath"`
-	SerialPath string `json:"serialPath"`
-	Dir        string `json:"dir"`
+	ID                   string `json:"id"`
+	Wall                 string `json:"wall"`
+	FirecrackerContainer string `json:"firecrackerContainer"`
+	InboundURL           string `json:"inboundUrl"`
+	NoInbound            bool   `json:"noInbound"`
+	LogPath              string `json:"logPath"`
+	SerialPath           string `json:"serialPath"`
+	Dir                  string `json:"dir"`
 }
 
 func cacheFile(root, name string) (string, error) {
@@ -57,9 +57,9 @@ func cacheFile(root, name string) (string, error) {
 	return filepath.Join(dir, name), nil
 }
 
-func fcHelperDir(root string) (string, error) {
-	dir := filepath.Join(CacheDir(root), "firecracker-helper")
-	if err := fchelper.Extract(dir); err != nil {
+func fcScriptsDir(root string) (string, error) {
+	dir := filepath.Join(CacheDir(root), "firecracker-scripts")
+	if err := fcscripts.Extract(dir); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -190,8 +190,8 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err error) {
 	// Return before the rootfs copy. A live htm-fc-<id> still has that
 	// file open, and a second copy would replace it.
-	helper := "htm-fc-" + id
-	if err := helperFree(helper); err != nil {
+	fcContainer := "htm-fc-" + id
+	if err := containerFree(fcContainer); err != nil {
 		return nil, err
 	}
 	if err := EnsureImageExists(opts.Image); err != nil {
@@ -222,11 +222,12 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	// The copy is in place before docker run. On a later error, remove it
-	// only when htm-fc-<id> does not exist. An existing helper keeps its disk.
+	// only when htm-fc-<id> does not exist. An existing Firecracker container
+	// keeps its disk.
 	defer func() {
 		if err != nil {
 			dropUnmountedRootfs(id, dir)
-			if helperFree("htm-fc-"+id) == nil {
+			if containerFree("htm-fc-"+id) == nil {
 				_ = os.RemoveAll(attachKeyDir(root, id))
 			}
 		}
@@ -248,17 +249,17 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			return nil, err
 		}
 	}
-	helpers, err := fcHelperDir(root)
+	scripts, err := fcScriptsDir(root)
 	if err != nil {
 		return nil, err
 	}
-	helperScript := filepath.Join(helpers, "entrypoint.sh")
+	entrypoint := filepath.Join(scripts, "entrypoint.sh")
 	if opts.DataPath != "" {
 		abs, err := filepath.Abs(opts.DataPath)
 		if err != nil {
 			return nil, err
 		}
-		// A colon breaks the helper's docker -v mount of this file.
+		// A colon breaks the Firecracker container's docker -v mount of this file.
 		if strings.Contains(abs, ":") {
 			return nil, fmt.Errorf("data disk path %s must not contain ':'", abs)
 		}
@@ -320,8 +321,8 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 
-	helperArgs := []string{
-		"run", "-d", "--name", helper,
+	fcArgs := []string{
+		"run", "-d", "--name", fcContainer,
 		"--device", "/dev/kvm",
 		"--device", "/dev/net/tun",
 		"--cap-add", "NET_ADMIN",
@@ -332,67 +333,67 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		"--sysctl", "net.ipv4.conf.default.rp_filter=0",
 		"--entrypoint", "sh",
 	}
-	helperArgs = append(helperArgs, inboundPublish(opts.NoInbound)...)
-	// The helper entrypoint accepts tcp/18081 from the bridge gateway unless
+	fcArgs = append(fcArgs, inboundPublish(opts.NoInbound)...)
+	// The entrypoint accepts tcp/18081 from the bridge gateway unless
 	// this is set. The gate file is copied unchanged and may still listen there.
 	if opts.NoInbound {
-		helperArgs = append(helperArgs, "-e", "NO_INBOUND=1")
+		fcArgs = append(fcArgs, "-e", "NO_INBOUND=1")
 	}
-	helperArgs = append(helperArgs,
+	fcArgs = append(fcArgs,
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", strongRootfsVolume(dir),
 	)
 	if opts.DataPath != "" {
-		helperArgs = append(helperArgs,
+		fcArgs = append(fcArgs,
 			"-v", opts.DataPath+":/opt/data.ext4",
 			"-v", opts.DataPath+".lock:/opt/data.lock",
 		)
 		// A reused id keeps the instance dir. An old claim would look like
-		// this boot's helper already holds the disk.
+		// this boot's Firecracker container already holds the disk.
 		if err := os.Remove(filepath.Join(dir, "data.claimed")); err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
 	}
-	helperArgs = append(helperArgs,
-		"-v", helperScript+":/fc-helper.sh:ro",
+	fcArgs = append(fcArgs,
+		"-v", entrypoint+":/entrypoint.sh:ro",
 		"-v", dir+":/log",
 	)
-	helperArgs = append(helperArgs, TestLabelArgs(opts.TestLabel)...)
-	helperArgs = append(helperArgs, NetToolsImage, "/fc-helper.sh")
-	if _, err := Docker(30*time.Second, helperArgs...); err != nil {
+	fcArgs = append(fcArgs, TestLabelArgs(opts.TestLabel)...)
+	fcArgs = append(fcArgs, NetToolsImage, "/entrypoint.sh")
+	if _, err := Docker(30*time.Second, fcArgs...); err != nil {
 		return nil, err
 	}
 	if opts.DataPath != "" {
-		if err := waitDataClaim(dir, helper); err != nil {
+		if err := waitDataClaim(dir, fcContainer); err != nil {
 			endStrong(id, dir)
 			return nil, err
 		}
 	}
 
 	gate := "htm-gate-" + id
-	if err := runAfterGate(opts, id, helper); err != nil {
+	if err := runAfterGate(opts, id, fcContainer); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}
-	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + helper}); err != nil {
+	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + fcContainer}); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}
 	// squid.pid starts Firecracker before WaitSquid returns. Joining a
-	// helper that has already exited hides the boot error.
+	// Firecracker container that has already exited hides the boot error.
 	inboundTimeout := 40 * time.Second
-	if !helperRunning(helper) {
+	if !containerRunning(fcContainer) {
 		err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
-			return helperLogs(helper), helperRunning(helper)
+			return containerLogs(fcContainer), containerRunning(fcContainer)
 		})
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if err := startGateDNS(root, id, helper, gate, strongGateIP, opts.TestLabel, conf); err != nil {
-		if !helperRunning(helper) {
+	if err := startGateDNS(root, id, fcContainer, gate, strongGateIP, opts.TestLabel, conf); err != nil {
+		if !containerRunning(fcContainer) {
 			err = waitGuestUname(dir, inboundTimeout, func() (string, bool) {
-				return helperLogs(helper), helperRunning(helper)
+				return containerLogs(fcContainer), containerRunning(fcContainer)
 			})
 		}
 		_ = DestroyStrong(id)
@@ -403,7 +404,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	if opts.DataPath != "" {
-		if err := waitDataMounted(helper); err != nil {
+		if err := waitDataMounted(fcContainer); err != nil {
 			endStrong(id, dir)
 			return nil, err
 		}
@@ -413,19 +414,19 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	// user space. It is printed only after a data disk has mounted.
 	if opts.NoInbound {
 		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
-			return helperLogs(helper), helperRunning(helper)
+			return containerLogs(fcContainer), containerRunning(fcContainer)
 		}); err != nil {
 			_ = DestroyStrong(id)
 			return nil, err
 		}
 	}
-	url, err := finishInbound(helper, opts.NoInbound, inboundTimeout)
+	url, err := finishInbound(fcContainer, opts.NoInbound, inboundTimeout)
 	if err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", Helper: helper, InboundURL: url, NoInbound: opts.NoInbound,
+		ID: id, Wall: "strong", FirecrackerContainer: fcContainer, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
 	b, err := json.MarshalIndent(inst, "", "  ")
@@ -440,19 +441,19 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	return inst, nil
 }
 
-func helperLogs(name string) string {
+func containerLogs(name string) string {
 	stdout, stderr, _ := DockerExec(10*time.Second, "logs", name)
 	return stdout + stderr
 }
 
-func helperRunning(name string) bool {
+func containerRunning(name string) bool {
 	out, err := Docker(5*time.Second, "inspect", "-f", "{{.State.Running}}", name)
 	return err == nil && strings.TrimSpace(out) == "true"
 }
 
-// helperFree is nil when no container has this name. Any other docker
+// containerFree is nil when no container has this name. Any other docker
 // error is returned so a dead daemon is not treated as absence.
-func helperFree(name string) error {
+func containerFree(name string) error {
 	_, err := Docker(5*time.Second, "inspect", "-f", "{{.Id}}", name)
 	if err == nil {
 		return fmt.Errorf("%s already exists", name)
@@ -463,8 +464,8 @@ func helperFree(name string) error {
 	return err
 }
 
-// strongRootfsVolume is the helper bind. The host path is this habitat's
-// copy, var/<id>/rootfs.ext4, not the shared cache.
+// strongRootfsVolume is the Firecracker container bind. The host path is this
+// habitat's copy, var/<id>/rootfs.ext4, not the shared cache.
 func strongRootfsVolume(dir string) string {
 	return habitatRootfsPath(dir) + ":/opt/rootfs.ext4"
 }
@@ -476,16 +477,16 @@ func strongRootfsVolume(dir string) string {
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
 	dropUnmountedRootfs(id, dir)
-	if dir == "" || helperFree("htm-fc-"+id) != nil {
+	if dir == "" || containerFree("htm-fc-"+id) != nil {
 		return
 	}
 	_ = os.RemoveAll(attachKeyDir(filepath.Dir(filepath.Dir(dir)), id))
 }
 
-// dropUnmountedRootfs removes the private rootfs when no helper container
+// dropUnmountedRootfs removes the private rootfs when no Firecracker container
 // has this id. The cache and the operator --data file are not in dir.
 func dropUnmountedRootfs(id, dir string) {
-	if err := helperFree("htm-fc-" + id); err != nil {
+	if err := containerFree("htm-fc-" + id); err != nil {
 		return
 	}
 	removePrivateRootfs(dir)
@@ -501,18 +502,18 @@ func removePrivateRootfs(dir string) {
 func WaitStrongSerial(inst *StrongInstance, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		stdout := helperLogs(inst.Helper)
+		stdout := containerLogs(inst.FirecrackerContainer)
 		_ = os.WriteFile(inst.SerialPath, []byte(stdout), 0o644)
 		leak := strings.Contains(stdout, "LEAK_OK") || strings.Contains(stdout, "LEAK_FAIL")
 		if leak {
 			return stdout, nil
 		}
-		if !helperRunning(inst.Helper) {
-			return stdout + extraFC(inst), fmt.Errorf("helper exited before leak check finished")
+		if !containerRunning(inst.FirecrackerContainer) {
+			return stdout + extraFC(inst), fmt.Errorf("Firecracker container exited before leak check finished")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	stdout := helperLogs(inst.Helper) + extraFC(inst)
+	stdout := containerLogs(inst.FirecrackerContainer) + extraFC(inst)
 	_ = os.WriteFile(inst.SerialPath, []byte(stdout), 0o644)
 	return stdout, fmt.Errorf("timeout waiting for strong-wall serial")
 }
@@ -597,11 +598,11 @@ func dataDiskUsable(path string) error {
 }
 
 // lockDataDisk holds an exclusive POSIX lock on path.lock until the caller
-// closes it. flock does not conflict with that lock, so the helper can
-// still flock the file for the life of the VM. A second open of this file
-// must not be closed while the lock is held: closing any descriptor drops
-// the POSIX lock. The in-use probe is therefore a flock on this same
-// descriptor, released before the helper's own nonblocking flock.
+// closes it. flock does not conflict with that lock, so the Firecracker
+// container can still flock the file for the life of the VM. A second open of
+// this file must not be closed while the lock is held: closing any descriptor
+// drops the POSIX lock. The in-use probe is therefore a flock on this same
+// descriptor, released before the Firecracker container's own nonblocking flock.
 func lockDataDisk(path string) (*os.File, error) {
 	if err := dataDiskUsable(path); err != nil {
 		return nil, err
@@ -632,29 +633,29 @@ func lockDataDisk(path string) (*os.File, error) {
 	return f, nil
 }
 
-func waitDataClaim(dir, helper string) error {
+func waitDataClaim(dir, fcContainer string) error {
 	claimed := filepath.Join(dir, "data.claimed")
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(claimed); err == nil {
 			return nil
 		}
-		if !helperRunning(helper) {
-			logs := helperLogs(helper)
+		if !containerRunning(fcContainer) {
+			logs := containerLogs(fcContainer)
 			if strings.Contains(logs, "data disk in use") {
 				return fmt.Errorf("data disk is in use")
 			}
-			return fmt.Errorf("helper exited before the data disk was claimed: %s", logs)
+			return fmt.Errorf("Firecracker container exited before the data disk was claimed: %s", logs)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("data disk was not claimed")
 }
 
-// waitGuestUname blocks until fc-init prints GUEST_UNAME= on the helper
-// serial console. A dead or missing helper fails immediately. fc-init prints
-// DATA_MOUNT_FAIL and exits before that line, so a mount failure must not
-// turn into a boot timeout.
+// waitGuestUname blocks until fc-init prints GUEST_UNAME= on the Firecracker
+// container serial console. A dead or missing container fails immediately.
+// fc-init prints DATA_MOUNT_FAIL and exits before that line, so a mount
+// failure must not turn into a boot timeout.
 func waitGuestUname(dir string, timeout time.Duration, console func() (string, bool)) error {
 	deadline := time.Now().Add(timeout)
 	var text string
@@ -668,7 +669,7 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 			return nil
 		}
 		if !running {
-			// The marker can be written as the helper exits, after the read above.
+			// The marker can be written as the Firecracker container exits, after the read above.
 			text, _ = console()
 			if strings.Contains(text, "DATA_MOUNT_FAIL") {
 				return fmt.Errorf("data disk did not mount")
@@ -700,28 +701,28 @@ func waitGuestUname(dir string, timeout time.Duration, console func() (string, b
 
 // The guest prints one of these after it tries /dev/vdb. Create does not
 // succeed on DATA_MOUNT_FAIL; fc-init does not start the inhabitant either.
-func waitDataMounted(helper string) error {
+func waitDataMounted(fcContainer string) error {
 	deadline := time.Now().Add(60 * time.Second)
 	var logs string
 	for time.Now().Before(deadline) {
-		logs = helperLogs(helper)
+		logs = containerLogs(fcContainer)
 		if strings.Contains(logs, "DATA_MOUNT_FAIL") {
-			// Destroy removes the helper, and docker logs with it.
+			// Destroy removes the Firecracker container, and docker logs with it.
 			return dataMountFailure(logs)
 		}
 		if strings.Contains(logs, "DATA_MOUNT_OK") {
 			return nil
 		}
-		if !helperRunning(helper) {
+		if !containerRunning(fcContainer) {
 			// The guest can print the marker and exit between the read and this check.
-			logs = helperLogs(helper)
+			logs = containerLogs(fcContainer)
 			if strings.Contains(logs, "DATA_MOUNT_FAIL") {
 				return dataMountFailure(logs)
 			}
 			if strings.Contains(logs, "DATA_MOUNT_OK") {
 				return nil
 			}
-			return fmt.Errorf("helper exited before the data disk mounted: %s", logs)
+			return fmt.Errorf("Firecracker container exited before the data disk mounted: %s", logs)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -744,7 +745,7 @@ func DestroyStrong(id string) error {
 	stopGateDNS(id)
 	removeGate(id)
 	DockerIgnore("rm", "-f", "htm-fc-"+id)
-	if root, err := Root(); err == nil && helperFree("htm-fc-"+id) == nil {
+	if root, err := Root(); err == nil && containerFree("htm-fc-"+id) == nil {
 		_ = os.RemoveAll(attachKeyDir(root, id))
 	}
 	return nil

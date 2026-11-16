@@ -42,7 +42,7 @@ func TestGuestDocker(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Minute)
 	var serial string
 	for time.Now().Before(deadline) {
-		serial, _ = supervisor.Docker(10*time.Second, "logs", inst.Helper)
+		serial, _ = supervisor.Docker(10*time.Second, "logs", inst.FirecrackerContainer)
 		if strings.Contains(serial, "DOCKER_INNER_OK") && strings.Contains(serial, "hermetarium-docker-ok") {
 			t.Log("strong wall: docker ran a container")
 			return

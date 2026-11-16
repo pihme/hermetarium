@@ -43,7 +43,7 @@ The container on the strong wall that holds the microVM.
 _Avoid_: helper
 
 **Firecracker scripts**:
-The strong-wall scripts in `firecracker-helper/`. They are not the Firecracker container.
+The strong-wall scripts in `firecracker-scripts/`. They are not the Firecracker container.
 _Avoid_: helper, Firecracker helper
 
 ## Inside the habitat

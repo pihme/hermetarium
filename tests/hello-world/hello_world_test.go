@@ -108,12 +108,12 @@ func testStrong(t *testing.T, root string) {
 		t.Log("strong wall: destroyed")
 	}()
 
-	priv, err := supervisor.Docker(10*time.Second, "inspect", "-f", "{{.HostConfig.Privileged}}", inst.Helper)
+	priv, err := supervisor.Docker(10*time.Second, "inspect", "-f", "{{.HostConfig.Privileged}}", inst.FirecrackerContainer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(priv) != "false" {
-		t.Fatalf("helper is privileged: %q", priv)
+		t.Fatalf("Firecracker container is privileged: %q", priv)
 	}
 
 	serial, waitErr := supervisor.WaitStrongSerial(inst, 90*time.Second)
@@ -161,7 +161,7 @@ func testStrong(t *testing.T, root string) {
 		t.Fatalf("strong wall: leak did not fail\n%s", tail(serial, 2000))
 	}
 	t.Log("strong wall: direct egress failed (fail-closed)")
-	harness.AssertNeighborBlocked(t, inst.Helper)
+	harness.AssertNeighborBlocked(t, inst.FirecrackerContainer)
 	t.Log("strong wall: a neighbor container on the default bridge cannot reach the gate")
 	if err := supervisor.SyncInstanceLog(inst.Dir); err != nil {
 		t.Fatal(err)
