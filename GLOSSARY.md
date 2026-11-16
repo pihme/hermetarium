@@ -46,12 +46,14 @@ _Avoid_: helper
 The strong-wall scripts in `firecracker-helper/`. They are not the Firecracker container.
 _Avoid_: helper, Firecracker helper
 
+## Inside the habitat
+
+**Porter**:
+The HTTP adapter in the inhabitant image. It listens on port 8080 and carries the operator's question to the inhabitant's CLI.
+_Avoid_: helper, host program
+
 ## Host programs
 
 **Build image**:
 The small Alpine image the supervisor uses for its own jobs, outside any habitat.
-_Avoid_: helper
-
-**Porter**:
-The host program that carries the operator's question to an inhabitant.
 _Avoid_: helper

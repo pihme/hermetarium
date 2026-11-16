@@ -35,7 +35,7 @@ The image is the same on either wall. The wall is outside the image.
    strong  its own tiny machine  needs Linux with KVM
 ```
 
-On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the container is a virtual machine with its own kernel, and root stays inside it.
+On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the Firecracker container holds a microVM with its own kernel, and root stays inside that microVM.
 
 On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-fc-<id>`) holds the TAP device, the firewall, and the microVM. The gate (`htm-gate-<id>`) is Squid. It is a second container and joins the Firecracker container's network namespace.
 

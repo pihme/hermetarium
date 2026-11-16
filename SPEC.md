@@ -24,7 +24,7 @@ operator machine or cluster
   supervisor (Go binary)
     ├── wall (weak runc | strong Firecracker)
     └── Squid (spawned; per-habitat ACL file; access.log → I/O log)
-          └── Hermetarium = that OCI image, running
+          └── habitat (the image, running behind the wall)
                 └── inhabitant (HTTP server: echo, or a coding-agent harness)
 ```
 
@@ -45,9 +45,11 @@ The outside network reaches the inhabitant only through Squid. The operator also
 | Habitat | One running instance: image + wall + network path. |
 | Image | OCI image; what the inhabitant sees as Linux. |
 | Wall | Isolation around the image: **weak** (`runc`) or **strong** (Firecracker microVM). |
-| Supervisor | Control plane that boots and kills Hermetaria, owns the network path, writes the I/O log. |
+| Supervisor | Control plane that boots and kills habitats, owns the network path, writes the I/O log. |
 | Inhabitant | Agent or process that lives inside. |
 | I/O log | Record of traffic that **crosses the wall** (required). |
+
+The words to use, and the ones to avoid, are in [GLOSSARY.md](GLOSSARY.md).
 
 ## 6. Walls
 

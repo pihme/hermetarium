@@ -4,7 +4,7 @@ This file is for the coding agent working in this repo. Read it at the start of 
 
 ## What this repo is
 
-**Hermetarium** is a sealed habitat for software agents. Spec: `SPEC.md`.
+**Hermetarium** is the product that starts habitats. Spec: [SPEC.md](SPEC.md). Words: [GLOSSARY.md](GLOSSARY.md).
 
 An inhabitant boots inside an OCI image and may change that world freely. It cannot leave. The wall is outside the image (weak `runc` / Docker, or strong Firecracker). The supervisor owns the only network path (Squid) and the I/O log.
 
