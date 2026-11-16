@@ -115,7 +115,9 @@ Unmount the file first if you mounted it to read it. Do not check or mount the c
 
 # Denied requests
 
-A host script and a systemd user timer. Hermetarium does not send mail. Squid only writes the log. The script asks `hermetarium logs` for an up-to-date I/O log, takes the denials since the last run, and sends one mail for that run. A run with nothing new sends nothing. Many denials between two runs are still one mail. The mail names the habitat, the time span, and each denied destination with its count. A connection the client closed during the TLS handshake is listed too, with the host name from the log. The mail has no key and no request body.
+A host script and a systemd user timer. Hermetarium does not send mail. Squid only writes the log. The script asks `hermetarium logs` for an up-to-date I/O log, takes the denials since the last run, and sends one mail for that run. A run with nothing new sends nothing. Many denials between two runs are still one mail. The mail names the habitat, the time span, and each denied destination with its count. A connection the client closed during the TLS handshake is listed too, with the host name from the log. The mail has no key, no request body, and no DNS answer.
+
+Gate DNS keeps the current lookup log and one older file, `dns.jsonl` and `dns.jsonl.1`, each capped at 1 MiB. `hermetarium logs` copies only those two. A denied lookup that has already rotated out of `dns.jsonl.1` before this timer runs is not mailed. An HTTP denial stays in Squid's access log and is not dropped that way.
 
 The same mail settings are the wall's one mail configuration. The Push Guard's mail for a red push uses this file and `omakase/mail.sh`. A password stays in a file that the mail program reads. It is not written in `mail.env`.
 

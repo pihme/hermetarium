@@ -111,7 +111,7 @@ In-process. No Docker habitat.
 | `TestRootCheckoutFromCwd` | With the env unset, a checkout working directory is the root. Cache is `<root>/.cache`. |
 | `TestRootXDGWhenNoCheckout` | Outside a checkout, root is `$XDG_DATA_HOME/hermetarium` and cache is `$XDG_CACHE_HOME/hermetarium`. |
 | `TestCacheDirExplicitRoot` | `CacheDir` follows the root argument. |
-| `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. A bumped line is decrypted and keeps the path. A CONNECT line is `https` on the authority port. A bumped CONNECT to an IP is named from SNI and keeps that IP in `upstream`. A spliced line is passthrough, takes the destination from SNI, and keeps the upstream address from the peer or, when the peer is `-`, from the IP authority. A `NONE_NONE_ABORTED` CONNECT is not a policy denial, has `aborted` set, and takes the destination from SNI. |
+| `TestParseSquidLine` | An allow line for `probe.hermetarium.test` parses method, bytes, and destination. A `TCP_DENIED` line is not allowed. An inbound POST on port 18081 has direction `in`. An `https://` URL is protocol `https`, port 443, and keeps the path. A bumped line is decrypted and keeps the path. A CONNECT line is `https` on the authority port. A bumped CONNECT to an IP is named from SNI and keeps that IP in `upstream`. A spliced line is passthrough, takes the destination from SNI, and keeps the upstream address from the peer or, when the peer is `-`, from the IP authority. A `NONE_NONE_ABORTED` CONNECT is not a policy denial, has `aborted` set, and takes the destination from SNI. A `TCP_TUNNEL_ABORTED/200` CONNECT that already transferred bytes does not have `aborted` set. |
 | `TestACLWantsHTTPS` | A commented `https_port` line leaves interception off. An active `https_port` with `ssl-bump` turns it on. |
 | `TestPrepareMITM` | `PrepareMITM` writes a CA certificate and keeps the private key out of the public directory. |
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
@@ -184,6 +184,8 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 `tests/digest` `TestDigestManyAreOneMail`. No Docker daemon and no KVM. A first run with nothing denied sends nothing. Many denied requests, and one TLS handshake the client closed, then produce one mail. That mail names each destination and its count, including the pass-through host. It does not contain the request path, a key planted in that path, or a request body.
 
 `tests/digest` `TestDigestFailedMailDoesNotAdvance`. No Docker daemon and no KVM. When the mail program fails, the script exits non-zero and does not remember the denial as sent. The next run sends that one mail.
+
+`tests/digest` `TestDigestSpanOrdersFractionalSeconds`. No Docker daemon and no KVM. Three denials in one second use the `RFC3339Nano` forms of .000, .100, and .120 (`...01Z`, `...01.1Z`, `...01.12Z`). The span runs from the .000 instant to the .120 instant. A denied DNS lookup is counted by name. Its answer is not in the mail.
 
 ### Guest Docker
 

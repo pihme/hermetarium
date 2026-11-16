@@ -24,9 +24,9 @@ type Record struct {
 	Path     string `json:"path,omitempty"`
 	Result   string `json:"result,omitempty"`
 	Allowed  bool   `json:"allowed"`
-	// Aborted is set when the client closed the transaction. A CONNECT with
-	// this set is a TLS handshake the client gave up on; the destination is
-	// the SNI host name when the gate file logged it.
+	// Aborted is a CONNECT closed before a tunnel existed (NONE_*_ABORTED).
+	// The destination is the SNI host name when the gate file logged it.
+	// TCP_TUNNEL_ABORTED is a tunnel that later closed, and is not this.
 	Aborted bool `json:"aborted,omitempty"`
 	Bytes   int  `json:"bytes,omitempty"`
 	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
@@ -142,10 +142,20 @@ func ParseSquidLine(line string) (Record, bool) {
 		Method:      f[5],
 		Path:        path,
 		Allowed:     !strings.Contains(status, "DENIED"),
-		Aborted:     strings.Contains(status, "ABORTED"),
+		Aborted:     handshakeAbort(status, f[5]),
 		Bytes:       bytes,
 		TLS:         tlsMode,
 	}, true
+}
+
+// handshakeAbort is NONE_*_ABORTED on CONNECT. No tunnel was established.
+// TCP_TUNNEL_ABORTED is a later close of a tunnel that already carried bytes.
+func handshakeAbort(status, method string) bool {
+	if method != "CONNECT" {
+		return false
+	}
+	head, _, _ := strings.Cut(status, "/")
+	return strings.HasPrefix(head, "NONE") && strings.Contains(head, "ABORTED")
 }
 
 // splitAuthority parses host:port. A port outside 1..65535 returns the host and ok false.

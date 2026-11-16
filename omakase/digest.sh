@@ -4,6 +4,9 @@
 # sends nothing. Several denials are one mail, not one mail each.
 # A CONNECT the client closed during the TLS handshake is listed too,
 # under the host name from that log line.
+# A denied DNS name is mailed only while logs still has it (dns.jsonl
+# and dns.jsonl.1). An older lookup is omitted. The mail names
+# destinations and counts. It does not include a DNS answer, a path, or a key.
 set -eu
 
 die() {
@@ -148,6 +151,16 @@ function parse_literal(s, i,    start, c) {
   pnext = i
   return 1
 }
+function time_key(s,    z, body, dot, frac) {
+  z = index(s, "Z")
+  if (z < 2) return s
+  body = substr(s, 1, z - 1)
+  dot = index(body, ".")
+  if (dot == 0) return body ".000000000"
+  frac = substr(body, dot + 1)
+  while (length(frac) < 9) frac = frac "0"
+  return substr(body, 1, dot) frac
+}
 function load_obj(s,    i, c, key) {
   delete f
   i = skip_ws(s, 1)
@@ -226,8 +239,16 @@ END {
       key = kind[sig] "\t" sdest[sig]
       add[key] += extra
       t = stime[sig]
-      if (min == "" || t < min) min = t
-      if (t > max) max = t
+      # RFC3339Nano drops trailing zeros, so "...01Z" > "...01.1Z" as text.
+      tk = time_key(t)
+      if (min == "" || tk < mink) {
+        min = t
+        mink = tk
+      }
+      if (max == "" || tk > maxk) {
+        max = t
+        maxk = tk
+      }
     }
     print sig " " ord[sig] > stateout
   }

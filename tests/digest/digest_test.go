@@ -130,6 +130,53 @@ func TestDigestManyAreOneMail(t *testing.T) {
 	}
 }
 
+func TestDigestSpanOrdersFractionalSeconds(t *testing.T) {
+	// RFC3339Nano drops trailing zeros. These are .000, .100, and .120
+	// in the same second. As text, the .120 form sorts first.
+	const (
+		at000 = "2026-11-16T10:00:01Z"
+		at100 = "2026-11-16T10:00:01.1Z"
+		at120 = "2026-11-16T10:00:01.12Z"
+	)
+	r := newRun(t)
+	r.writeLog([]supervisor.Record{
+		{
+			Time: at120, Direction: "out", Protocol: "https",
+			Destination: "later.example", Method: "GET", Allowed: false,
+		},
+		{
+			Time: at100, Direction: "out", Protocol: "https",
+			Destination: "mid.example", Method: "GET", Allowed: false,
+		},
+		{
+			Time: at000, Direction: "out", Protocol: "http",
+			Destination: "early.example", Method: "GET", Allowed: false,
+		},
+		{
+			Time: at100, Direction: "out", Protocol: "dns",
+			Destination: "blocked.example", Method: "A", Result: "NXDOMAIN 192.0.2.9 secret-dns-answer",
+			Allowed: false,
+		},
+	})
+	out := r.run(t, false)
+	mail := r.mail(t)
+	if strings.Count(mail, "---MAIL---") != 1 {
+		t.Fatalf("mails\n%s\n%s", mail, out)
+	}
+	want := "Span: " + at000 + " to " + at120
+	if !strings.Contains(mail, want) {
+		t.Fatalf("span\n%s", mail)
+	}
+	for _, dest := range []string{"early.example 1", "mid.example 1", "later.example 1", "blocked.example 1"} {
+		if !strings.Contains(mail, dest) {
+			t.Fatalf("missing %s\n%s", dest, mail)
+		}
+	}
+	if strings.Contains(mail, "secret-dns-answer") || strings.Contains(mail, "192.0.2.9") || strings.Contains(mail, "NXDOMAIN") {
+		t.Fatalf("dns answer in mail\n%s", mail)
+	}
+}
+
 func TestDigestFailedMailDoesNotAdvance(t *testing.T) {
 	r := newRun(t)
 	r.writeLog([]supervisor.Record{

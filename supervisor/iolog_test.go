@@ -81,6 +81,12 @@ func TestParseSquidLine(t *testing.T) {
 	if len(gaveRecs) != 1 || !gaveRecs[0].Aborted || !gaveRecs[0].Allowed || gaveRecs[0].Destination != "pinned.example" || gaveRecs[0].TLS != "passthrough" {
 		t.Fatalf("synced gave up %+v", gaveRecs)
 	}
+	// The tunnel existed and then closed. Not a handshake the client gave up on.
+	tunnelAbort := "1757162701.000 50 10.20.0.3 TCP_TUNNEL_ABORTED/200 5000 CONNECT pinned.example:443 - HIER_DIRECT/10.1.0.2 - 3130 splice pinned.example"
+	rec, ok = ParseSquidLine(tunnelAbort)
+	if !ok || !rec.Allowed || rec.Aborted || rec.Bytes != 5000 || rec.Destination != "pinned.example" || rec.TLS != "passthrough" || rec.Method != "CONNECT" {
+		t.Fatalf("tunnel abort %+v ok=%v", rec, ok)
+	}
 	dir := t.TempDir()
 	access := filepath.Join(dir, "access.log")
 	if err := os.WriteFile(access, []byte(bumpedConnect+"\n"+splicedIP+"\n"+splicedTunnel+"\n"), 0o644); err != nil {
