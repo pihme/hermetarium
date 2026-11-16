@@ -111,16 +111,43 @@ func agentdOpts(root, label string, mock bool) (supervisor.CreateOpts, error) {
 }
 
 func inhabitantOpts(root, name, label string, mock bool) (supervisor.CreateOpts, error) {
-	var image, peer, keyEnv string
+	var image string
+	var acl string
+	var err error
 	switch name {
 	case InhabitantClaude:
-		image, peer, keyEnv = InClaudeImage, ClaudeLivePeer, "HERMETARIUM_ANTHROPIC_API_KEY"
+		image = InClaudeImage
+		acl, err = fillACL(filepath.Join(root, "inhabitants", name, "squid.conf"), mock, ClaudeLivePeer, "HERMETARIUM_ANTHROPIC_API_KEY")
 	case InhabitantGrok:
-		image, peer, keyEnv = InGrokImage, GrokLivePeer, "HERMETARIUM_XAI_API_KEY"
+		image = InGrokImage
+		acl, err = fillACL(filepath.Join(root, "inhabitants", name, "squid.conf"), mock, GrokLivePeer, "HERMETARIUM_XAI_API_KEY")
+	case InhabitantOpenCode:
+		// No paid key. The smoke fills the generic model stand-in with the mock.
+		image = InOpenCodeImage
+		if !mock {
+			err = fmt.Errorf("opencode smoke uses the mock endpoint")
+			break
+		}
+		var raw []byte
+		raw, err = os.ReadFile(filepath.Join(root, "inhabitants", name, "squid.conf"))
+		if err != nil {
+			break
+		}
+		s := string(raw)
+		// An empty prefix must not become an extra argument. The box path stays /v1/...
+		s = strings.ReplaceAll(s, "url_rewrite_program /log/model-rewrite __MODEL_PREFIX__", "url_rewrite_program /log/model-rewrite")
+		s = strings.ReplaceAll(s, "__MODEL_PEER__", "127.0.0.1 parent 18082 0 no-query no-digest originserver name=model")
+		s = strings.ReplaceAll(s, "__MODEL_HOST__", "upstream.example")
+		s = strings.ReplaceAll(s, "__MODEL_PREFIX__", "")
+		s = strings.ReplaceAll(s, "__MODEL_KEY__", TestVendorKey)
+		if strings.Contains(s, "__MODEL_") {
+			err = fmt.Errorf("unfilled model gate file")
+			break
+		}
+		acl, err = writeTempACL(s)
 	default:
 		return supervisor.CreateOpts{}, fmt.Errorf("unknown inhabitant %q", name)
 	}
-	acl, err := fillACL(filepath.Join(root, "inhabitants", name, "squid.conf"), mock, peer, keyEnv)
 	if err != nil {
 		return supervisor.CreateOpts{}, err
 	}
@@ -147,6 +174,10 @@ func fillACL(src string, mock bool, livePeer, keyEnv string) (string, error) {
 		key = os.Getenv(keyEnv)
 	}
 	s = strings.ReplaceAll(s, "__VENDOR_KEY__", key)
+	return writeTempACL(s)
+}
+
+func writeTempACL(s string) (string, error) {
 	f, err := os.CreateTemp("", "htm-acl-*.conf")
 	if err != nil {
 		return "", err

@@ -20,8 +20,8 @@ Habitats are created through the supervisor Go API. Chat and echo are HTTP POST 
 `tests/harness` builds images and fills a temp ACL before `create`.
 
 - Echo and agentd: `hermetarium-echo:local` and `hermetarium-agentd:local`, 128 MiB / 256 MB, ACL from `examples/<name>/squid.conf`.
-- Official CLIs: `hermetarium-in-claude:local`, and `hermetarium-in-grok:local`, 2048 MiB / 2048 MB, ACL from `inhabitants/<name>/squid.conf`. Porter is copied into the image build.
-- Mock runs replace the habitat `cache_peer` with `127.0.0.1 parent 18082` and `__VENDOR_KEY__` with `htm-test-key`. Live runs keep the real vendor peer and substitute `HERMETARIUM_ANTHROPIC_API_KEY` or `HERMETARIUM_XAI_API_KEY`. The supervisor does not read those variables.
+- Official CLIs: `hermetarium-in-claude:local`, `hermetarium-in-grok:local`, and `hermetarium-in-opencode:local`, 2048 MiB / 2048 MB, ACL from `inhabitants/<name>/squid.conf`. Porter is copied into the image build.
+- Mock runs replace the habitat `cache_peer` with `127.0.0.1 parent 18082` and `__VENDOR_KEY__` with `htm-test-key`. Live runs keep the real vendor peer and substitute `HERMETARIUM_ANTHROPIC_API_KEY` or `HERMETARIUM_XAI_API_KEY`. The supervisor does not read those variables. The OpenCode mock fills `__MODEL_PEER__`, `__MODEL_HOST__`, `__MODEL_PREFIX__` (empty), and `__MODEL_KEY__` (`htm-test-key`) instead. There is no OpenCode live case.
 - Echo creates start a probe httpd on the gate (`tests/probe`, port 18080, body `hermetarium-ok`). Mock creates start `tests/vendormock` on the gate. The mock requires `x-api-key` or `Authorization: Bearer` equal to `htm-test-key`. `/v1/messages` and `/v1/chat/completions` return a bash tool call `id -u`, then the text `0` after a tool result.
 
 ## `make test`
@@ -115,19 +115,19 @@ In-process. No Docker habitat.
 | `TestACLWantsHTTPS` | A commented `https_port` line leaves interception off. An active `https_port` with `ssl-bump` turns it on. |
 | `TestPrepareMITM` | `PrepareMITM` writes a CA certificate and keeps the private key out of the public directory. |
 | `TestPrepareMITMAfterGateChown` | Needs Docker. After the gate user owns `mitm/`, `PrepareMITM` can write a new CA. |
-| `TestInhabitantHTTPSStaysCommented` | The two inhabitant gate files ship `OPEN-HTTPS` commented out. |
+| `TestInhabitantHTTPSStaysCommented` | The inhabitant gate files ship `OPEN-HTTPS` commented out. |
 | `TestFcScriptsDirExtractsWithoutTree` | `entrypoint.sh` and `pack-oci.sh` extract as executables under the data root, and the extract does not create a `firecracker-scripts/` directory there. |
 | `TestExtract` | The same two scripts extract executable. The entrypoint contains the marker `fc-scripts` (a string in the Firecracker scripts, not a name for the container). The pack script contains `rootfs.ext4` and builds it with `mke2fs -d` (no mount). fc-init starts `sshd` after the guest address and `/run/sshd` (mode 0755) and before the inhabitant, and only when `[ -x /usr/sbin/sshd ]`. The scripts do not build a vsock terminal. `DATA_MOUNT_FAIL` exits before the inhabitant. A second extract leaves the entrypoint mtime unchanged. |
 | `TestGateCAFallsThroughToCurl` | The fc-init gate CA fetch runs against a fake busybox without wget: curl is tried next under timeout 3 and writes the CA to both paths. With no curl, the only output is `fc-init: could not fetch the gate CA`. |
 | `TestEcho` | The echo handler returns the POST body with status 200. |
 | `TestHealth` | agentd `GET /` returns 200 and a body containing `ok`. |
 | `TestToolCommand` | A tool-use payload `{"command":"id -u"}` yields the command `id -u`. |
-| `TestCmdFirstTurn` | Porter argv for a first turn: `claude -p --output-format text --dangerously-skip-permissions` and `grok --always-approve -p`. Claude's environment includes `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. |
-| `TestCmdContinuesSession` | After a turn has run, `claude` and `grok` gain `--continue`. Claude's flag stays in front of `-p`. Grok's follows the prompt, because `-p` is `--single`. |
+| `TestCmdFirstTurn` | Porter argv for a first turn: `claude -p --output-format text --dangerously-skip-permissions`, `grok --always-approve -p`, and `opencode run --auto --`. Claude's environment includes `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. OpenCode's environment includes `OPENCODE_DISABLE_AUTOUPDATE=1` and `OPENCODE_DISABLE_MODELS_FETCH=1`. OpenCode's `-p` is not the prompt. `--` keeps a prompt that looks like a flag as the message. The model comes from `opencode.json`, not `-m`. |
+| `TestCmdContinuesSession` | After a turn has run, `claude`, `grok`, and `opencode` gain `--continue`. Claude's flag stays in front of `-p`. Grok's follows the prompt, because `-p` is `--single`. OpenCode's stays in front of `--`, before the positional prompt. |
 | `TestCmdUnknownHarness` | An unknown `HARNESS` value returns an error. |
 | `TestReleaseScript` | `tests/harness` runs `python3 -m unittest` on `.github/scripts/test_release.py`. In a temp git repo, `diff_note_lines()` keeps an added `// Release-Notes:` or `# Release-Notes:` line under an artifact path, indented or not, and drops a note that the commit moves or only renames, a note in `*_test.go`, `*.md`, `testdata/`, `fixtures/` or `vendor/`, a note outside the artifact's paths, a `Release-Notes:` that is not a whole line, and a repeated note text. |
 
-Porter tests compare argv. They do not exec `claude` or `grok`.
+Porter tests compare argv. They do not exec `claude`, `grok`, or `opencode`.
 
 ### Hello-world
 
@@ -199,6 +199,9 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 | --- | --- | --- |
 | `claude-code` | `/usr/local/bin/claude --version` | `claude.hermetarium.test` |
 | `grok-build` | `/usr/local/bin/grok --version` | `grok.hermetarium.test` |
+| `opencode` | `/usr/local/bin/opencode --version` | `model.hermetarium.test` |
+
+OpenCode is optional. It does not replace echo or agentd. Its gate file is the generic model stand-in, filled with the mock peer and `htm-test-key`. A failed mock chat still passes the subtest. There is no live OpenCode case.
 
 `printenv` does not contain `htm-test-key`. `harness.AssertInboundNoVendor` with the inhabitant's vendor host, as in the agentd mock. A POST `Run id -u and reply with only the number.` is attempted with a 20s timeout. A failed call ends the subtest successfully. A successful call continues into the agentd exercise (two further POSTs, reply contains `0`, inbound and vendor host in the I/O log).
 
@@ -234,3 +237,4 @@ Job `release` runs after `test` on push to `main`. It does not run the suite.
 - The I/O log allowed bit. Habitat tests match destination or direction.
 - Installing a package inside the habitat.
 - The `hermetarium` CLI as a subprocess (`create`, `url`, `destroy`). `destroy` in habitat tests is cleanup.
+- A paid OpenCode upstream, and a git push. The OpenCode smoke does not require a paid key. Its README shows the model HTTP log line, and says a push is absent until the gate file allows a git host.

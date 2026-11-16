@@ -11,13 +11,15 @@ import (
 )
 
 const (
-	EchoImage     = "hermetarium-echo:local"
-	AgentdImage   = "hermetarium-agentd:local"
-	InClaudeImage = "hermetarium-in-claude:local"
-	InGrokImage   = "hermetarium-in-grok:local"
+	EchoImage       = "hermetarium-echo:local"
+	AgentdImage     = "hermetarium-agentd:local"
+	InClaudeImage   = "hermetarium-in-claude:local"
+	InGrokImage     = "hermetarium-in-grok:local"
+	InOpenCodeImage = "hermetarium-in-opencode:local"
 
-	InhabitantClaude = "claude-code"
-	InhabitantGrok   = "grok-build"
+	InhabitantClaude   = "claude-code"
+	InhabitantGrok     = "grok-build"
+	InhabitantOpenCode = "opencode"
 )
 
 func EnsureEchoImage(root string) error {

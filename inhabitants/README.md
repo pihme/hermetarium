@@ -1,19 +1,20 @@
 # Inhabitants
 
-An inhabitant lives in its own container. [Squid](https://www.squid-cache.org/) is the gate in front of that container. The two `squid.conf` files share one shape. Each file names a different model company.
+An inhabitant lives in its own container. [Squid](https://www.squid-cache.org/) is the gate in front of that container. The Claude and Grok `squid.conf` files share one shape. Each of those files names a model company. The OpenCode file uses the same door and a generic OpenAI-compatible upstream.
 
 | Folder | Hermetarium runs | Vendor is | Docker | Firecracker |
 | --- | --- | --- | --- | --- |
 | [claude-code](claude-code/README.md) | Claude Code | Anthropic, `api.anthropic.com` | tested | tested |
 | [grok-build](grok-build/README.md) | Grok Build | xAI, `api.x.ai` | tested | tested |
+| [opencode](opencode/README.md) | OpenCode | the upstream you name, `model.hermetarium.test` | smoke | not in the suite |
 
-Both inhabitants have been run on both walls by hand, with a real key: a question, then a second question that continues the conversation. The automated tests use a stand-in model and do not cover that.
+Claude Code and Grok Build have been run on both walls by hand, with a real key: a question, then a second question that continues the conversation. The automated tests use a stand-in model and do not cover that. OpenCode is optional. Its smoke is the Docker wall and a pretend model, with no paid key. Echo and agentd stay the images for the wall, egress, and log tests.
 
 ## Who is who
 
 **Habitat** is what `create` starts: the image on a wall, with the gate in front of it. In `squid.conf` the image is the peer named `inhabitant`. The inhabitant listens on port 8080. Hermetarium is the product, not that container.
 
-**Vendor** is the model company's API. In `squid.conf` that API is the peer named `vendor`. The container does not call the company by its real name. It calls a stand-in host (`claude.hermetarium.test` or `grok.hermetarium.test`). Squid is the one that connects to the real API.
+**Vendor** is the model company's API. In `squid.conf` that API is the peer named `vendor`. The container does not call the company by its real name. It calls a stand-in host (`claude.hermetarium.test` or `grok.hermetarium.test`). Squid is the one that connects to the real API. OpenCode calls `model.hermetarium.test`. That peer is named `model`, and the gate file names the upstream.
 
 **Squid** is one gate with two jobs. Your question comes in through `inbound` and is handed to Hermetarium. Hermetarium's call to the model goes out through `vendor`, and Squid attaches the key from `__VENDOR_KEY__` on that trip. The key stays in `squid.conf`.
 
@@ -79,7 +80,9 @@ request_header_add x-api-key "__VENDOR_KEY__" vendorhost !inbound
 request_header_add Authorization "Bearer __VENDOR_KEY__" vendorhost !inbound
 ```
 
-Both files also set `Host` to the real API name on that path (`api.x.ai`, `api.anthropic.com`). The services in front of the APIs answer 403 when the name is still the stand-in host.
+The Claude and Grok files also set `Host` to the real API name on that path (`api.x.ai`, `api.anthropic.com`). The services in front of the APIs answer 403 when the name is still the stand-in host.
+
+The OpenCode file names the stand-in `model.hermetarium.test` and the peer `model`. The words to fill are `__MODEL_PEER__`, `__MODEL_HOST__`, `__MODEL_PREFIX__`, and `__MODEL_KEY__`. Squid drops the box `Authorization` and sets `Bearer` plus the `Host` from that file. A request on the inbound port with that stand-in host never carries the key. The snippets below are the Claude and Grok shape. `inhabitants/opencode/squid.conf` is where that file writes `modelhost` and the `__MODEL_*` words.
 
 The value that replaces `__VENDOR_KEY__` must be an API key. For xAI, a login session token is rejected. For Anthropic, use a long-lived API key: the key is copied into the habitat when you run `create`, and a new key means creating the habitat again. A key that expires while the habitat runs makes every call fail until then.
 

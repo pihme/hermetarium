@@ -113,6 +113,23 @@ func (s *server) cmd(prompt string) (*exec.Cmd, error) {
 			args = append(args, "--continue")
 		}
 		return exec.Command("grok", args...), nil
+	case "opencode":
+		// The prompt is positional. -p is the server password, not the prompt.
+		// -- keeps a body that is itself a flag as the message. --continue
+		// does not take the next argument, so it stays in front of --.
+		// --auto approves a tool the config did not deny, so a turn does not
+		// wait on the TUI. The model is opencode.json; -m would override it.
+		args := []string{"run", "--auto"}
+		if s.started {
+			args = append(args, "--continue")
+		}
+		args = append(args, "--", prompt)
+		c := exec.Command("opencode", args...)
+		c.Env = append(env,
+			"OPENCODE_DISABLE_AUTOUPDATE=1",
+			"OPENCODE_DISABLE_MODELS_FETCH=1",
+		)
+		return c, nil
 	default:
 		return nil, fmt.Errorf("unknown HARNESS %q", s.harness)
 	}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "hermetarium/mock",
+  "autoupdate": false,
+  "permission": "allow",
+  "provider": {
+    "hermetarium": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Hermetarium",
+      "options": {
+        "baseURL": "http://model.hermetarium.test/v1",
+        "apiKey": "{env:OPENCODE_API_KEY}"
+      },
+      "models": {
+        "mock": {
+          "name": "Mock"
+        }
+      }
+    }
+  }
+}

@@ -112,6 +112,7 @@ A coding assistant lives in its own folder. Each README says what it is, what th
 
 - [Claude Code](inhabitants/claude-code/README.md)
 - [Grok Build](inhabitants/grok-build/README.md)
+- [OpenCode](inhabitants/opencode/README.md)
 
 The shared shape of the gate is in the [inhabitants README](inhabitants/README.md). The image holds a stand-in key so the program will start. Your real key stays in `squid.conf`.
 
@@ -148,9 +149,9 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 
 **The log.** `hermetarium logs YOUR_ID` reads Squid's access log and writes `var/<id>/io.jsonl`. A line has the time, the direction (`in` or `out`), the protocol, the destination, the port, the method, the path when the address has one, whether it was allowed, and the size. DNS queries are in that log too: the name, the type, and the result. A TCP query is forwarded on TCP. A truncated UDP answer is fetched again on TCP, and stays truncated for a UDP client when the TCP message is larger than 512 octets. At most 32 DNS queries are in flight. They are written to `dns.jsonl`, capped at 1 MiB, with the previous file kept as `dns.jsonl.1`. A file already over that cap when gate DNS starts is rotated, not discarded, and `logs` reads both files. Message bodies stay out of the log.
 
-**Porter** (`porter/`) is a small program inside the inhabitant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code and Grok Build. You can skip porter and answer on 8080 yourself. The echo image does that.
+**Porter** (`porter/`) is a small program inside the inhabitant image. It listens on port 8080, which is where `url` delivers your question. Each POST is one turn. A later POST continues the same conversation for Claude Code, Grok Build, and OpenCode. You can skip porter and answer on 8080 yourself. The echo image does that.
 
-**Inhabitants** (`inhabitants/`) are the official assistants: Claude Code and Grok Build. They run as root. Inside the box they may run commands and edit files without stopping to ask. The wall is outside the image.
+**Inhabitants** (`inhabitants/`) are Claude Code, Grok Build, and OpenCode. OpenCode is optional. They run as root. Inside the box they may run commands and edit files without stopping to ask. The wall is outside the image.
 
 [Fregoli](https://github.com/pihme/fregoli) is one program from outside this repo that can live in a habitat. Its image already answers on port 8080. It currently listens only on `127.0.0.1` inside the container, so the gate cannot reach it until [fregoli#1](https://github.com/pihme/fregoli/issues/1) is fixed.
 
@@ -160,8 +161,8 @@ The **supervisor** (`supervisor/`) is the `hermetarium` command. It picks the wa
 
 - `supervisor/` — the `hermetarium` program
 - `firecracker-scripts/` — the Firecracker scripts, packed inside the binary
-- `porter/` — the small program that carries a question to Claude or Grok
-- `inhabitants/` — Claude Code and Grok Build, plus the shared gate README
+- `porter/` — the small program that carries a question to Claude, Grok, or OpenCode
+- `inhabitants/` — Claude Code, Grok Build, and OpenCode, plus the shared gate README
 - `examples/` — echo, and the agentd stand-in
 - `tests/` — the suite, the pretend model, and the probe
 - `omakase/` — host backup of one habitat's logs and data disk
@@ -175,7 +176,7 @@ Firecracker files land in `.cache/` inside the checkout, or in `~/.cache/hermeta
 
 What the product promises is in the [specification, section 11](SPEC.md#11-tests). What the suite checks today is in [TESTING.md](TESTING.md).
 
-The usual suite needs no model account. It runs hello-world on both walls, and one agentd turn against the pretend model. The official-assistant tests check that `claude` and `grok` are installed and that porter answers. GitHub runs this on every push to `main` and on every pull request.
+The usual suite needs no model account. It runs hello-world on both walls, and one agentd turn against the pretend model. The inhabitant tests check that `claude`, `grok`, and `opencode` are installed and that porter answers. GitHub runs this on every push to `main` and on every pull request.
 
 ```bash
 make test

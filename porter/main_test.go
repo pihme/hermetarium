@@ -13,6 +13,7 @@ func TestCmdFirstTurn(t *testing.T) {
 	}{
 		{"claude", []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
 		{"grok", []string{"--always-approve", "-p", "hi"}},
+		{"opencode", []string{"run", "--auto", "--", "hi"}},
 	}
 	for _, c := range cases {
 		s := &server{harness: c.harness}
@@ -26,10 +27,16 @@ func TestCmdFirstTurn(t *testing.T) {
 		if c.harness == "claude" && !strings.Contains(strings.Join(cmd.Env, "\n"), "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1") {
 			t.Fatalf("claude env missing skip-permissions variable: %v", cmd.Env)
 		}
+		if c.harness == "opencode" {
+			env := strings.Join(cmd.Env, "\n")
+			if !strings.Contains(env, "OPENCODE_DISABLE_AUTOUPDATE=1") || !strings.Contains(env, "OPENCODE_DISABLE_MODELS_FETCH=1") {
+				t.Fatalf("opencode env missing fetch lock: %v", cmd.Env)
+			}
+		}
 	}
 }
 
-// claude and grok carry --continue once a turn has already run, so a later
+// claude, grok, and opencode carry --continue once a turn has already run, so a later
 // POST continues the same session (SPEC.md §9c).
 func TestCmdContinuesSession(t *testing.T) {
 	cases := []struct {
@@ -38,6 +45,7 @@ func TestCmdContinuesSession(t *testing.T) {
 	}{
 		{"claude", []string{"--continue", "-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
 		{"grok", []string{"--always-approve", "-p", "hi", "--continue"}},
+		{"opencode", []string{"run", "--auto", "--continue", "--", "hi"}},
 	}
 	for _, c := range cases {
 		s := &server{harness: c.harness, started: true}
