@@ -14,7 +14,7 @@ The Firecracker container is `htm-fc-<id>`. It holds the microVM. The gate is `h
 - The gate file, `squid.conf`.
 - These steps, the token rules, and what the setup holds.
 
-Git Warden is not in this folder. There is no Push Guard configuration and no script that starts one. Backup of the root disk is not in this folder either. `omakase/backup.sh` still expects a data disk. Do not point it at this habitat.
+Git Warden is not in this folder. There is no Push Guard configuration and no script that starts one. Backup of the root disk is not in this folder either. `omakase/backup.sh` pauses `htm-fc-<id>` and reads the root file, and it requires a Git Warden journal.
 
 ## Image
 
@@ -152,7 +152,7 @@ The habitat's files live under `HERMETARIUM_ROOT`, else this checkout, else `$XD
 - The open web is a way out. The inhabitant can send a page body to any decrypted host. The log does not store that body.
 - The terminal is not in the I/O log. Escape sequences from the habitat reach your terminal as they are.
 - A program that pins its own certificate list still refuses the gate certificate, unless you pass that host through.
-- `omakase/backup.sh` does not back up this root disk.
+- `omakase/backup.sh` will not read this root file without a Git Warden journal.
 
 ## Checklist
 

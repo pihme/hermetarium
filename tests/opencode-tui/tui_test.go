@@ -176,28 +176,36 @@ func TestOpenCodeTUI(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(instDir, "mockca.pem"), ca, 0o644); err != nil {
 				t.Fatal(err)
 			}
+			label := supervisor.TrackTestContainers(t)
 			opts := supervisor.CreateOpts{
 				Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
+				TestLabel: label,
 				AfterGate: func(hid, netns string) error {
-					if err := startModelMock(root, hid, netns, report); err != nil {
+					if err := startModelMock(root, hid, netns, report, label); err != nil {
 						return err
 					}
-					return startGitHubMock(mockBin, hid, netns, report)
+					return startGitHubMock(mockBin, hid, netns, report, label)
 				},
 			}
 			var dir string
 			if wall == "weak" {
-				t.Cleanup(func() { _, _ = supervisor.Docker(30*time.Second, "rm", "-f", "htm-gh-"+id) })
-				t.Cleanup(func() { _ = supervisor.DestroyWeak(id) })
-				inst, err := supervisor.CreateWeak(root, id, opts)
+				// htm-gh shares the gate netns. Destroy removes that container by name.
+				t.Cleanup(func() {
+					_, _ = supervisor.Docker(30*time.Second, "rm", "-f", "htm-gh-"+id)
+					_ = supervisor.DestroyWeak(id)
+				})
+				inst, err := supervisor.CreateWeak(root, id, supervisor.WithTestLabel(t, opts))
 				if err != nil {
 					t.Fatal(err)
 				}
 				dir = inst.Dir
 			} else {
-				t.Cleanup(func() { _, _ = supervisor.Docker(30*time.Second, "rm", "-f", "htm-gh-"+id) })
-				t.Cleanup(func() { _ = supervisor.DestroyStrong(id) })
-				inst, err := supervisor.CreateStrong(root, id, opts)
+				// htm-gh shares the Firecracker container netns. Destroy removes that container by name.
+				t.Cleanup(func() {
+					_, _ = supervisor.Docker(30*time.Second, "rm", "-f", "htm-gh-"+id)
+					_ = supervisor.DestroyStrong(id)
+				})
+				inst, err := supervisor.CreateStrong(root, id, supervisor.WithTestLabel(t, opts))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -207,7 +215,7 @@ func TestOpenCodeTUI(t *testing.T) {
 				t.Fatalf("url: %v", err)
 			}
 			logs := waitMarker(t, wall, id, "TUI_DONE")
-			if strings.Contains(logs, "CLIENT_FAIL") || strings.Contains(logs, "HTTP_FAIL") || strings.Contains(logs, "PAGE_FAIL") {
+			if strings.Contains(logs, "CLIENT_FAIL") || strings.Contains(logs, "HTTP_FAIL") || strings.Contains(logs, "PAGE_FAIL") || strings.Contains(logs, "CERT_FAIL") {
 				t.Fatalf("client\n%s\n%s", logs, diag(id, dir))
 			}
 			if !strings.Contains(logs, "HTTP 200") || !strings.Contains(logs, "STREAM_DONE") || !strings.Contains(logs, "PAGE_DONE") {
@@ -232,10 +240,23 @@ func TestOpenCodeTUI(t *testing.T) {
 			if strings.Contains(logs, "UPSTREAM_OK") || !strings.Contains(logs, "UPSTREAM_FAIL") {
 				t.Fatalf("model peer was reachable directly\n%s", logs)
 			}
+			if !strings.Contains(logs, "CERT pinned.example subject=pinned.example issuer=Mock Origin") {
+				t.Fatalf("pass-through certificate\n%s", logs)
+			}
+			if strings.Contains(betweenCert(logs, "pinned.example"), "Hermetarium") {
+				t.Fatalf("pass-through saw the gate certificate\n%s", logs)
+			}
 			for _, want := range []string{
 				"HTTP GET https://other.example/hello 200",
 				"HTTP POST https://api.github.com/user/repos 200",
 				"HTTP DELETE https://api.github.com/repos/octo/hello 403",
+				"HTTP POST https://api.github.com/graphql 403",
+				"HTTP PATCH https://api.github.com/repos/octo/hello 403",
+				"HTTP POST https://api.github.com/repos/octo/hello/git/refs 403",
+				"HTTP POST https://api.github.com/repos/octo/../pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/a%25b/pulls 403",
+				"HTTP PUT https://api.github.com/repos/octo/hello/contents/README.md 403",
+				"HTTP GET http://api.github.com/user 403",
 			} {
 				if !strings.Contains(logs, want) {
 					t.Fatalf("missing %s\n%s\n%s", want, logs, diag(id, dir))
@@ -267,8 +288,13 @@ func TestOpenCodeTUI(t *testing.T) {
 			if !ok || pageAuth != "Bearer "+boxToken || strings.Contains(pageAuth, githubToken) || strings.Contains(pageAuth, modelKey) {
 				t.Fatalf("page auth %q\n%s", pageAuth, ghText)
 			}
-			if strings.Contains(ghText, "method=DELETE") {
-				t.Fatalf("delete reached the origin\n%s", ghText)
+			for _, line := range strings.Split(ghText, "\n") {
+				if strings.Contains(line, githubToken) && !strings.Contains(line, "path=/user/repos") {
+					t.Fatalf("gate token on the wrong request\n%s", ghText)
+				}
+			}
+			if strings.Contains(ghText, "method=DELETE") || strings.Contains(ghText, "/contents/") || strings.Contains(ghText, "path=/graphql") || strings.Contains(ghText, "method=PATCH") || strings.Contains(ghText, "/git/refs") || strings.Contains(ghText, "path=/user host") || strings.Contains(ghText, "..") || strings.Contains(ghText, "%") {
+				t.Fatalf("denied request reached the mock\n%s", ghText)
 			}
 			if err := supervisor.SyncInstanceLog(dir); err != nil {
 				t.Fatal(err)
@@ -287,6 +313,29 @@ func TestOpenCodeTUI(t *testing.T) {
 			page, ok := findRec(recs, "GET", "/hello")
 			if !ok || !page.Allowed || page.Destination != "other.example" || page.Path != "/hello" || page.Protocol != "https" || page.Port != 443 || page.TLS != "decrypted" {
 				t.Fatalf("page %+v\n%s", page, diag(id, dir))
+			}
+			put, ok := findRec(recs, "PUT", "/contents/")
+			if !ok || put.Allowed {
+				t.Fatalf("contents %+v\n%s", put, diag(id, dir))
+			}
+			for _, deny := range []struct{ method, path string }{
+				{"POST", "/graphql"},
+				{"PATCH", "/repos/octo/hello"},
+				{"POST", "/git/refs"},
+				{"POST", ".."},
+				{"POST", "%"},
+				{"GET", "/user"},
+			} {
+				rec, found := findRec(recs, deny.method, deny.path)
+				if !found || rec.Allowed || rec.Destination != "api.github.com" {
+					t.Fatalf("%s %s %+v\n%s", deny.method, deny.path, rec, diag(id, dir))
+				}
+				if deny.path == "/user" && (rec.Path != "/user" || rec.Protocol != "http" || rec.Port != 80) {
+					t.Fatalf("cleartext %+v\n%s", rec, diag(id, dir))
+				}
+			}
+			if !hasTLS(recs, "pinned.example", "passthrough") {
+				t.Fatalf("pass-through log %+v\n%s", recs, diag(id, dir))
 			}
 			if wall == "weak" {
 				assertBoxHasNoSecret(t, id)
@@ -391,7 +440,7 @@ func buildBin(t *testing.T, root, name, pkg string) string {
 	return bin
 }
 
-func startModelMock(root, id, netns, report string) error {
+func startModelMock(root, id, netns, report, label string) error {
 	bin := filepath.Join(report, "vendor-mock")
 	cmd := exec.Command("go", "build", "-o", bin, "./tests/vendormock")
 	cmd.Dir = root
@@ -402,34 +451,36 @@ func startModelMock(root, id, netns, report string) error {
 	if err := supervisor.EnsureImageExists(supervisor.AlpineImage); err != nil {
 		return err
 	}
-	_, err := supervisor.Docker(30*time.Second,
-		"run", "-d", "--name", "htm-mock-"+id,
-		"--network", "container:"+netns,
-		"-e", "MOCK_EXPECT_KEY="+modelKey,
+	args := []string{
+		"run", "-d", "--name", "htm-mock-" + id,
+		"--network", "container:" + netns,
+		"-e", "MOCK_EXPECT_KEY=" + modelKey,
 		"-e", "MOCK_REPORT=/report/model",
-		"-e", "LISTEN=:"+peerPort,
-		"-v", bin+":/usr/local/bin/vendor-mock:ro",
-		"-v", report+":/report",
-		supervisor.AlpineImage,
-		"/usr/local/bin/vendor-mock",
-	)
+		"-e", "LISTEN=:" + peerPort,
+		"-v", bin + ":/usr/local/bin/vendor-mock:ro",
+		"-v", report + ":/report",
+	}
+	args = append(args, supervisor.TestLabelArgs(label)...)
+	args = append(args, supervisor.AlpineImage, "/usr/local/bin/vendor-mock")
+	_, err := supervisor.Docker(30*time.Second, args...)
 	return err
 }
 
-func startGitHubMock(bin, id, netns, report string) error {
+func startGitHubMock(bin, id, netns, report, label string) error {
 	if err := supervisor.EnsureImageExists(supervisor.AlpineImage); err != nil {
 		return err
 	}
-	_, err := supervisor.Docker(30*time.Second,
-		"run", "-d", "--name", "htm-gh-"+id,
-		"--network", "container:"+netns,
+	args := []string{
+		"run", "-d", "--name", "htm-gh-" + id,
+		"--network", "container:" + netns,
 		"-e", "MOCK_REPORT=/report/github",
 		"-e", "CERT_DIR=/report",
-		"-v", bin+":/usr/local/bin/github-mock:ro",
-		"-v", report+":/report",
-		supervisor.AlpineImage,
-		"/usr/local/bin/github-mock",
-	)
+		"-v", bin + ":/usr/local/bin/github-mock:ro",
+		"-v", report + ":/report",
+	}
+	args = append(args, supervisor.TestLabelArgs(label)...)
+	args = append(args, supervisor.AlpineImage, "/usr/local/bin/github-mock")
+	_, err := supervisor.Docker(30*time.Second, args...)
 	return err
 }
 
@@ -549,6 +600,27 @@ func findRec(recs []supervisor.Record, method, pathSub string) (supervisor.Recor
 		}
 	}
 	return supervisor.Record{}, false
+}
+
+func hasTLS(recs []supervisor.Record, host, mode string) bool {
+	for _, r := range recs {
+		if r.Destination == host && r.TLS == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func betweenCert(logs, host string) string {
+	i := strings.Index(logs, "CERT "+host)
+	if i < 0 {
+		return ""
+	}
+	rest := logs[i:]
+	if j := strings.Index(rest, "\n"); j >= 0 {
+		return rest[:j]
+	}
+	return rest
 }
 
 func streamedGaps(logs string) int {
