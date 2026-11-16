@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestFreezeReports(t *testing.T) {
 	writeExe(t, filepath.Join(bin, "restic"), "#!/bin/sh\nexit 0\n")
 	writeDockerStub(t, filepath.Join(bin, "docker"))
 	herm := filepath.Join(root, "hermetarium")
-	writeExe(t, herm, `#!/bin/sh
+	writeExe(t, herm, fmt.Sprintf(`#!/bin/sh
 if [ "$1" = logs ]; then
   exit 0
 fi
@@ -64,22 +65,22 @@ case " $* " in
 esac
 case "$ATTACH_MODE" in
   refused)
-    echo "ssh: connect to host 172.16.0.2 port 22: Connection refused" >&2
+    echo %q >&2
     ;;
   timeout)
-    echo "ssh: connect to host 172.16.0.2 port 22: Connection timed out" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: Connection timed out" >&2
     ;;
   noroute)
-    echo "ssh: connect to host 172.16.0.2 port 22: No route to host" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: No route to host" >&2
     ;;
   unreachable)
-    echo "ssh: connect to host 172.16.0.2 port 22: Network is unreachable" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: Network is unreachable" >&2
     ;;
   reset)
-    echo "ssh: connect to host 172.16.0.2 port 22: Connection reset by peer" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: Connection reset by peer" >&2
     ;;
   denied)
-    echo "root@172.16.0.2: Permission denied (publickey)." >&2
+    echo "attach: root@172.16.0.2: Permission denied (publickey)." >&2
     ;;
   nofsfreeze)
     echo "fsfreeze is not installed in this habitat" >&2
@@ -92,7 +93,7 @@ case "$ATTACH_MODE" in
     ;;
 esac
 exit 1
-`)
+`, supervisor.AttachPort22Closed))
 
 	run := func(t *testing.T, mode string) string {
 		t.Helper()
@@ -137,4 +138,25 @@ exit 1
 			t.Fatalf("thaw failure missing\n%s", out)
 		}
 	})
+}
+
+// TestFreezeReportsAttachNeedle fails unless backup.sh greps the phrase
+// inside AttachPort22Closed. A reword that drops it sends the freeze to
+// "needs fsfreeze". The attach sentence is not copied here.
+func TestFreezeReportsAttachNeedle(t *testing.T) {
+	checkout, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(checkout, "omakase", "backup.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const phrase = "no SSH server at /usr/sbin/sshd"
+	if !strings.Contains(string(body), `grep -q "`+phrase+`"`) {
+		t.Fatalf("backup.sh does not contain grep -q %q", phrase)
+	}
+	if !strings.Contains(supervisor.AttachPort22Closed, phrase) {
+		t.Fatalf("AttachPort22Closed=%q", supervisor.AttachPort22Closed)
+	}
 }

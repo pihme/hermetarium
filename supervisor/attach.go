@@ -135,6 +135,15 @@ func attachDocker(box string, argv []string, in, out, errOut *os.File, sig <-cha
 	})
 }
 
+// noSSHServerPhrase is the text omakase/backup.sh greps in an attach error.
+const noSSHServerPhrase = "no SSH server at /usr/sbin/sshd"
+
+// AttachPort22Closed is the strong-wall error when the client reports
+// Connection refused. Nothing is listening on port 22: no sshd, or sshd
+// did not start.
+const AttachPort22Closed = "attach: nothing listens on port 22 in the guest: the image has " +
+	noSSHServerPhrase + ", or it did not start (see USAGE)"
+
 // attachSSH runs ssh in a throwaway container that shares the helper network
 // namespace. Nothing publishes the guest port. The private key is mounted
 // only into that container, not into the guest.
@@ -205,7 +214,13 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 	if err != nil {
 		return 1, err
 	}
+	// Connection refused means nothing is listening on port 22: no sshd, or
+	// sshd did not start. Other client errors stay as ssh wrote them.
+	// Guest stderr is not in this file.
 	if msg := strings.TrimSpace(string(diag)); msg != "" {
+		if strings.Contains(msg, "Connection refused") {
+			return 1, errors.New(AttachPort22Closed)
+		}
 		return 1, fmt.Errorf("attach: %s", msg)
 	}
 	return code, nil
