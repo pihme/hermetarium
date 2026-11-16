@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +50,16 @@ func TestResolveCreate(t *testing.T) {
 	}
 	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--data-size", "64"}); err == nil {
 		t.Fatal("expected --data-size to require --data")
+	}
+	withRoot, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--rootfs", "/tmp/root.ext4"})
+	if err != nil || withRoot.Rootfs != "/tmp/root.ext4" {
+		t.Fatalf("rootfs %+v %v", withRoot, err)
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--rootfs"}); err == nil {
+		t.Fatal("expected --rootfs to require a file")
+	}
+	if _, err := ResolveCreate([]string{"--image", "myorg/box:1", "--acl", "/tmp/acl.conf", "--rootfs", "-root.ext4"}); err == nil {
+		t.Fatal("expected --rootfs to reject a flag")
 	}
 	if ex.CPUs != 0 {
 		t.Fatalf("default cpus %d", ex.CPUs)
@@ -141,6 +153,87 @@ func TestCreateRejectsCPUsAboveWallLimit(t *testing.T) {
 		if err := limitCPUs(ok.wall, ok.n); err != nil {
 			t.Fatalf("%s %d: %v", ok.wall, ok.n, err)
 		}
+	}
+}
+
+func TestCreateRejectsRootfsOnWeakWall(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	code := Run([]string{"create", "--wall", "weak", "--image", "img", "--acl", "acl.conf", "--rootfs", "root.ext4"})
+	w.Close()
+	os.Stderr = old
+	b, _ := io.ReadAll(r)
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%q", code, b)
+	}
+	if !bytes.Contains(b, []byte("the Docker wall rejects --rootfs")) {
+		t.Fatalf("stderr %q", b)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("created %v", entries)
+	}
+}
+
+func TestExt4Regular(t *testing.T) {
+	dir := t.TempDir()
+	if err := ext4Regular(dir); err == nil || !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("directory: %v", err)
+	}
+	missing := filepath.Join(dir, "missing")
+	if err := ext4Regular(missing); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("missing: %v", err)
+	}
+	bad := filepath.Join(dir, "not-ext4")
+	if err := os.WriteFile(bad, []byte("not a filesystem"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(bad); err == nil || !strings.Contains(err.Error(), "not ext4") {
+		t.Fatalf("non-ext4: %v", err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(bad, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(link); err == nil || !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("symlink: %v", err)
+	}
+	good := filepath.Join(dir, "ok.ext4")
+	f, err := os.OpenFile(good, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{0x53, 0xEF}, 0x438); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(good); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ext4Regular(good); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("ext4 check changed the file")
 	}
 }
 

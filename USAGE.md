@@ -73,6 +73,8 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--cpus N` works on both walls. The strong wall gives the guest that many processors, from 1 to 32. The Docker wall sets that CPU quota (`--cpus`), from 1 up to the host's CPU count. A value outside that range is rejected before a virtual machine or container starts. Leave it off and the guest has one processor, and the Docker wall has no quota.
 
+`--rootfs FILE` is the strong wall's root disk instead of a fresh pack of `--image`. The file must already be a regular file with ext4 magic. Hermetarium copies it, keeping holes, to `var/<id>/rootfs.ext4` and boots the copy. `--image` and `--acl` are still required. `destroy` deletes the copy and leaves `FILE`. The Docker wall rejects `--rootfs`.
+
 `--data FILE` is a second disk on the strong wall. The guest mounts it at `/data`. When the file does not exist, Hermetarium creates it sparse, as ext4, mode `0600`. `--data-size` is that size in MiB. The default is 1024. When the file already exists, `--data-size` is ignored and the file is attached as it is. An existing file that is not ext4 is refused. If the guest cannot mount the data disk, create fails and the habitat is removed. `destroy` leaves the file. The next `create --data FILE` attaches the same disk. The Docker wall refuses `--data`.
 
 Hermetarium keeps a lock beside that file, named `FILE.lock`. A refused file gets no lock. A running habitat holds the lock, so a second create of the same file is refused. `destroy` leaves the lock file too. After `destroy`, delete the data file and the lock if you are finished with them.

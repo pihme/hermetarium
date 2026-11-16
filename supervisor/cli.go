@@ -46,6 +46,10 @@ func Run(args []string) int {
 			fmt.Fprintln(os.Stderr, "--data applies only to --wall strong")
 			return 2
 		}
+		if wall != "strong" && flagPresent(rest, "--rootfs") {
+			fmt.Fprintln(os.Stderr, "the Docker wall rejects --rootfs")
+			return 2
+		}
 		if err := limitCPUs(wall, ex.CPUs); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
@@ -249,9 +253,16 @@ func ResolveCreate(args []string) (CreateOpts, error) {
 			return CreateOpts{}, err
 		}
 	}
+	rootfs := ""
+	if flagPresent(args, "--rootfs") {
+		rootfs = strings.TrimSpace(flag(args, "--rootfs", ""))
+		if rootfs == "" || strings.HasPrefix(rootfs, "-") {
+			return CreateOpts{}, fmt.Errorf("--rootfs requires a file")
+		}
+	}
 	return CreateOpts{
 		Image: image, ACL: acl, MemMiB: mem, DiskMB: disk, CPUs: cpus,
-		DataPath: data, DataMiB: dataMiB,
+		DataPath: data, DataMiB: dataMiB, Rootfs: rootfs,
 		NoInbound: flagPresent(args, "--no-inbound"),
 	}, nil
 }
@@ -277,7 +288,7 @@ func limitCPUs(wall string, cpus int) error {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage: hermetarium create --wall weak|strong --image NAME --acl FILE [--cpus N] [--id NAME] [--no-inbound]
-       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--data FILE] [--data-size MiB] [--id NAME] [--no-inbound]
+       hermetarium create --wall strong --image NAME --acl FILE [--mem MiB] [--disk MiB] [--cpus N] [--data FILE] [--data-size MiB] [--rootfs FILE] [--id NAME] [--no-inbound]
        hermetarium url <id>
        hermetarium exec <id> -- <cmd>
        hermetarium attach <id> [-- <cmd>]

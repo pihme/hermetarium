@@ -188,6 +188,12 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 }
 
 func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err error) {
+	// A bad root file fails before any habitat directory or container.
+	if opts.Rootfs != "" {
+		if err := ext4Regular(opts.Rootfs); err != nil {
+			return nil, err
+		}
+	}
 	// Return before the rootfs copy. A live htm-fc-<id> still has that
 	// file open, and a second copy would replace it.
 	fcContainer := "htm-fc-" + id
@@ -204,9 +210,13 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	if err != nil {
 		return nil, err
 	}
-	cached, err := EnsureImageRootfs(root, opts.Image, diskMB(opts))
-	if err != nil {
-		return nil, err
+	// --rootfs is the root disk. Do not pack --image into a new one.
+	var cached string
+	if opts.Rootfs == "" {
+		cached, err = EnsureImageRootfs(root, opts.Image, diskMB(opts))
+		if err != nil {
+			return nil, err
+		}
 	}
 	dir, err := InstanceDir(root, id)
 	if err != nil {
@@ -218,7 +228,11 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	if err := os.Chmod(dir, 0o777); err != nil {
 		return nil, err
 	}
-	if _, err := habitatRootfs(dir, cached); err != nil {
+	src := cached
+	if opts.Rootfs != "" {
+		src = opts.Rootfs
+	}
+	if _, err := habitatRootfs(dir, src); err != nil {
 		return nil, err
 	}
 	// The copy is in place before docker run. On a later error, remove it

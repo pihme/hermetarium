@@ -121,6 +121,32 @@ func habitatRootfsPath(dir string) string {
 	return filepath.Join(dir, "rootfs.ext4")
 }
 
+// ext4Regular accepts a regular file with ext4 magic 0xEF53 at offset 0x438.
+// It does not follow a symlink and it does not create the path.
+func ext4Regular(path string) error {
+	st, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("root disk %s does not exist", path)
+		}
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("root disk %s is not a file", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var magic [2]byte
+	_, rerr := f.ReadAt(magic[:], 0x438)
+	if rerr != nil || magic[0] != 0x53 || magic[1] != 0xEF {
+		return fmt.Errorf("root disk %s is not ext4", path)
+	}
+	return nil
+}
+
 // habitatRootfs is one habitat's disk. The cache from EnsureImageRootfs is
 // keyed only by image and size, so mounting it would publish guest writes
 // to every later habitat that shares that image.
