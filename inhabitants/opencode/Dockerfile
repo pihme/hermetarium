@@ -1,6 +1,8 @@
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# sshd and tmux are the strong-wall terminal. build-essential is the compiler the inhabitant uses.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
 	ca-certificates curl bash iproute2 iptables procps git ripgrep \
+	tmux openssh-server build-essential \
 	&& rm -rf /var/lib/apt/lists/*
 # 1.19.5 completed a turn through the gate. The hash is that GitHub release asset.
 # npm's postinstall downloads the same file, and a later opencode would fetch models.
