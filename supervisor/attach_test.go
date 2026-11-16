@@ -38,6 +38,114 @@ func TestSSHRemoteCommand(t *testing.T) {
 	}
 }
 
+// TestAttachRefusedNoSSHD does not boot a habitat. docker on PATH is a script.
+func TestAttachRefusedNoSSHD(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HERMETARIUM_ROOT", root)
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := `#!/bin/sh
+case "$1" in
+inspect)
+  exit 0
+  ;;
+run)
+  prev=
+  for a in "$@"; do
+    if [ "$prev" = -v ]; then
+      case "$a" in
+      *:/ssh.log)
+        printf '%s\n' "$SSH_DIAG" > "${a%:/ssh.log}"
+        ;;
+      esac
+    fi
+    prev=$a
+  done
+  exit 255
+  ;;
+exec)
+  printf '%s\n' "$SSH_DIAG" >&2
+  exit 1
+  ;;
+*)
+  echo "stub docker: $*" >&2
+  exit 99
+  ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	stamp := filepath.Join(root, ".cache", "nettools-build")
+	if err := os.MkdirAll(stamp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stamp, "Dockerfile"), []byte(netToolsDockerfile()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	putRunning := func(id, body string) {
+		t.Helper()
+		dir := filepath.Join(root, "var", id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "instance.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	refused := "ssh: connect to host 172.16.0.2 port 22: Connection refused"
+	t.Run("strong", func(t *testing.T) {
+		t.Setenv("SSH_DIAG", refused)
+		id := "nossh"
+		putRunning(id, `{"wall":"strong","helper":"htm-fc-nossh"}`+"\n")
+		if _, err := writeAttachKey(root, id); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr, err := runAttach(id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(stderr)
+		want := "attach: this image has no SSH server at /usr/sbin/sshd; strong-wall attach needs one (see USAGE)"
+		if code != 1 || stdout != "" || got != want {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+	t.Run("timeout", func(t *testing.T) {
+		msg := "ssh: connect to host 172.16.0.2 port 22: Connection timed out"
+		t.Setenv("SSH_DIAG", msg)
+		id := "notime"
+		putRunning(id, `{"wall":"strong","helper":"htm-fc-notime"}`+"\n")
+		if _, err := writeAttachKey(root, id); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr, err := runAttach(id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code != 1 || stdout != "" || strings.TrimSpace(stderr) != "attach: "+msg || strings.Contains(stderr, "/usr/sbin/sshd") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+	t.Run("weak", func(t *testing.T) {
+		t.Setenv("SSH_DIAG", refused)
+		id := "noweak"
+		putRunning(id, `{"wall":"weak","box":"htm-box-noweak"}`+"\n")
+		code, stdout, stderr, err := runAttach(id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code != 1 || stdout != "" || strings.TrimSpace(stderr) != refused || strings.Contains(stderr, "/usr/sbin/sshd") || strings.Contains(stderr, "USAGE") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+}
+
 func TestAttachKeyOutsideGate(t *testing.T) {
 	root := t.TempDir()
 	id := "hab"

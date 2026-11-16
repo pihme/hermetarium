@@ -205,7 +205,12 @@ func attachSSH(root, id, helper string, argv []string, in, out, errOut *os.File,
 	if err != nil {
 		return 1, err
 	}
+	// Connection refused means nothing is listening: the image has no sshd.
+	// Other client errors stay as ssh wrote them. Guest stderr is not in this file.
 	if msg := strings.TrimSpace(string(diag)); msg != "" {
+		if strings.Contains(msg, "Connection refused") {
+			return 1, fmt.Errorf("attach: this image has no SSH server at /usr/sbin/sshd; strong-wall attach needs one (see USAGE)")
+		}
 		return 1, fmt.Errorf("attach: %s", msg)
 	}
 	return code, nil
