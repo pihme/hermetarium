@@ -19,6 +19,7 @@ permissions:
 jobs:
   wake:
     # Only handoff labels, and only when pihme set them (REGELN.md: labels from other accounts are ignored).
+    # `in-progress` (and every other non-handoff label) is deliberately not listed: it wakes no one.
     # Exception: ready-for-maintainer that Dependabot sets on its own PR through `labels:` in .github/dependabot.yml.
     # Compare immutable numeric user ids (14032870 = pihme, 49699333 = dependabot[bot]), not login names.
     if: >-

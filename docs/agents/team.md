@@ -22,6 +22,10 @@ Other team members (coordination, project managers, design, research) make no re
 
 Independent issues and PRs each move on their own. Hand one on as soon as your part is done and its CI is green, and keep working the others. An item that depends on another waits until that one has landed.
 
+**At most 5 open PRs per repo** (Dependabot PRs not counted). With 5 open, nothing new is started in that repo; finish, review and merge the open ones first.
+
+**Branch names:** `<type>/<issue>-<keyword>`, with the Conventional Commits type and the issue number, e.g. `feat/103-render-quality`. Dependabot branches are exempt.
+
 ### Labels and handover
 
 | Label | Meaning | Owner | Color |
@@ -31,18 +35,21 @@ Independent issues and PRs each move on their own. Hand one on as soon as your p
 | `ready-for-qa` | Ready for review and testing | QA | yellow `FBCA04` |
 | `needs-input` | Waiting for input or a decision from the owner | owner | orange `D93F0B` |
 | `ready-for-human` | Needs the owner to implement or decide | owner | orange `D93F0B` |
+| `in-progress` | Someone is working on it; not a handover, wakes no one | the role working on it | light blue `C5DEF5` |
 
 **The label is the handover.** When your part of an issue or PR is done, remove your label on that item and set the next one. Each issue and each PR carries exactly one `ready-for-*` label.
 
 - **Only the label decides whether a PR is merged**, never messages between team members. If a PR must not be merged (e.g. a release PR that is not ready yet), Maintainer removes its `ready-for-qa` or `ready-for-human` label.
 - Setting a `ready-for-*` label removes every other `ready-for-*` label on that item in the same step; QA treats an item with two as not handed over.
 - When Dependabot PRs are consolidated into one PR, the maintainer removes the `ready-for-*` label from the individual Dependabot PRs and closes them with a comment linking the consolidated PR.
+- **`in-progress`:** set it on the issue or PR when you start working on it, and remove it in the same step as you set the next handover label. It is not a `ready-for-*` label and wakes no one.
+- **`ready-for-qa` only on green CI:** set `ready-for-qa` on a PR only after its CI is green for the current head. Until then the PR keeps `ready-for-maintainer` or `ready-for-development`.
 - **Missing labels:** a new PR without its handover label gets it checked and set (exactly one `ready-for-*`, per the table below). Report only if a question remains.
 
 | When | Who | Sets |
 | --- | --- | --- |
 | Issue triaged: website, docs, smaller change / larger code work | owner or Maintainer | `ready-for-maintainer` / `ready-for-development` |
-| PR ready, CI green | Maintainer or Developer | `ready-for-qa` (Maintainer first checks author and file list) |
+| PR ready, CI green on the current head (never before) | Maintainer or Developer | `ready-for-qa` (Maintainer first checks author and file list) |
 | Problems found, including a rebase or conflict fix | QA | back to the role responsible for the ticket: Developer `ready-for-development`, Maintainer `ready-for-maintainer` (see Handing work back) |
 | Dependabot PR needs a rebase | QA | comment `@dependabot rebase`, keep `ready-for-qa`; `ready-for-maintainer` only if Dependabot cannot rebase |
 | Review passes | QA | merges, closes linked issues, removes `ready-for-qa` |
@@ -66,7 +73,7 @@ Independent issues and PRs each move on their own. Hand one on as soon as your p
 3. If it is fine, Maintainer sets `ready-for-qa` and removes `ready-for-maintainer`. QA then reviews and merges on its own.
 4. If it needs a decision (e.g. a breaking major update), Maintainer sets `ready-for-human` instead and informs the owner. A routine Nix lock bump that changes a release input needs no decision: it follows step 3 (`ready-for-qa`, QA merges); only the release PR that follows (where the release tool opens one) is merged by the owner (see Releases).
 5. During a release Dependabot PRs stay open and keep `ready-for-maintainer` (see Releases). Release PRs from 1.0.0 on are still merged only by the owner.
-6. **One release per Dependabot round:** the releasing (`fix(deps)`) PRs of one Dependabot round (the weekly Saturday run) go out together in one release, not one release per bump. Where every merge to `main` cuts a release, Maintainer consolidates them into one PR (see Labels and handover); where a release PR collects the changes, that release PR covers the whole round.
+6. **One release per Dependabot round:** the releasing (`fix(deps)`) PRs of one Dependabot round (the repo's weekly run, on the weekday set in its `.github/dependabot.yml`) go out together in one release, not one release per bump. Where every merge to `main` cuts a release, Maintainer consolidates them into one PR (see Labels and handover); where a release PR collects the changes, that release PR covers the whole round.
 7. **All lock files of a bump:** when a bump is bundled, Maintainer first searches the whole repo for every lock file and workspace in which the package appears (e.g. `fuzz/`, `bench/`, `nix/`) and takes all of them into the same PR, not only those Dependabot opened a PR for.
 8. **Versions already rejected:** a dependency version the owner already rejected is not ignored permanently in `.github/dependabot.yml`. The decisions already made are kept in an internal list (outside the repos). If Dependabot opens the same rejected version again, its PR is closed with a reference to that decision; a later version is evaluated anew and may change the decision.
 
@@ -88,7 +95,7 @@ Independent issues and PRs each move on their own. Hand one on as soon as your p
 
 ### Initiative
 
-Wanted: spot duplicate or redundant PRs, red CI on `main`, docs that no longer match the code; fix trivial things per `AGENTS.md`; update `AGENTS.md` and docs in the same PR as the change; bundle related small changes into one PR (in content repos with a high PR rate, bundle smaller changes where sensible, to avoid stacked PRs); one topic per PR.
+Wanted: spot duplicate or redundant PRs, red CI on `main` (a failed run on `main`, including a startup failure or a failed Pages deployment, also wakes the coordination role, which assigns it), docs that no longer match the code; fix trivial things per `AGENTS.md`; update `AGENTS.md` and docs in the same PR as the change; bundle related small changes into one PR (in content repos with a high PR rate, bundle smaller changes where sensible, to avoid stacked PRs); one topic per PR.
 
 Not wanted: scope extensions or new work during a release; design decisions (design proposes, the owner decides); editing published releases or release notes; reopening issues the owner closed.
 
@@ -127,6 +134,7 @@ Applies only to repos explicitly classified as websites without a Nix environmen
 - Checks every Dependabot PR and hands it to QA or the owner (see Dependabot PRs).
 - Release owner: prepares the release PR and checks for duplicate release PRs before and after every merge.
 - Never merges.
+- **Red runs on `main`:** a failed run on `main` (including a startup failure or a failed Pages deployment) wakes the coordination role, which assigns it to Maintainer. Maintainer then fixes it or hands it on (larger code work: `ready-for-development`), as with any other quick fix.
 - One quick fix is fine; if it does not solve the problem, report it to the coordination role first (not the owner) or open a PR with the root-cause fix, never try the next fix silently.
 
 **Post-release check:**
@@ -156,6 +164,7 @@ Applies only to repos explicitly classified as websites without a Nix environmen
 - **The only role that merges:** all PRs (release PRs: see Releases), squash, after green CI and review. Closes the linked issues.
 - Squash-merge titles are Conventional Commits: a change that must ship needs `fix:` or `feat:`. With `release.py`, `chore:`/`docs:`/`ci:` do not release; a repo whose release tool also counts other types on a release path says so in `AGENTS.md` ("Versions and releases").
 - **Stacked PRs:** before squash-merging the lower PR of a stack, retarget the PRs above it onto `main`. Handing them back still follows the ticket's ownership.
+- **Follow-up points:** every non-blocking follow-up point from a review becomes its own issue with `needs-triage`, linked in the PR (review comment or description). A point left only in a PR comment counts as lost. The closing round of the day goes through these issues.
 - Dependabot PRs keep their title and prefix from `.github/dependabot.yml`; never turn an update into `feat!:`.
 
 **Pre-release check (before the release PR is merged):**
