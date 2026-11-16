@@ -19,7 +19,8 @@ import (
 
 const (
 	// One habitat can send as fast as the socket allows. Past this, new
-	// queries are dropped instead of starting another goroutine.
+	// queries are dropped. A TCP query takes a slot only after the query
+	// has arrived, so a half-sent query cannot fill the cap.
 	maxInflight = 32
 	// io.jsonl is rewritten from Squid's access log and has no cap. This
 	// file only grows, so keep it and one previous generation bounded.
@@ -204,12 +205,7 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 			}
 			continue
 		}
-		if !g.acquire() {
-			c.Close()
-			continue
-		}
 		go func(c net.Conn) {
-			defer g.release()
 			defer c.Close()
 			wait := g.tcpWait
 			if wait == 0 {
@@ -224,6 +220,13 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 			if _, err := io.ReadFull(c, q); err != nil {
 				return
 			}
+			// After the query, not on the length. A length with no body
+			// would otherwise hold a slot until the deadline and stall UDP.
+			// A full cap closes this connection without an answer.
+			if !g.acquire() {
+				return
+			}
+			defer g.release()
 			resp := g.answer(q, true)
 			if len(resp) == 0 || len(resp) > 65535 {
 				return
