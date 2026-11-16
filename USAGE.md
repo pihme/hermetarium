@@ -104,11 +104,7 @@ Stop it:
 ./bin/hermetarium destroy YOUR_ID
 ```
 
-The address from `url` is how you talk to the habitat. `exec` runs a command on the Docker wall.
-
-```bash
-./bin/hermetarium exec YOUR_ID -- hostname
-```
+The address from `url` is how you talk to the habitat.
 
 `attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`. On the Docker wall that is `docker exec` with a TTY. On the strong wall it is SSH to the guest. An image that wants that terminal includes an SSH server. `create` makes a key pair for the habitat, hands the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the Firecracker container's network namespace.
 

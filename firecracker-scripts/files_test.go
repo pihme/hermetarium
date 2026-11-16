@@ -3,6 +3,7 @@ package fcscripts
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +40,9 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "vsock") {
 		t.Fatal("entrypoint.sh still builds a vsock terminal")
 	}
+	if strings.Contains(string(b), "172.16.0.1") || strings.Contains(string(b), "probe.hermetarium.test") {
+		t.Fatal("entrypoint.sh carries a gate address or a stand-in name")
+	}
 	b, err = os.ReadFile(pack)
 	if err != nil {
 		t.Fatal(err)
@@ -52,22 +56,36 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(b), "umount") {
 		t.Fatal("pack-oci.sh mounts the root disk")
 	}
-	if !strings.Contains(string(b), "/bin/busybox wget") || !strings.Contains(string(b), "timeout 3 curl") {
-		t.Fatal("pack-oci.sh CA fetch must not call curl without a timeout")
+	if !strings.Contains(string(b), ". /gate-cert.sh || exit 1") {
+		t.Fatal("pack-oci.sh does not stop when the shared gate certificate install fails")
+	}
+	cert, err := os.ReadFile(filepath.Join(dir, "gate-cert.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cert), "/bin/busybox wget") || !strings.Contains(string(cert), "timeout 3 curl") {
+		t.Fatal("gate-cert.sh fetch must not call curl without a timeout")
 	}
 	if strings.Contains(string(b), "vsock") || strings.Contains(string(b), "fc-attach") {
 		t.Fatal("pack-oci.sh still builds a vsock terminal")
 	}
 	init := fcInitScript(t, string(b))
+	if strings.Contains(init, "update-ca-certificates") {
+		t.Fatal("fc-init carries its own certificate install")
+	}
 	pts := strings.Index(init, "/dev/pts")
-	ip := strings.Index(init, "172.16.0.2/24")
+	ip := strings.Index(init, `addr add "$guest/$prefix"`)
 	priv := strings.Index(init, "mkdir -p /root/.ssh /var/empty /run/sshd")
 	mode := strings.Index(init, "chmod 755 /run/sshd")
 	start := strings.Index(init, "/usr/sbin/sshd -f /fc-sshd.conf")
-	uname := strings.Index(init, "GUEST_UNAME=")
+	uname := strings.Index(init, "echo \"GUEST_UNAME=")
+	certAt := strings.Index(init, ". /gate-cert.sh || exit 1")
 	execAt := strings.LastIndex(init, "\nexec $cmd")
 	if pts < 0 || ip < 0 || priv < 0 || mode < 0 || start < 0 || uname < 0 || execAt < 0 || !(pts < ip && ip < priv && priv < mode && mode < start && start < uname && uname < execAt) {
 		t.Fatal("sshd must start after the guest address and /run/sshd, and before the inhabitant")
+	}
+	if certAt < 0 || certAt > uname {
+		t.Fatal("GUEST_UNAME= must follow a successful gate certificate install")
 	}
 	if !strings.Contains(init, `[ -x /usr/sbin/sshd ]`) {
 		t.Fatal("sshd must be skipped when the image has no server")
@@ -75,8 +93,11 @@ func TestExtract(t *testing.T) {
 	if strings.Count(init, ". /fc-env") != 1 {
 		t.Fatal("/fc-env sourced more than once")
 	}
-	if !strings.Contains(string(b), "nameserver 172.16.0.1") || !strings.Contains(string(b), "127.0.0.1 localhost") {
+	if !strings.Contains(init, `nameserver %s`) || !strings.Contains(string(b), "127.0.0.1 localhost") {
 		t.Fatal("pack-oci.sh missing gate resolver or localhost")
+	}
+	if strings.Contains(string(b), "172.16.0.1") || strings.Contains(init, "probe.hermetarium.test") {
+		t.Fatal("pack-oci.sh carries a gate address or a stand-in name")
 	}
 	if !strings.Contains(string(b), "GUEST_RNG=") || !strings.Contains(string(b), "/fc-getrandom") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_OK") || !strings.Contains(string(b), "echo GUEST_GETRANDOM_SKIPPED") {
 		t.Fatal("pack-oci.sh must record virtio-rng and a bounded getrandom")
@@ -166,11 +187,11 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 	if err := Extract(dir); err != nil {
 		t.Fatal(err)
 	}
-	pack, err := os.ReadFile(filepath.Join(dir, "pack-oci.sh"))
+	snippetB, err := os.ReadFile(filepath.Join(dir, "gate-cert.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	snippet := gateCASnippet(t, string(pack))
+	snippet := string(snippetB)
 
 	t.Run("curl", func(t *testing.T) {
 		root := t.TempDir()
@@ -183,7 +204,10 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 		writeExe(t, filepath.Join(bin, "curl"), curlWritesCA)
 		linkExe(t, bin, "mkdir")
 		linkExe(t, bin, "cp")
-		stdout, calls := runGateCA(t, root, bin, snippet)
+		stdout, calls, err := runGateCA(t, root, bin, snippet)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if stdout != "" {
 			t.Fatalf("stdout = %q, want empty", stdout)
 		}
@@ -220,7 +244,10 @@ func TestGateCAFallsThroughToCurl(t *testing.T) {
 		writeExe(t, filepath.Join(bin, "busybox"), busyboxNoWget)
 		linkExe(t, bin, "mkdir")
 		linkExe(t, bin, "cp")
-		stdout, calls := runGateCA(t, root, bin, snippet)
+		stdout, calls, err := runGateCA(t, root, bin, snippet)
+		if err == nil {
+			t.Fatal("failed fetch exited 0")
+		}
 		if stdout != caFetchFail+"\n" {
 			t.Fatalf("stdout = %q, want one serial line", stdout)
 		}
@@ -248,33 +275,7 @@ func fcInitScript(t *testing.T, pack string) string {
 	return rest[:j]
 }
 
-func gateCASnippet(t *testing.T, pack string) string {
-	t.Helper()
-	const start = "cat > /rootfs/fc-init << 'EOF'\n"
-	i := strings.Index(pack, start)
-	if i < 0 {
-		t.Fatal("pack-oci.sh has no fc-init heredoc")
-	}
-	rest := pack[i+len(start):]
-	j := strings.Index(rest, "\nEOF\n")
-	if j < 0 {
-		t.Fatal("pack-oci.sh fc-init heredoc is not closed")
-	}
-	init := rest[:j]
-	const mark = "mkdir -p /etc/ssl /usr/local/share/ca-certificates\n"
-	k := strings.Index(init, mark)
-	if k < 0 {
-		t.Fatal("fc-init has no gate CA fetch")
-	}
-	fetch := init[k:]
-	end := strings.Index(fetch, "\ncmd=$(cat /fc-cmd)\n")
-	if end < 0 {
-		t.Fatal("fc-init gate CA fetch does not stop before /fc-cmd")
-	}
-	return fetch[:end+1]
-}
-
-func runGateCA(t *testing.T, root, bin, snippet string) (string, string) {
+func runGateCA(t *testing.T, root, bin, snippet string) (string, string, error) {
 	t.Helper()
 	ssl := filepath.Join(root, "ssl")
 	certs := filepath.Join(root, "ca-certificates")
@@ -302,19 +303,21 @@ func runGateCA(t *testing.T, root, bin, snippet string) (string, string) {
 		"PATH=" + bin,
 		"LOG=" + logPath,
 		"CA_BODY=" + fakeCA,
+		"GATE_CA_URL=http://172.16.0.1:3131/ca.pem",
 		"HOME=" + root,
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("snippet: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
-	}
+	runErr := cmd.Run()
 	calls, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return stdout.String(), string(calls)
+	if runErr != nil && stdout.Len() == 0 && stderr.Len() > 0 {
+		return stdout.String(), string(calls), fmt.Errorf("snippet: %v\nstderr:\n%s", runErr, stderr.String())
+	}
+	return stdout.String(), string(calls), runErr
 }
 
 func writeExe(t *testing.T, path, body string) {

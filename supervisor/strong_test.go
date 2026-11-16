@@ -76,7 +76,7 @@ func TestFcScriptsDirExtractsWithoutTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"entrypoint.sh", "pack-oci.sh"} {
+	for _, name := range []string{"entrypoint.sh", "pack-oci.sh", "gate-cert.sh"} {
 		p := filepath.Join(dir, name)
 		st, err := os.Stat(p)
 		if err != nil {

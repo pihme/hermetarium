@@ -263,32 +263,32 @@ func TestNoInboundRejectedMachineConfig(t *testing.T) {
 	}
 	id := newTestID(t)
 	t.Cleanup(func() { _ = DestroyStrong(id) })
+	OnGateReady(id, func(string, string) error {
+		// Squid is listening. Firecracker reads vm.json only after dns.ready,
+		// which is still ahead of this hook, so vcpu_count 0 is rejected
+		// before the guest can print GUEST_UNAME=.
+		p := filepath.Join(VarDir(root), id, "vm.json")
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		var vm map[string]any
+		if err := json.Unmarshal(b, &vm); err != nil {
+			return err
+		}
+		mc, ok := vm["machine-config"].(map[string]any)
+		if !ok {
+			return errors.New("vm.json has no machine-config")
+		}
+		mc["vcpu_count"] = 0
+		raw, err := json.MarshalIndent(vm, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(p, append(raw, '\n'), 0o644)
+	})
 	_, err = CreateStrong(root, id, WithTestLabel(t, CreateOpts{
 		Image: BusyboxImage, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
-		AfterGate: func(string, string) error {
-			// Firecracker reads vm.json only after squid.pid appears, which
-			// is after this hook. vcpu_count 0 is rejected before the guest
-			// can print GUEST_UNAME=.
-			p := filepath.Join(VarDir(root), id, "vm.json")
-			b, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			var vm map[string]any
-			if err := json.Unmarshal(b, &vm); err != nil {
-				return err
-			}
-			mc, ok := vm["machine-config"].(map[string]any)
-			if !ok {
-				return errors.New("vm.json has no machine-config")
-			}
-			mc["vcpu_count"] = 0
-			raw, err := json.MarshalIndent(vm, "", "  ")
-			if err != nil {
-				return err
-			}
-			return os.WriteFile(p, append(raw, '\n'), 0o644)
-		},
 	}))
 	if err == nil || !strings.Contains(err.Error(), "guest did not boot") {
 		t.Fatal(err)

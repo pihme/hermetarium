@@ -36,7 +36,8 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 		return "", err
 	}
 	script := filepath.Join(scripts, "pack-oci.sh")
-	if rootfsFresh(dest, script, sizeMB) {
+	certScript := filepath.Join(scripts, "gate-cert.sh")
+	if rootfsFresh(dest, []string{script, certScript}, sizeMB) {
 		return dest, nil
 	}
 	cmd, err := Docker(15*time.Second, "inspect", "-f",
@@ -83,6 +84,7 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	_, err = Docker(3*time.Minute, "run", "--rm",
 		"-e", fmt.Sprintf("SIZE_MB=%d", sizeMB),
 		"-v", script+":/pack-oci.sh:ro",
+		"-v", certScript+":/gate-cert.sh:ro",
 		"-v", work+":/in",
 		"-v", stage+":/out",
 		AlpineImage, "sh", "/pack-oci.sh",
@@ -97,14 +99,16 @@ func EnsureImageRootfs(root, image string, sizeMB int) (string, error) {
 	return dest, nil
 }
 
-func rootfsFresh(dest, script string, sizeMB int) bool {
+func rootfsFresh(dest string, scripts []string, sizeMB int) bool {
 	st, err := os.Stat(dest)
 	if err != nil || st.Size() != int64(sizeMB)<<20 {
 		return false
 	}
-	sc, err := os.Stat(script)
-	if err != nil || st.ModTime().Before(sc.ModTime()) {
-		return false
+	for _, script := range scripts {
+		sc, err := os.Stat(script)
+		if err != nil || st.ModTime().Before(sc.ModTime()) {
+			return false
+		}
 	}
 	return true
 }

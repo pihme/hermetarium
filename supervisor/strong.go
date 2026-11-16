@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,20 +33,6 @@ const (
 // leaves it at fcSHA256. Tests point it at a fixture so a tarball with no
 // binary can be rejected without downloading the release asset.
 var fcPin = fcSHA256
-
-const strongGuestIP = "172.16.0.2"
-const strongGateIP = "172.16.0.1"
-
-type StrongInstance struct {
-	ID                   string `json:"id"`
-	Wall                 string `json:"wall"`
-	FirecrackerContainer string `json:"firecrackerContainer"`
-	InboundURL           string `json:"inboundUrl"`
-	NoInbound            bool   `json:"noInbound"`
-	LogPath              string `json:"logPath"`
-	SerialPath           string `json:"serialPath"`
-	Dir                  string `json:"dir"`
-}
 
 func cacheFile(root, name string) (string, error) {
 	dir := CacheDir(root)
@@ -186,6 +173,7 @@ func EnsureStrongAssets(root string) (firecracker, kernel string, err error) {
 }
 
 func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err error) {
+	defer func() { takeGateReady(id) }()
 	// A bad root file fails before any habitat directory or container.
 	if opts.Rootfs != "" {
 		if err := ext4Regular(opts.Rootfs); err != nil {
@@ -196,12 +184,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	// file open, and a second copy would replace it.
 	fcContainer := "htm-fc-" + id
 	if err := containerFree(fcContainer); err != nil {
-		return nil, err
-	}
-	if err := EnsureImageExists(opts.Image); err != nil {
-		return nil, err
-	}
-	if err := EnsureNetTools(root); err != nil {
 		return nil, err
 	}
 	firecracker, kernel, err := EnsureStrongAssets(root)
@@ -216,14 +198,8 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			return nil, err
 		}
 	}
-	dir, err := InstanceDir(root, id)
+	dir, conf, https, err := prepareHabitat(root, id, opts)
 	if err != nil {
-		return nil, err
-	}
-	if err := InstallACL(dir, opts.ACL); err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
 		return nil, err
 	}
 	src := cached
@@ -246,21 +222,6 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	}()
 	logPath := filepath.Join(dir, "io.jsonl")
 	serialPath := filepath.Join(dir, "serial.log")
-	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
-		return nil, err
-	}
-	conf, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
-	if err != nil {
-		return nil, err
-	}
-	if ACLWantsHTTPS(conf) {
-		if err := PrepareMITM(dir); err != nil {
-			return nil, err
-		}
-		if err := InitMITMDB(root, dir); err != nil {
-			return nil, err
-		}
-	}
 	scripts, err := fcScriptsDir(root)
 	if err != nil {
 		return nil, err
@@ -271,7 +232,11 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	if err != nil {
 		return nil, err
 	}
-	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg
+	plan := StrongPlan()
+	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/fc-init " + pubArg + " " + plan.KernelArgs()
+	if https {
+		bootArgs += " hermetarium.ca=" + plan.CAURL()
+	}
 	vm := map[string]any{
 		"boot-source": map[string]any{
 			"kernel_image_path": "/opt/vmlinux.bin",
@@ -316,6 +281,10 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	fcArgs = append(fcArgs, inboundPublish(opts.NoInbound)...)
 	// The entrypoint accepts tcp/18081 from the bridge gateway unless
 	// this is set. The gate file is copied unchanged and may still listen there.
+	fcArgs = append(fcArgs, "-e", "GATE_IP="+plan.Gate, "-e", "GUEST_IP="+plan.Guest, "-e", "GATE_CIDR="+plan.CIDR, "-e", "GATE_PREFIX="+strconv.Itoa(plan.Prefix))
+	if https {
+		fcArgs = append(fcArgs, "-e", "GATE_HTTPS=1", "-e", "GATE_CA_PORT="+strconv.Itoa(GateCAPort))
+	}
 	if opts.NoInbound {
 		fcArgs = append(fcArgs, "-e", "NO_INBOUND=1")
 	}
@@ -323,6 +292,8 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		"-v", firecracker+":/opt/firecracker:ro",
 		"-v", kernel+":/opt/vmlinux.bin:ro",
 		"-v", strongRootfsVolume(dir),
+	)
+	fcArgs = append(fcArgs,
 		"-v", entrypoint+":/entrypoint.sh:ro",
 		"-v", dir+":/log",
 	)
@@ -331,18 +302,19 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	if _, err := Docker(30*time.Second, fcArgs...); err != nil {
 		return nil, err
 	}
-
-	gate := "htm-gate-" + id
-	if err := runAfterGate(opts, id, fcContainer); err != nil {
+	if err := waitGateRules(dir, fcContainer); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}
+
+	gate := "htm-gate-" + id
 	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + fcContainer}); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}
-	// squid.pid starts Firecracker before WaitSquid returns. Joining a
-	// Firecracker container that has already exited hides the boot error.
+	// Firecracker starts only after squid.pid and dns.ready. DNS stays down
+	// until httpd has accepted, so the guest cannot fetch the CA before it
+	// is served. A container that has already exited hides the boot error.
 	inboundTimeout := 40 * time.Second
 	if !containerRunning(fcContainer) {
 		err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
@@ -351,7 +323,24 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if err := startGateDNS(root, id, fcContainer, gate, strongGateIP, opts.TestLabel, conf); err != nil {
+	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
+		endStrong(id, dir)
+		return nil, err
+	}
+	if https {
+		if err := waitGateCA(dir, fcContainer); err != nil {
+			endStrong(id, dir)
+			return nil, err
+		}
+	}
+	// Squid is listening. DNS is what lets the entrypoint boot Firecracker,
+	// so a sidecar started here shares a netns where the gate is up and the
+	// guest has not started.
+	if err := runGateReady(root, id, fcContainer); err != nil {
+		endStrong(id, dir)
+		return nil, err
+	}
+	if err := startGateDNS(root, id, fcContainer, gate, plan.Gate, opts.TestLabel, conf); err != nil {
 		if !containerRunning(fcContainer) {
 			err = waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 				return containerLogs(fcContainer), containerRunning(fcContainer)
@@ -360,13 +349,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		_ = DestroyStrong(id)
 		return nil, err
 	}
-	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
-		endStrong(id, dir)
-		return nil, err
-	}
-
 	// No inbound port, so the serial line is the signal the guest reached
-	// user space.
+	// user space. fc-init prints it only after the certificate install, so
+	// a failed install cannot look like a booted habitat.
 	if opts.NoInbound {
 		if err := waitGuestUname(dir, inboundTimeout, func() (string, bool) {
 			return containerLogs(fcContainer), containerRunning(fcContainer)
@@ -381,15 +366,12 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	inst := &StrongInstance{
-		ID: id, Wall: "strong", FirecrackerContainer: fcContainer, InboundURL: url, NoInbound: opts.NoInbound,
+		ID: id, Wall: "strong", FirecrackerContainer: fcContainer, Gate: gate,
+		GateIP: plan.Gate, BoxIP: plan.Guest,
+		InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, SerialPath: serialPath, Dir: dir,
 	}
-	b, err := json.MarshalIndent(inst, "", "  ")
-	if err != nil {
-		endStrong(id, dir)
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
+	if err := writeInstance(inst); err != nil {
 		endStrong(id, dir)
 		return nil, err
 	}

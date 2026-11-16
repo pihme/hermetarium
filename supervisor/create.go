@@ -1,5 +1,11 @@
 package supervisor
 
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
 const (
 	ClaudeHost = "claude.hermetarium.test"
 	GrokHost   = "grok.hermetarium.test"
@@ -10,11 +16,6 @@ const (
 type CreateOpts struct {
 	Image string
 	ACL   string // host path to squid.conf; copied into the instance dir and mounted
-
-	// AfterGate runs in the gate or Firecracker container netns after Squid's
-	// network exists and before the inhabitant is reachable. Tests use it for
-	// probe/mock sidecars.
-	AfterGate func(id, netns string) error
 
 	MemMiB int
 	DiskMB int
@@ -34,10 +35,6 @@ type CreateOpts struct {
 	// create starts (gate, box, DNS, Firecracker container). Empty for the
 	// operator CLI; tests set it so cleanup is scoped to one test.
 	TestLabel string
-}
-
-func VendorHosts() []string {
-	return []string{ClaudeHost, GrokHost, ModelHost}
 }
 
 func memMiB(o CreateOpts) int {
@@ -61,9 +58,48 @@ func cpuCount(o CreateOpts) int {
 	return 1
 }
 
-func runAfterGate(opts CreateOpts, id, netns string) error {
-	if opts.AfterGate == nil {
+var (
+	gateReadyMu sync.Mutex
+	gateReady   = map[string]func(root, id string) error{}
+	gateNetNS   sync.Map
+)
+
+// OnGateReady registers a test sidecar for one habitat. It runs after Squid
+// is listening and before gate DNS, which is what releases the strong guest.
+// The product create input does not carry this hook.
+func OnGateReady(id string, fn func(root, id string) error) {
+	gateReadyMu.Lock()
+	defer gateReadyMu.Unlock()
+	gateReady[id] = fn
+}
+
+func takeGateReady(id string) func(root, id string) error {
+	gateReadyMu.Lock()
+	defer gateReadyMu.Unlock()
+	fn := gateReady[id]
+	delete(gateReady, id)
+	return fn
+}
+
+func runGateReady(root, id, netns string) error {
+	gateNetNS.Store(id, netns)
+	fn := takeGateReady(id)
+	if fn == nil {
 		return nil
 	}
-	return opts.AfterGate(id, netns)
+	return fn(root, id)
+}
+
+// JoinGate starts name in the gate netns create recorded for id.
+// Callers do not pass htm-gate-<id> or htm-fc-<id>.
+func JoinGate(id, name string, args ...string) error {
+	v, ok := gateNetNS.Load(id)
+	if !ok {
+		return fmt.Errorf("join gate: habitat %s has no gate network", id)
+	}
+	full := append([]string{"run", "-d", "--name", name, "--network", "container:" + v.(string)}, args...)
+	if _, err := Docker(30*time.Second, full...); err != nil {
+		return err
+	}
+	return nil
 }

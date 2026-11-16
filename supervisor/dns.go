@@ -53,8 +53,7 @@ func startGateDNS(root, id, netns, gateContainer, gateIP, label string, conf []b
 		b.WriteString("open 0\n")
 	}
 	fmt.Fprintf(&b, "gate %s\n", gateIP)
-	fmt.Fprintf(&b, "name %s\n", ProbeHost)
-	for _, h := range VendorHosts() {
+	for _, h := range StandInNames() {
 		fmt.Fprintf(&b, "name %s\n", h)
 	}
 	for _, s := range up {

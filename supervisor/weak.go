@@ -3,7 +3,6 @@ package supervisor
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -14,58 +13,17 @@ import (
 	"time"
 )
 
-type WeakInstance struct {
-	ID         string `json:"id"`
-	Wall       string `json:"wall"`
-	Network    string `json:"network"`
-	Gate       string `json:"gate"`
-	Box        string `json:"box"`
-	GateIP     string `json:"gateIp"`
-	BoxIP      string `json:"boxIp"`
-	InboundURL string `json:"inboundUrl"`
-	NoInbound  bool   `json:"noInbound"`
-	LogPath    string `json:"logPath"`
-	Dir        string `json:"dir"`
-}
-
 func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
+	defer func() { takeGateReady(id) }()
 	if opts.Rootfs != "" {
 		return nil, fmt.Errorf("the Docker wall rejects --rootfs")
 	}
-	if err := EnsureImageExists(opts.Image); err != nil {
-		return nil, err
-	}
-	if err := EnsureNetTools(root); err != nil {
-		return nil, err
-	}
-	dir, err := InstanceDir(root, id)
+	dir, conf, https, err := prepareHabitat(root, id, opts)
 	if err != nil {
 		return nil, err
 	}
-	sub := SubnetForID(id)
-	if err := InstallACL(dir, opts.ACL); err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
-		return nil, err
-	}
+	plan := WeakPlan(id)
 	logPath := filepath.Join(dir, "io.jsonl")
-	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
-		return nil, err
-	}
-	conf, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
-	if err != nil {
-		return nil, err
-	}
-	https := ACLWantsHTTPS(conf)
-	if https {
-		if err := PrepareMITM(dir); err != nil {
-			return nil, err
-		}
-		if err := InitMITMDB(root, dir); err != nil {
-			return nil, err
-		}
-	}
 	network := "htm-" + id
 	gate := "htm-gate-" + id
 	box := "htm-box-" + id
@@ -74,7 +32,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		// --internal makes Docker block every route out of this network, so
 		// the box cannot leave even with NET_ADMIN. The gate also joins the
 		// default bridge below, which is the only path to the Internet.
-		"network", "create", "--driver", "bridge", "--internal", "--subnet", sub.CIDR,
+		"network", "create", "--driver", "bridge", "--internal", "--subnet", plan.CIDR,
 		network,
 	); err != nil {
 		return nil, err
@@ -103,51 +61,53 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	if err := runSquid(root, gate, dir, opts.TestLabel, append([]string{
 		"--network", "bridge",
-		"--add-host", "inhabitant:" + sub.Box,
+		"--add-host", "inhabitant:" + plan.Guest,
 		"--sysctl", "net.ipv4.ip_forward=1",
 	}, inboundPublish(opts.NoInbound)...)); err != nil {
 		return nil, err
 	}
-	if _, err := Docker(30*time.Second, "network", "connect", "--ip", sub.Gate, network, gate); err != nil {
+	if _, err := Docker(30*time.Second, "network", "connect", "--ip", plan.Gate, network, gate); err != nil {
 		return nil, err
 	}
 	if err := WaitSquid(dir, gate, 20*time.Second); err != nil {
 		return nil, err
 	}
-	if err := lockGate(gate, sub.Gate, opts.NoInbound); err != nil {
+	// One script, same bytes the Firecracker container runs. Failure must not start the box.
+	if err := applyGateRules(gate, dir, plan.Gate, plan.CIDR, https, opts.NoInbound); err != nil {
 		return nil, err
 	}
-	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
+	// Sidecars share this netns only after Squid is listening.
+	if err := runGateReady(root, id, gate); err != nil {
 		return nil, err
 	}
-	if err := startGateDNS(root, id, gate, gate, sub.Gate, opts.TestLabel, conf); err != nil {
-		return nil, err
-	}
-	if err := runAfterGate(opts, id, gate); err != nil {
+	if err := startGateDNS(root, id, gate, gate, plan.Gate, opts.TestLabel, conf); err != nil {
 		return nil, err
 	}
 
 	// Docker keeps 127.0.0.11 on an --internal network and answers outside
 	// names with SERVFAIL. Mount the gate resolver before the image command.
 	resolv := filepath.Join(dir, "resolv.conf")
-	if err := os.WriteFile(resolv, []byte("nameserver "+sub.Gate+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(resolv, []byte("nameserver "+plan.Gate+"\n"), 0o644); err != nil {
 		return nil, err
 	}
 	boxArgs := []string{
 		"run", "-d", "--name", box,
-		"--network", network, "--ip", sub.Box,
+		"--network", network, "--ip", plan.Guest,
 		"--cap-add", "NET_ADMIN",
 		"-v", resolv + ":/etc/resolv.conf:ro",
-		"--add-host", ProbeHost + ":" + sub.Gate,
 	}
-	for _, h := range VendorHosts() {
-		boxArgs = append(boxArgs, "--add-host", h+":"+sub.Gate)
+	for _, h := range plan.Names {
+		boxArgs = append(boxArgs, "--add-host", h+":"+plan.Gate)
 	}
 	if opts.CPUs > 0 {
 		boxArgs = append(boxArgs, "--cpus", strconv.Itoa(opts.CPUs))
 	}
 	if https {
-		boxArgs = append(boxArgs, mitmBoxDockerArgs(dir)...)
+		mitmArgs, err := mitmBoxDockerArgs(root, dir)
+		if err != nil {
+			return nil, err
+		}
+		boxArgs = append(boxArgs, mitmArgs...)
 	}
 	boxArgs = append(boxArgs, TestLabelArgs(opts.TestLabel)...)
 	boxArgs = append(boxArgs, opts.Image)
@@ -157,12 +117,12 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	// resolv.conf is mounted read-only. This only installs the default route.
 	if _, err := Docker(15*time.Second,
 		"exec", box, "sh", "-c",
-		"ip route replace default via "+sub.Gate+" || ip route add default via "+sub.Gate,
+		"ip route replace default via "+plan.Gate+" || ip route add default via "+plan.Gate,
 	); err != nil {
 		return nil, err
 	}
 	if https {
-		if err := InstallBoxTrust(box); err != nil {
+		if err := installGateCert(box); err != nil {
 			return nil, err
 		}
 	}
@@ -174,14 +134,10 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 
 	inst := &WeakInstance{
 		ID: id, Wall: "weak", Network: network, Gate: gate, Box: box,
-		GateIP: sub.Gate, BoxIP: sub.Box, InboundURL: url, NoInbound: opts.NoInbound,
+		GateIP: plan.Gate, BoxIP: plan.Guest, InboundURL: url, NoInbound: opts.NoInbound,
 		LogPath: logPath, Dir: dir,
 	}
-	b, err := json.MarshalIndent(inst, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "instance.json"), b, 0o644); err != nil {
+	if err := writeInstance(inst); err != nil {
 		return nil, err
 	}
 	cleanup = false
@@ -828,18 +784,6 @@ func forgetSameBridgeLocked(bridge string, forceOwned bool) error {
 		return fmt.Errorf("remove forward accept on %s: %w", bridge, err)
 	}
 	return nil
-}
-
-func LoadWeak(root, id string) (*WeakInstance, error) {
-	b, err := os.ReadFile(filepath.Join(VarDir(root), id, "instance.json"))
-	if err != nil {
-		return nil, err
-	}
-	var inst WeakInstance
-	if err := json.Unmarshal(b, &inst); err != nil {
-		return nil, err
-	}
-	return &inst, nil
 }
 
 func SyncInstanceLog(dir string) error {
