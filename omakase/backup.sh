@@ -5,9 +5,9 @@
 #
 # A restic read of the root file takes longer than one write. Pause the
 # Firecracker container for the read so the file is one moment. Do not
-# restart it: a restart kills Firecracker. The pause is bounded. restic is
-# stopped, and the EXIT trap unpauses. SIGKILL skips the trap; then run
-# docker unpause htm-fc-<id>.
+# restart it: a restart kills Firecracker. The pause is bounded. INT and
+# TERM unpause without waiting out that bound. SIGKILL skips the trap;
+# then run docker unpause htm-fc-<id>.
 set -eu
 
 die() {
@@ -203,11 +203,23 @@ for f in "$inst/io.jsonl" "$inst/access.log" "$rootfile"; do
 done
 
 # paused stays 1 until this run unpauses. SIGKILL skips this trap.
+# backup_pid is timeout. timeout calls setpgid, so it is not in this
+# shell's process group. A foreground wait would defer INT and TERM
+# until the pause bound, and a later SIGKILL would leave the container
+# paused.
 paused=0
+backup_pid=0
 fc=htm-fc-$HERMETARIUM_ID
 cleanup() {
   rc=${1:-$?}
   trap - EXIT INT TERM
+  if [ "$backup_pid" != 0 ]; then
+    # Stop restic now. Do not wait out the pause bound. The group kill
+    # is timeout's own process group; this shell is not in it.
+    kill -TERM -"$backup_pid" 2>/dev/null || true
+    kill -TERM "$backup_pid" 2>/dev/null || true
+    backup_pid=0
+  fi
   if [ "$paused" = 1 ]; then
     if docker unpause "$fc"; then
       paused=0
@@ -224,15 +236,25 @@ trap 'cleanup $?' EXIT
 trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
-docker pause "$fc"
+# Before docker pause returns. A signal during pause runs this trap
+# with the flag already set, including when the pause has succeeded.
 paused=1
+docker pause "$fc"
 
-# -k so a restic that ignores TERM cannot hold the pause.
+# -k so a restic that ignores TERM cannot hold the pause past the bound.
+# Background timeout so this trap can run without waiting for it.
 timeout -k 10 "$pause_seconds" restic backup --json --tag hermetarium \
   "$rootfile" \
   "$inst/io.jsonl" \
   "$inst/access.log" \
-  "$journal"
+  "$journal" &
+backup_pid=$!
+backup_status=0
+wait "$backup_pid" || backup_status=$?
+backup_pid=0
+if [ "$backup_status" -ne 0 ]; then
+  exit "$backup_status"
+fi
 
 docker unpause "$fc"
 paused=0

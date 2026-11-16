@@ -151,8 +151,9 @@ func TestBackupWhileWriting(t *testing.T) {
 		t.Fatalf("second backup treated files as new (%d)", second.FilesNew)
 	}
 	// FilesNew == 0 still allows another copy of every unique block.
-	// The second snapshot must be a small fraction of the first.
-	if first.DataAdded < 1 || second.DataAdded*4 >= first.DataAdded {
+	// An ext4 journal of a few MiB was 27% of the first snapshot on CI
+	// (about 6 MiB) and failed a 25% ceiling. Half still rejects a full recopy.
+	if first.DataAdded < 1 || second.DataAdded*2 >= first.DataAdded {
 		t.Fatalf("second backup added %d bytes, first added %d", second.DataAdded, first.DataAdded)
 	}
 

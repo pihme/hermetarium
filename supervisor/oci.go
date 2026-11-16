@@ -183,7 +183,8 @@ func copySparse(src, dst string) (err error) {
 	if !st.Mode().IsRegular() {
 		return fmt.Errorf("copy rootfs: %s is not a regular file", src)
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+	// The instance directory is 0777. This file is the guest's disk.
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("stale %s; run hermetarium destroy <id> first: %w", filepath.Base(dst), err)

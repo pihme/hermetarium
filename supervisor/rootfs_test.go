@@ -159,6 +159,9 @@ func TestHabitatRootfsReplacesSymlink(t *testing.T) {
 	if st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() {
 		t.Fatalf("rootfs mode %v", st.Mode())
 	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("rootfs mode %o, want 0600", st.Mode().Perm())
+	}
 	if sum, err := sha256File(cache); err != nil || sum != cacheSum {
 		t.Fatalf("cache changed: %v %s", err, sum)
 	}
