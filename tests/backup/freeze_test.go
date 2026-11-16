@@ -64,22 +64,22 @@ case " $* " in
 esac
 case "$ATTACH_MODE" in
   refused)
-    echo "ssh: connect to host 172.16.0.2 port 22: Connection refused" >&2
+    echo "attach: this image has no SSH server at /usr/sbin/sshd; strong-wall attach needs one (see USAGE)" >&2
     ;;
   timeout)
-    echo "ssh: connect to host 172.16.0.2 port 22: Connection timed out" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: Connection timed out" >&2
     ;;
   noroute)
-    echo "ssh: connect to host 172.16.0.2 port 22: No route to host" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: No route to host" >&2
     ;;
   unreachable)
-    echo "ssh: connect to host 172.16.0.2 port 22: Network is unreachable" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: Network is unreachable" >&2
     ;;
   reset)
-    echo "ssh: connect to host 172.16.0.2 port 22: Connection reset by peer" >&2
+    echo "attach: ssh: connect to host 172.16.0.2 port 22: Connection reset by peer" >&2
     ;;
   denied)
-    echo "root@172.16.0.2: Permission denied (publickey)." >&2
+    echo "attach: root@172.16.0.2: Permission denied (publickey)." >&2
     ;;
   nofsfreeze)
     echo "fsfreeze is not installed in this habitat" >&2

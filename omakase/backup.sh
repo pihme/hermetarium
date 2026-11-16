@@ -340,6 +340,10 @@ if [ "$rc" -ne 0 ]; then
     fi
     die "could not freeze /data (attach did not run fsfreeze)"
   fi
+  if grep -q "no SSH server at /usr/sbin/sshd" "$freeze_log"; then
+    frozen=0
+    die "could not freeze /data (the habitat image needs an SSH server at /usr/sbin/sshd)"
+  fi
   if grep -q "fsfreeze is not installed" "$freeze_log"; then
     frozen=0
     die "could not freeze /data (fsfreeze is not installed in this habitat)"
