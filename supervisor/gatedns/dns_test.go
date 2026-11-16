@@ -516,12 +516,13 @@ func TestTCPConnDeadline(t *testing.T) {
 	}
 }
 
-// countListener counts a connection when its handler enters the first read.
-// Accept is too early: the query can be answered before those connections
-// have taken their slots.
+// countListener counts a connection when its handler reads.
+// reads is the first read. past is a read after the 2-byte length, so a
+// slot taken on that length is already held before the test sends UDP.
 type countListener struct {
 	net.Listener
 	reads *atomic.Int32
+	past  *atomic.Int32
 }
 
 func (l *countListener) Accept() (net.Conn, error) {
@@ -529,21 +530,158 @@ func (l *countListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &countConn{Conn: c, reads: l.reads}, nil
+	return &countConn{Conn: c, reads: l.reads, past: l.past}, nil
 }
 
 type countConn struct {
 	net.Conn
 	reads *atomic.Int32
+	past  *atomic.Int32
 	once  sync.Once
+	saw   sync.Once
+	n     int
 }
 
 func (c *countConn) Read(b []byte) (int, error) {
 	c.once.Do(func() { c.reads.Add(1) })
-	return c.Conn.Read(b)
+	if c.n >= 2 {
+		c.saw.Do(func() { c.past.Add(1) })
+	}
+	n, err := c.Conn.Read(b)
+	c.n += n
+	return n, err
 }
 
 func TestIdleTCPDoesNotStallUDP(t *testing.T) {
+	cases := []struct {
+		name string
+		send bool
+		body int
+	}{
+		{name: "idle"},
+		{name: "length without body", send: true},
+		{name: "partial body", send: true, body: 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &gateDNS{
+				open:    false,
+				gate:    net.ParseIP("172.16.0.1").To4(),
+				names:   map[string]struct{}{"probe.hermetarium.test": {}},
+				slots:   make(chan struct{}, maxInflight),
+				log:     newLog(t),
+				tcpWait: 5 * time.Second,
+			}
+			udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reads, past atomic.Int32
+			go g.serveUDP(udp)
+			go g.serveTCP(&countListener{Listener: raw, reads: &reads, past: &past})
+			t.Cleanup(func() {
+				udp.Close()
+				raw.Close()
+			})
+
+			conns := make([]net.Conn, 0, maxInflight)
+			for i := 0; i < maxInflight; i++ {
+				c, err := net.Dial("tcp", raw.Addr().String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				conns = append(conns, c)
+			}
+			t.Cleanup(func() {
+				for _, c := range conns {
+					c.Close()
+				}
+			})
+			if tc.send {
+				for _, c := range conns {
+					pkt := make([]byte, 2+tc.body)
+					binary.BigEndian.PutUint16(pkt[:2], 4096)
+					if _, err := c.Write(pkt); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			got := &reads
+			if tc.send {
+				got = &past
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for got.Load() < maxInflight && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if n := got.Load(); n != maxInflight {
+				t.Fatalf("handlers reading %d connections, want %d", n, maxInflight)
+			}
+
+			// Far under the 5s TCP deadline these connections are held for.
+			const prompt = time.Second
+			client, err := net.DialUDP("udp4", nil, udp.LocalAddr().(*net.UDPAddr))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			_ = client.SetDeadline(time.Now().Add(prompt))
+			start := time.Now()
+			if _, err := client.Write(dnsQuery("probe.hermetarium.test", 1)); err != nil {
+				t.Fatal(err)
+			}
+			buf := make([]byte, 4096)
+			n, err := client.Read(buf)
+			if err != nil {
+				t.Fatalf("udp answer was not prompt (%s): %v", time.Since(start), err)
+			}
+			if time.Since(start) > prompt {
+				t.Fatalf("udp answer took %s", time.Since(start))
+			}
+			resp := buf[:n]
+			if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
+				t.Fatalf("udp answer len %d", len(resp))
+			}
+		})
+	}
+}
+
+// writeHoldConn blocks the first response write. A slot released on the
+// length prefix is already gone, so the pool is empty while that write waits.
+type writeHoldListener struct {
+	net.Listener
+	hold chan struct{}
+	hit  func()
+}
+
+func (l *writeHoldListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &writeHoldConn{Conn: c, hold: l.hold, hit: l.hit}, nil
+}
+
+type writeHoldConn struct {
+	net.Conn
+	hold chan struct{}
+	hit  func()
+	once sync.Once
+}
+
+func (c *writeHoldConn) Write(b []byte) (int, error) {
+	c.once.Do(func() {
+		c.hit()
+		<-c.hold
+	})
+	return c.Conn.Write(b)
+}
+
+func TestTCPSlotHeldUntilResponse(t *testing.T) {
 	g := &gateDNS{
 		open:    false,
 		gate:    net.ParseIP("172.16.0.1").To4(),
@@ -552,66 +690,95 @@ func TestIdleTCPDoesNotStallUDP(t *testing.T) {
 		log:     newLog(t),
 		tcpWait: 5 * time.Second,
 	}
-	udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
 	raw, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reads atomic.Int32
-	go g.serveUDP(udp)
-	go g.serveTCP(&countListener{Listener: raw, reads: &reads})
+	hold := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(hold) }) }
 	t.Cleanup(func() {
-		udp.Close()
+		release()
 		raw.Close()
 	})
-
-	idle := make([]net.Conn, 0, maxInflight)
-	for i := 0; i < maxInflight; i++ {
-		c, err := net.Dial("tcp", raw.Addr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		idle = append(idle, c)
-	}
-	t.Cleanup(func() {
-		for _, c := range idle {
-			c.Close()
-		}
+	var writing atomic.Int32
+	go g.serveTCP(&writeHoldListener{
+		Listener: raw,
+		hold:     hold,
+		hit:      func() { writing.Add(1) },
 	})
+
+	q := dnsQuery("probe.hermetarium.test", 1)
+	pkt := make([]byte, 2+len(q))
+	binary.BigEndian.PutUint16(pkt[:2], uint16(len(q)))
+	copy(pkt[2:], q)
+	type got struct {
+		resp []byte
+		err  error
+	}
+	results := make(chan got, maxInflight)
+	for i := 0; i < maxInflight; i++ {
+		go func() {
+			c, err := net.Dial("tcp", raw.Addr().String())
+			if err != nil {
+				results <- got{err: err}
+				return
+			}
+			defer c.Close()
+			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+			if _, err := c.Write(pkt); err != nil {
+				results <- got{err: err}
+				return
+			}
+			var n uint16
+			if err := binary.Read(c, binary.BigEndian, &n); err != nil {
+				results <- got{err: err}
+				return
+			}
+			buf := make([]byte, n)
+			if _, err := io.ReadFull(c, buf); err != nil {
+				results <- got{err: err}
+				return
+			}
+			results <- got{resp: buf}
+		}()
+	}
 	deadline := time.Now().Add(2 * time.Second)
-	for reads.Load() < maxInflight && time.Now().Before(deadline) {
+	for writing.Load() < maxInflight && time.Now().Before(deadline) {
+		select {
+		case r := <-results:
+			t.Fatalf("response before the write was held: %v len %d", r.err, len(r.resp))
+		default:
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if got := reads.Load(); got != maxInflight {
-		t.Fatalf("handlers reading %d idle connections, want %d", got, maxInflight)
+	if n := writing.Load(); n != maxInflight {
+		t.Fatalf("responses started %d, want %d", n, maxInflight)
 	}
-
-	// Far under the 5s TCP deadline the idle connections are held for.
-	const prompt = time.Second
-	client, err := net.DialUDP("udp4", nil, udp.LocalAddr().(*net.UDPAddr))
-	if err != nil {
-		t.Fatal(err)
+	if n := len(g.slots); n != maxInflight {
+		t.Fatalf("slots during response write %d, want %d", n, maxInflight)
 	}
-	defer client.Close()
-	_ = client.SetDeadline(time.Now().Add(prompt))
-	start := time.Now()
-	if _, err := client.Write(dnsQuery("probe.hermetarium.test", 1)); err != nil {
-		t.Fatal(err)
+	if _, err := tryTCP(raw.Addr().String(), q); err == nil {
+		t.Fatal("tcp answered while the cap was full")
 	}
-	buf := make([]byte, 4096)
-	n, err := client.Read(buf)
-	if err != nil {
-		t.Fatalf("udp answer was not prompt (%s): %v", time.Since(start), err)
+	release()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for i := 0; i < maxInflight; i++ {
+		select {
+		case r := <-results:
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+			if len(r.resp) < 16 || net.IP(r.resp[len(r.resp)-4:]).String() != "172.16.0.1" {
+				t.Fatalf("tcp answer len %d", len(r.resp))
+			}
+		case <-timer.C:
+			t.Fatalf("answered %d of %d", i, maxInflight)
+		}
 	}
-	if time.Since(start) > prompt {
-		t.Fatalf("udp answer took %s", time.Since(start))
-	}
-	resp := buf[:n]
-	if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
-		t.Fatalf("udp answer len %d", len(resp))
+	if !waitIdle(g.slots) {
+		t.Fatal("slots still held after the responses were written")
 	}
 }
 
