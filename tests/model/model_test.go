@@ -67,20 +67,22 @@ func TestModelGate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			label := supervisor.TrackTestContainers(t)
 			opts := supervisor.CreateOpts{
 				Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
+				TestLabel: label,
 				AfterGate: func(hid, netns string) error {
-					return startModelMock(root, hid, netns, report, peerPort)
+					return startModelMock(root, hid, netns, report, peerPort, label)
 				},
 			}
 			if wall == "weak" {
 				t.Cleanup(func() { _ = supervisor.DestroyWeak(id) })
-				if _, err := supervisor.CreateWeak(root, id, opts); err != nil {
+				if _, err := supervisor.CreateWeak(root, id, supervisor.WithTestLabel(t, opts)); err != nil {
 					t.Fatal(err)
 				}
 			} else {
 				t.Cleanup(func() { _ = supervisor.DestroyStrong(id) })
-				if _, err := supervisor.CreateStrong(root, id, opts); err != nil {
+				if _, err := supervisor.CreateStrong(root, id, supervisor.WithTestLabel(t, opts)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -173,7 +175,7 @@ exec sleep 3600
 	return image
 }
 
-func startModelMock(root, id, netns, report, port string) error {
+func startModelMock(root, id, netns, report, port, label string) error {
 	bin := filepath.Join(report, "vendor-mock")
 	cmd := exec.Command("go", "build", "-o", bin, "./tests/vendormock")
 	cmd.Dir = root
@@ -184,17 +186,18 @@ func startModelMock(root, id, netns, report, port string) error {
 	if err := supervisor.EnsureImageExists(supervisor.AlpineImage); err != nil {
 		return err
 	}
-	_, err := supervisor.Docker(30*time.Second,
-		"run", "-d", "--name", "htm-mock-"+id,
-		"--network", "container:"+netns,
-		"-e", "MOCK_EXPECT_KEY="+modelKey,
+	args := []string{
+		"run", "-d", "--name", "htm-mock-" + id,
+		"--network", "container:" + netns,
+		"-e", "MOCK_EXPECT_KEY=" + modelKey,
 		"-e", "MOCK_REPORT=/report/got",
-		"-e", "LISTEN=:"+port,
-		"-v", bin+":/usr/local/bin/vendor-mock:ro",
-		"-v", report+":/report",
-		supervisor.AlpineImage,
-		"/usr/local/bin/vendor-mock",
-	)
+		"-e", "LISTEN=:" + port,
+		"-v", bin + ":/usr/local/bin/vendor-mock:ro",
+		"-v", report + ":/report",
+	}
+	args = append(args, supervisor.TestLabelArgs(label)...)
+	args = append(args, supervisor.AlpineImage, "/usr/local/bin/vendor-mock")
+	_, err := supervisor.Docker(30*time.Second, args...)
 	return err
 }
 

@@ -283,7 +283,7 @@ func TestAttachGuestStderr(t *testing.T) {
 		_ = DestroyWeak(id)
 		endStrong(id, filepath.Join(VarDir(root), id))
 	})
-	if _, err := CreateStrong(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 256}); err != nil {
+	if _, err := CreateStrong(root, id, WithTestLabel(t, CreateOpts{Image: image, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 256})); err != nil {
 		t.Fatal(err)
 	}
 	// A non-nil error is what mustDrive retries. This command exits 0, so
@@ -484,13 +484,13 @@ func TestAttachTTY(t *testing.T) {
 			var dir, logPath string
 			switch wall {
 			case "weak":
-				inst, err := CreateWeak(root, id, opts)
+				inst, err := CreateWeak(root, id, WithTestLabel(t, opts))
 				if err != nil {
 					t.Fatal(err)
 				}
 				dir, logPath = inst.Dir, inst.LogPath
 			default:
-				inst, err := CreateStrong(root, id, opts)
+				inst, err := CreateStrong(root, id, WithTestLabel(t, opts))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -990,14 +990,14 @@ func TestAttachExitCode(t *testing.T) {
 			})
 			switch wall {
 			case "weak":
-				if _, err := CreateWeak(root, id, opts); err != nil {
+				if _, err := CreateWeak(root, id, WithTestLabel(t, opts)); err != nil {
 					t.Fatal(err)
 				}
 			default:
 				if _, err := os.Stat("/dev/kvm"); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := CreateStrong(root, id, opts); err != nil {
+				if _, err := CreateStrong(root, id, WithTestLabel(t, opts)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1031,7 +1031,7 @@ func TestAttachConcurrentWeakTTY(t *testing.T) {
 	acl := writeClosedACL(t)
 	id := newTestID(t)
 	t.Cleanup(func() { _ = DestroyWeak(id) })
-	if _, err := CreateWeak(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true}); err != nil {
+	if _, err := CreateWeak(root, id, WithTestLabel(t, CreateOpts{Image: image, ACL: acl, NoInbound: true})); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -1101,7 +1101,7 @@ func TestResizeDockerExec(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := "htm-resize-" + newTestID(t)
-	if _, err := Docker(30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
+	if _, err := DockerLabeled(t, 30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
@@ -1221,7 +1221,7 @@ func TestWeakAttachResize(t *testing.T) {
 
 	name := "htm-wresize-" + newTestID(t)
 	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
-	if _, err := Docker(30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
+	if _, err := DockerLabeled(t, 30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
 		t.Fatal(err)
 	}
 	master, slave, err := openTestPTY(40, 100)
@@ -1352,7 +1352,7 @@ func TestWeakAttachIgnoresForeignExec(t *testing.T) {
 
 	name := "htm-foreign-" + newTestID(t)
 	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
-	if _, err := Docker(30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
+	if _, err := DockerLabeled(t, 30*time.Second, "run", "-d", "--name", name, "--entrypoint", "sleep", AlpineImage, "120"); err != nil {
 		t.Fatal(err)
 	}
 	master, slave, err := openTestPTY(40, 100)

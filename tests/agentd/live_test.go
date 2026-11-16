@@ -23,7 +23,7 @@ func TestAgentdLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst, err := harness.CreateWeakAgentd(root, id, false)
+	inst, err := harness.CreateWeakAgentd(t, root, id, false)
 	if err != nil {
 		t.Fatal(err)
 	}

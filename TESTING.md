@@ -77,8 +77,17 @@ In-process. No Docker habitat.
 | `TestAlpineImageFromDockerfile` | `AlpineImage` is `alpine:3.24`, the same tag parsed from the build image Dockerfile (`supervisor/helper/Dockerfile`). |
 | `TestSquidDockerfile` | `SquidImage` is `hermetarium-squid:local`. The embedded Dockerfile starts `FROM ubuntu/squid:` and installs `squid-openssl`, and it requires `/usr/lib/squid/security_file_certgen`. |
 | `TestEnsureNetToolsStamp` | An existing nettools image is rebuilt when the Dockerfile stamp differs. A failed build restores the previous stamp, or removes it when there was none. A matching stamp skips the build. |
-| `TestDestroyRemovesGateVolumes` | Needs Docker. Starting the gate creates the image's anonymous volumes. `DestroyWeak` and `DestroyStrong` remove those volumes. |
-| `TestDestroyRemovesBoxVolumes` | Needs Docker. A weak-wall image with `VOLUME /data` leaves the dangling-volume set unchanged after `DestroyWeak`. |
+| `TestGateHasNoAnonymousVolumes` | Needs Docker. The gate mounts tmpfs on `/var/log/squid` and `/var/spool/squid`, so it has no anonymous volumes. `DestroyWeak` and `DestroyStrong` remove the gate container. |
+| `TestDestroyRemovesBoxVolumes` | Needs Docker. A weak-wall image with `VOLUME /data` has those box volumes removed by `DestroyWeak`. The test checks only that box's volumes, not the machine-wide dangling-volume list. |
+| `TestNewTestLabelFormat` | Two labels differ. Each has prefix `htm`, this process's pid, and a uuid. |
+| `TestDockerArgsWithTestLabel` | `docker run` and `docker create` get `--label hermetarium.test=...` after the verb. `inspect` stays unlabeled. A blank label and a label already present are left unchanged. |
+| `TestParseTestLabelPID` | A well-formed `htm-<pid>-<uuid>` yields the pid. A wrong prefix, a non-numeric or zero pid, or a missing uuid do not parse. |
+| `TestPidRunning` | This process is running. A pid that has already exited is not. |
+| `TestCleanupRemovesOnlyOwnLabel` | Needs Docker. Removing containers with one test label leaves a container that has a different label. |
+| `TestCleanupDetectsLeftoverLabel` | Needs Docker. A container with the test label is listed before cleanup and gone after `RemoveContainersByTestLabel`. |
+| `TestSweepLeavesRunningPidContainers` | Needs Docker. A sweep removes a container whose label pid is not running and leaves one whose label pid is this process. |
+| `TestCreateDoesNotSetTestLabel` | Needs Docker. `CreateWeak` without `TestLabel` sets no `hermetarium.test` label on the gate, box, or DNS container. |
+| `TestRootfsExportRemovesImageVolumes` | Needs Docker. `docker rm -fv` of a temporary `docker create` from an image that declares `VOLUME` removes that volume. `EnsureImageRootfs` of the same image leaves no container from that image. |
 | `TestWeakBridgeForwardAccept` | Needs Docker. An internal bridge on `SubnetForID`'s CIDR gets `FORWARD` accept for that bridge in both `iptables-nft` and `iptables-legacy`. A missing legacy binary fails the test. After removal, both rules are gone. CI's Docker uses the iptables backend, so this job does not reproduce the nftables FORWARD DROP from issue #111. The test still checks that both rules are installed and removed. |
 | `TestDestroyWeakMissingNetTools` | Needs Docker. A weak habitat on `SubnetForID`'s CIDR has both FORWARD accepts. After `hermetarium-nettools:local` is removed, destroy rebuilds that image, exits 0, and the box, the network, and both FORWARD accepts are gone. `hermetarium-sleep:local` is removed. |
 | `TestDestroyWeakForgetError` | Needs Docker. An empty `bridge.name` makes destroy exit non-zero. `htm-box-<id>` and `htm-<id>` are gone, and `bridge.name` is still there. `hermetarium-sleep:local` is removed. |

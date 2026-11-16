@@ -78,7 +78,7 @@ func TestSquidStartupQuiet(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = DestroyWeak(id) })
 	name := "htm-gate-" + id
-	if err := runSquid(root, name, dir, nil); err != nil {
+	if err := runSquid(root, name, dir, TrackTestContainers(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
@@ -136,12 +136,13 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	holder := "htm-hold-" + id
+	label := TrackTestContainers(t)
 	t.Cleanup(func() {
-		DockerIgnore("rm", "-f", "htm-peer-"+id)
-		DockerIgnore("rm", "-f", "htm-gate-"+id)
-		DockerIgnore("rm", "-f", holder)
+		DockerIgnore("rm", "-fv", "htm-peer-"+id)
+		DockerIgnore("rm", "-fv", "htm-gate-"+id)
+		DockerIgnore("rm", "-fv", holder)
 	})
-	if _, err := Docker(30*time.Second, "run", "-d", "--name", holder, "--entrypoint", "sleep", AlpineImage, "600"); err != nil {
+	if _, err := Docker(30*time.Second, "run", "-d", "--name", holder, "--label", TestLabelKey+"="+label, "--entrypoint", "sleep", AlpineImage, "600"); err != nil {
 		t.Fatal(err)
 	}
 	const key = "htm-secret-key"
@@ -175,6 +176,7 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	// Peer first. Squid's startup probe marks a parent dead when nothing is
 	// listening, and a later request then never attempts certificate checks.
 	if _, err := Docker(30*time.Second, "run", "-d", "--name", "htm-peer-"+id,
+		"--label", TestLabelKey+"="+label,
 		"--network", "container:"+holder,
 		"-e", "CERT=/log/server.pem", "-e", "KEY=/log/server.key",
 		"-e", "PORT=18443", "-e", "LOG=/log/peer.log",
@@ -200,11 +202,14 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if err := runSquid(root, name, dir, []string{"--network", "container:" + holder}); err != nil {
+	if err := runSquid(root, name, dir, label, []string{"--network", "container:" + holder}); err != nil {
 		t.Fatal(err)
 	}
 	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
 		t.Fatal(err)
+	}
+	if vols := volumeNames(t, name); len(vols) != 0 {
+		t.Fatalf("gate left anonymous volumes %v", vols)
 	}
 	ask := func() {
 		t.Helper()
@@ -235,9 +240,9 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	}
 
 	// The same certificate, signed by a CA the gate is told to trust, does get the key.
-	DockerIgnore("rm", "-f", name)
+	DockerIgnore("rm", "-fv", name)
 	writePeerConf("/log/ca.pem")
-	if err := runSquid(root, name, dir, []string{"--network", "container:" + holder}); err != nil {
+	if err := runSquid(root, name, dir, label, []string{"--network", "container:" + holder}); err != nil {
 		t.Fatal(err)
 	}
 	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
@@ -249,6 +254,9 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	if !strings.Contains(got, "Bearer "+key) {
 		b, _ := os.ReadFile(filepath.Join(dir, "cache.log"))
 		t.Fatalf("trusted vendor did not see the key: %q\n%s", got, b)
+	}
+	if vols := volumeNames(t, name); len(vols) != 0 {
+		t.Fatalf("restarted gate left anonymous volumes %v", vols)
 	}
 }
 

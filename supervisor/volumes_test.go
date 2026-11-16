@@ -3,13 +3,12 @@ package supervisor
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestDestroyRemovesGateVolumes(t *testing.T) {
+func TestGateHasNoAnonymousVolumes(t *testing.T) {
 	if _, err := Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
 	}
@@ -28,20 +27,24 @@ func TestDestroyRemovesGateVolumes(t *testing.T) {
 		}
 		name := "htm-gate-" + id
 		t.Cleanup(func() { _ = destroy(id) })
-		if err := runSquid(root, name, dir, nil); err != nil {
+		if err := runSquid(root, name, dir, TrackTestContainers(t), nil); err != nil {
 			t.Fatal(err)
 		}
-		vols := gateVolumeNames(t, name)
-		if len(vols) == 0 {
-			t.Fatal("gate container has no anonymous volumes")
+		if vols := volumeNames(t, name); len(vols) != 0 {
+			t.Fatalf("gate has anonymous volumes %v, want none (tmpfs should cover the image VOLUME paths)", vols)
+		}
+		tmpfs, err := Docker(15*time.Second, "inspect", "-f", "{{json .HostConfig.Tmpfs}}", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(tmpfs, "/var/log/squid") || !strings.Contains(tmpfs, "/var/spool/squid") {
+			t.Fatalf("gate HostConfig.Tmpfs %s, want /var/log/squid and /var/spool/squid", tmpfs)
 		}
 		if err := destroy(id); err != nil {
 			t.Fatal(err)
 		}
-		for _, vol := range vols {
-			if _, err := Docker(15*time.Second, "volume", "inspect", vol); err == nil {
-				t.Errorf("%s left volume %s", name, vol)
-			}
+		if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", name); err == nil {
+			t.Errorf("gate container %s still present after destroy", name)
 		}
 	}
 }
@@ -82,18 +85,17 @@ func TestDestroyRemovesBoxVolumes(t *testing.T) {
 	if err := os.WriteFile(acl, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// dangling=true is every unused volume, named or anonymous, so compare the set.
-	before := danglingVolumes(t)
 	id, err := NewID()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = DestroyWeak(id) })
-	if _, err := CreateWeak(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true}); err != nil {
+	if _, err := CreateWeak(root, id, WithTestLabel(t, CreateOpts{Image: image, ACL: acl, NoInbound: true})); err != nil {
 		t.Fatal(err)
 	}
 	box := "htm-box-" + id
-	if vols := gateVolumeNames(t, box); len(vols) == 0 {
+	vols := volumeNames(t, box)
+	if len(vols) == 0 {
 		t.Fatal("box container has no anonymous volumes")
 	}
 	mounts, err := Docker(15*time.Second, "inspect", "-f",
@@ -107,58 +109,19 @@ func TestDestroyRemovesBoxVolumes(t *testing.T) {
 	if err := DestroyWeak(id); err != nil {
 		t.Fatal(err)
 	}
-	after := danglingVolumes(t)
-	added, removed := volumeDiff(before, after)
-	if len(added) > 0 || len(removed) > 0 {
-		t.Fatalf("dangling volumes changed: added %v removed %v", added, removed)
+	for _, vol := range vols {
+		if _, err := Docker(15*time.Second, "volume", "inspect", vol); err == nil {
+			t.Errorf("box left volume %s", vol)
+		}
 	}
 }
 
-func danglingVolumes(t *testing.T) map[string]bool {
-	t.Helper()
-	out, err := Docker(15*time.Second, "volume", "ls", "-qf", "dangling=true")
-	if err != nil {
-		t.Fatal(err)
-	}
-	set := map[string]bool{}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			set[line] = true
-		}
-	}
-	return set
-}
-
-func volumeDiff(before, after map[string]bool) (added, removed []string) {
-	for name := range after {
-		if !before[name] {
-			added = append(added, name)
-		}
-	}
-	for name := range before {
-		if !after[name] {
-			removed = append(removed, name)
-		}
-	}
-	sort.Strings(added)
-	sort.Strings(removed)
-	return added, removed
-}
-
-func gateVolumeNames(t *testing.T, container string) []string {
+func volumeNames(t *testing.T, container string) []string {
 	t.Helper()
 	out, err := Docker(15*time.Second, "inspect", "-f",
 		`{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}`, container)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var vols []string
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			vols = append(vols, line)
-		}
-	}
-	return vols
+	return splitNonEmpty(out)
 }

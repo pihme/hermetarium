@@ -29,7 +29,7 @@ func probeOfficial(t *testing.T, root, name string, versionCmd []string, vendorH
 		t.Fatal(err)
 	}
 	t.Logf("inhabitant %s weak %s", name, id)
-	inst, err := harness.CreateWeakInhabitant(root, id, name, true)
+	inst, err := harness.CreateWeakInhabitant(t, root, id, name, true)
 	if err != nil {
 		t.Fatal(err)
 	}

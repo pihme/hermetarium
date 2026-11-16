@@ -101,7 +101,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 		return nil, err
 	}
 
-	if err := runSquid(root, gate, dir, append([]string{
+	if err := runSquid(root, gate, dir, opts.TestLabel, append([]string{
 		"--network", "bridge",
 		"--add-host", "inhabitant:" + sub.Box,
 		"--sysctl", "net.ipv4.ip_forward=1",
@@ -120,7 +120,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if err := applyIntercept(gate, sub.CIDR, https); err != nil {
 		return nil, err
 	}
-	if err := startGateDNS(root, id, gate, gate, sub.Gate, conf); err != nil {
+	if err := startGateDNS(root, id, gate, gate, sub.Gate, opts.TestLabel, conf); err != nil {
 		return nil, err
 	}
 	if err := runAfterGate(opts, id, gate); err != nil {
@@ -149,6 +149,7 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	if https {
 		boxArgs = append(boxArgs, mitmBoxDockerArgs(dir)...)
 	}
+	boxArgs = append(boxArgs, TestLabelArgs(opts.TestLabel)...)
 	boxArgs = append(boxArgs, opts.Image)
 	if _, err := Docker(30*time.Second, boxArgs...); err != nil {
 		return nil, err

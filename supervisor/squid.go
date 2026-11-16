@@ -132,20 +132,25 @@ func EnsureNetTools(root string) error {
 	return nil
 }
 
-// The gate image declares volumes. -v removes those anonymous ones; bind mounts stay.
+// The gate image declares VOLUME for /var/log/squid and /var/spool/squid.
+// runSquid mounts a tmpfs on those paths so a create does not allocate
+// anonymous volumes. -v still removes any that exist; bind mounts stay.
 // Volumes left by earlier runs are not removed.
-// Release-Notes: `docker volume ls -qf dangling=true` lists every unused volume, named or anonymous, and a past habitat's volumes are the two long hex names for /var/log/squid and /var/spool/squid. Inspect before `docker volume rm`.
+// Release-Notes: The gate mounts tmpfs on /var/log/squid and /var/spool/squid, so a habitat no longer leaves anonymous Docker volumes for those paths. Volumes left by earlier releases still appear in `docker volume ls -qf dangling=true`; inspect before `docker volume rm`.
 func removeGate(id string) {
 	DockerIgnore("rm", "-fv", "htm-gate-"+id)
 }
 
-func runSquid(root, name, logDir string, extra []string) error {
+func runSquid(root, name, logDir, label string, extra []string) error {
 	if err := EnsureSquid(root); err != nil {
 		return err
 	}
 	args := []string{"run", "-d", "--name", name}
 	args = append(args, extra...)
+	args = append(args, TestLabelArgs(label)...)
 	args = append(args,
+		"--tmpfs", "/var/log/squid",
+		"--tmpfs", "/var/spool/squid",
 		"-v", logDir+":/log",
 		"--entrypoint", "/usr/sbin/squid",
 		SquidImage,

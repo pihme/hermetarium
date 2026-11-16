@@ -75,14 +75,14 @@ func TestGateDNS(t *testing.T) {
 				switch wall {
 				case "weak":
 					t.Cleanup(func() { _ = DestroyWeak(id) })
-					inst, err := CreateWeak(root, id, opts)
+					inst, err := CreateWeak(root, id, WithTestLabel(t, opts))
 					if err != nil {
 						t.Fatal(err)
 					}
 					dir, gate = inst.Dir, inst.GateIP
 				default:
 					t.Cleanup(func() { _ = DestroyStrong(id) })
-					inst, err := CreateStrong(root, id, opts)
+					inst, err := CreateStrong(root, id, WithTestLabel(t, opts))
 					if err != nil {
 						t.Fatal(err)
 					}

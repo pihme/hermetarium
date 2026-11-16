@@ -85,7 +85,7 @@ func TestNoInbound(t *testing.T) {
 	t.Run("weak", func(t *testing.T) {
 		id := newTestID(t)
 		t.Cleanup(func() { _ = DestroyWeak(id) })
-		inst, err := CreateWeak(root, id, opts)
+		inst, err := CreateWeak(root, id, WithTestLabel(t, opts))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,7 +100,7 @@ func TestNoInbound(t *testing.T) {
 	t.Run("strong", func(t *testing.T) {
 		id := newTestID(t)
 		t.Cleanup(func() { _ = DestroyStrong(id) })
-		inst, err := CreateStrong(root, id, opts)
+		inst, err := CreateStrong(root, id, WithTestLabel(t, opts))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestNoInboundGatePort(t *testing.T) {
 		t.Run("closed", func(t *testing.T) {
 			id := newTestID(t)
 			t.Cleanup(func() { _ = DestroyWeak(id) })
-			inst, err := CreateWeak(root, id, closed)
+			inst, err := CreateWeak(root, id, WithTestLabel(t, closed))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -182,7 +182,7 @@ func TestNoInboundGatePort(t *testing.T) {
 		t.Run("published", func(t *testing.T) {
 			id := newTestID(t)
 			t.Cleanup(func() { _ = DestroyWeak(id) })
-			inst, err := CreateWeak(root, id, open)
+			inst, err := CreateWeak(root, id, WithTestLabel(t, open))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,7 +199,7 @@ func TestNoInboundGatePort(t *testing.T) {
 		t.Run("closed", func(t *testing.T) {
 			id := newTestID(t)
 			t.Cleanup(func() { _ = DestroyStrong(id) })
-			inst, err := CreateStrong(root, id, closed)
+			inst, err := CreateStrong(root, id, WithTestLabel(t, closed))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +214,7 @@ func TestNoInboundGatePort(t *testing.T) {
 		t.Run("published", func(t *testing.T) {
 			id := newTestID(t)
 			t.Cleanup(func() { _ = DestroyStrong(id) })
-			inst, err := CreateStrong(root, id, open)
+			inst, err := CreateStrong(root, id, WithTestLabel(t, open))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -263,7 +263,7 @@ func TestNoInboundRejectedMachineConfig(t *testing.T) {
 	}
 	id := newTestID(t)
 	t.Cleanup(func() { _ = DestroyStrong(id) })
-	_, err = CreateStrong(root, id, CreateOpts{
+	_, err = CreateStrong(root, id, WithTestLabel(t, CreateOpts{
 		Image: BusyboxImage, ACL: acl, NoInbound: true, MemMiB: 128, DiskMB: 128,
 		AfterGate: func(string, string) error {
 			// Firecracker reads vm.json only after squid.pid appears, which
@@ -289,7 +289,7 @@ func TestNoInboundRejectedMachineConfig(t *testing.T) {
 			}
 			return os.WriteFile(p, append(raw, '\n'), 0o644)
 		},
-	})
+	}))
 	if err == nil || !strings.Contains(err.Error(), "guest did not boot") {
 		t.Fatal(err)
 	}
