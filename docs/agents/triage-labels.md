@@ -12,7 +12,7 @@ The engineering skills (`triage` and friends) speak in canonical roles. This tab
 | (team) | `ready-for-maintainer` | Website, docs fix or smaller change, for Maintainer |
 | `ready-for-qa` | `ready-for-qa` | Ready for QA review and independent testing |
 | `ready-for-human` | `ready-for-human` | Needs the owner to implement or decide |
-| (team) | `in-progress` | Work has started; set at the start, removed with the next handover label; wakes no one |
+| (team) | `in-progress` | Work has started; removed with the next handover label; wakes no one |
 | (team) | `needs-input` | Waiting for input or a decision from the owner |
 | `wontfix` | `wontfix` | Will not be actioned |
 

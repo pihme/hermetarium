@@ -35,7 +35,7 @@ Independent issues and PRs each move on their own. Hand one on as soon as your p
 | `ready-for-qa` | Ready for review and testing | QA | yellow `FBCA04` |
 | `needs-input` | Waiting for input or a decision from the owner | owner | orange `D93F0B` |
 | `ready-for-human` | Needs the owner to implement or decide | owner | orange `D93F0B` |
-| `in-progress` | Someone is working on it; not a handover, wakes no one | the role working on it | light blue `C5DEF5` |
+| `in-progress` | Work has started; removed with the next handover label; wakes no one | the role working on it | light blue `C5DEF5` |
 
 **The label is the handover.** When your part of an issue or PR is done, remove your label on that item and set the next one. Each issue and each PR carries exactly one `ready-for-*` label.
 
@@ -43,7 +43,7 @@ Independent issues and PRs each move on their own. Hand one on as soon as your p
 - Setting a `ready-for-*` label removes every other `ready-for-*` label on that item in the same step; QA treats an item with two as not handed over.
 - When Dependabot PRs are consolidated into one PR, the maintainer removes the `ready-for-*` label from the individual Dependabot PRs and closes them with a comment linking the consolidated PR.
 - **`in-progress`:** set it on the issue or PR when you start working on it, and remove it in the same step as you set the next handover label. It is not a `ready-for-*` label and wakes no one.
-- **`ready-for-qa` only on green CI:** set `ready-for-qa` on a PR only after its CI is green for the current head. Until then the PR keeps `ready-for-maintainer` or `ready-for-development`.
+- **`ready-for-qa` only on green CI:** set `ready-for-qa` on a PR only after its CI is green for the current head. Until then the PR keeps `ready-for-maintainer` or `ready-for-development`. Exception: a Dependabot PR that QA sends to `@dependabot rebase` keeps its `ready-for-qa` (see the rebase row below); QA merges it only once CI on the new head is green.
 - **Missing labels:** a new PR without its handover label gets it checked and set (exactly one `ready-for-*`, per the table below). Report only if a question remains.
 
 | When | Who | Sets |
