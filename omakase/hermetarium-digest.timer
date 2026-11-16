@@ -1,0 +1,9 @@
+[Unit]
+Description=Digest of requests a Hermetarium habitat was denied
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

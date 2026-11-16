@@ -1,0 +1,7 @@
+[Unit]
+Description=Mail a digest of requests a Hermetarium habitat was denied
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/hermetarium/digest.env
+ExecStart=/bin/sh -c 'if [ -z "${HERMETARIUM_DIGEST_SCRIPT:-}" ]; then echo "set HERMETARIUM_DIGEST_SCRIPT in digest.env" >&2; exit 1; fi; exec "$HERMETARIUM_DIGEST_SCRIPT"'
