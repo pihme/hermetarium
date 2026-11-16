@@ -118,7 +118,7 @@ func TestInhabitantHTTPSStaysCommented(t *testing.T) {
 		t.Fatal("no caller")
 	}
 	root := filepath.Join(filepath.Dir(file), "..", "inhabitants")
-	for _, name := range []string{"claude-code", "grok-build"} {
+	for _, name := range []string{"claude-code", "grok-build", "opencode"} {
 		b, err := os.ReadFile(filepath.Join(root, name, "squid.conf"))
 		if err != nil {
 			t.Fatal(err)

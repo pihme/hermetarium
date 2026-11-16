@@ -237,7 +237,7 @@ Grok Build starts with `--always-approve`. `config.toml` sets `permission_mode` 
 
 ## Your own image
 
-`inhabitants/claude-code/` and `inhabitants/grok-build/` are starting points. Build and run steps for each one are in that folder's README. Copy one, install the program you want, and keep this contract:
+`inhabitants/claude-code/`, `inhabitants/grok-build/`, and `inhabitants/opencode/` are starting points. Build and run steps for each one are in that folder's README. Copy one, install the program you want, and keep this contract:
 
 The image listens on port 8080. A POST is one turn. A GET may answer `ok`.
 
@@ -249,7 +249,7 @@ A strong-wall terminal needs an SSH server at `/usr/sbin/sshd`, plus `ssh-keygen
 
 Model calls go to the stand-in host on the gate: `http://claude.hermetarium.test` or `http://grok.hermetarium.test`. Squid is the one that connects to the real API.
 
-An OpenAI-compatible endpoint uses `http://model.hermetarium.test`. `examples/model/squid.conf` sets the upstream peer, the `Host` value, a path prefix, and the bearer key. The box may send a placeholder `Authorization`. Squid drops it and sets the key from that file. The key is not in the image.
+An OpenAI-compatible endpoint uses `http://model.hermetarium.test`. `examples/model/squid.conf` sets the upstream peer, the `Host` value, a path prefix, and the bearer key. The box may send a placeholder `Authorization`. Squid drops it and sets the key from that file. The key is not in the image. `inhabitants/opencode/` is that image: Porter inside it runs OpenCode. The gate file there is the same idea, plus the door on port 8080. It does not need a paid key for the pretend-model smoke. Echo and agentd stay the images for the wall tests.
 
 `__MODEL_PEER__` is the peer line. The `cache_peer_access` lines refer to `name=model`. One HTTPS upstream is `api.openai.com parent 443 0 no-query no-digest originserver tls tls-cafile=/etc/ssl/certs/ca-certificates.crt name=model`.
 
@@ -311,13 +311,13 @@ The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another 
 
 **Docker in Docker.** Start from an image that can run Docker, such as `docker:29-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. On the strong wall the guest init mounts cgroup2 at `/sys/fs/cgroup`, plus `/dev/pts`, `/dev/shm`, and `/run`. This kernel rejects at least one cgroup controller, so the stock `docker:29-dind` entrypoint loops. Enable controllers one at a time, as `tests/guest-docker/start.sh` does, or start `dockerd` directly. This kernel has no `CONFIG_IP_NF_RAW`, so set `DOCKER_INSECURE_NO_IPTABLES_RAW=1` in the image. Give the machine room with `--mem` and `--disk`.
 
-**Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official assistants. KinD wants more still.
+**Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official inhabitants, including OpenCode. KinD wants more still.
 
 **The kernel.** The strong wall boots Linux 6.1.188, the file `vmlinux-6.1.188` from the GitHub release `kernel/6.1.188`. Firecracker is v1.16.1. The supervisor checks the SHA-256 of that kernel and of the Firecracker release tarball after download and refuses a mismatch. The guest has entropy at boot. A base that needs a system call this kernel does not have can run on the Docker wall.
 
 ## Porter in your image
 
-Porter listens on port 8080 and runs `claude` or `grok` for each POST. Claude and Grok get `--continue` after the first turn. Claude's `-p` is a switch, so `--continue` stays in front of it. Grok's `-p` is `--single` and takes the prompt, so `--continue` follows the prompt. Grok also gets `--always-approve`.
+Porter listens on port 8080 and runs `claude`, `grok`, or `opencode` for each POST. Claude, Grok, and OpenCode get `--continue` after the first turn. Claude's `-p` is a switch, so `--continue` stays in front of it. Grok's `-p` is `--single` and takes the prompt, so `--continue` follows the prompt. Grok also gets `--always-approve`. OpenCode's prompt is positional, because its `-p` is a server password. `--` comes before the prompt, and `--continue` stays in front of `--`. It also gets `--auto`. The model is the `model` field in `opencode.json` (`provider/model`). Porter does not pass `-m`.
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o porter ./porter
@@ -333,6 +333,6 @@ EXPOSE 8080
 CMD ["/usr/local/bin/porter"]
 ```
 
-`HARNESS` picks the command. Use `claude` or `grok`, and put that program on `PATH`. The matching lines are in `porter/main.go`. Porter holds no real API key. Point the assistant at the stand-in host, and let Squid add the key.
+`HARNESS` picks the command. Use `claude`, `grok`, or `opencode`, and put that program on `PATH`. The matching lines are in `porter/main.go`. Porter holds no real API key. Point the inhabitant at the stand-in host, and let Squid add the key.
 
 You can skip porter and serve HTTP yourself on 8080. Echo does. Porter is the piece that turns one POST into one turn of an official assistant.

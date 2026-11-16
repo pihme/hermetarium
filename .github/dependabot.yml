@@ -48,6 +48,7 @@ updates:
       - /examples/agentd
       - /inhabitants/claude-code
       - /inhabitants/grok-build
+      - /inhabitants/opencode
     schedule:
       interval: weekly
       day: monday

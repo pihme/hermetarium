@@ -20,6 +20,9 @@ func TestOfficialCLIs(t *testing.T) {
 	t.Run("grok-build", func(t *testing.T) {
 		probeOfficial(t, root, harness.InhabitantGrok, []string{"/usr/local/bin/grok", "--version"}, supervisor.GrokHost)
 	})
+	t.Run("opencode", func(t *testing.T) {
+		probeOfficial(t, root, harness.InhabitantOpenCode, []string{"/usr/local/bin/opencode", "--version"}, supervisor.ModelHost)
+	})
 }
 
 func probeOfficial(t *testing.T, root, name string, versionCmd []string, vendorHost string) {
