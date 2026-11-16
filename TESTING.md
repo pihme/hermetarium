@@ -142,7 +142,7 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 `tests/backup` `TestHelperNotThisRoot`. No Docker daemon and no KVM. The stand-in `docker inspect` reports a `/log` mount that is not `var/<id>` under `HERMETARIUM_ROOT`. The script refuses that helper and does not run `restic backup`.
 
-`tests/backup` `TestFreezeFailureIsNotStayedFrozen`. No Docker daemon and no KVM. `hermetarium attach` fails. The script says it could not freeze `/data`, tries `fsfreeze -u` once, and does not say the disk stayed frozen.
+`tests/backup` `TestFreezeFailureIsNotStayedFrozen`. No Docker daemon and no KVM. `hermetarium attach` fails. The script reports that it could not freeze `/data`, does not run `fsfreeze -u`, and does not say the disk stayed frozen.
 
 `tests/backup` `TestFreezeBound`. No Docker daemon and no KVM. A stand-in `restic backup` sleeps. `HERMETARIUM_FREEZE_SECONDS=1` stops it and the script thaws.
 

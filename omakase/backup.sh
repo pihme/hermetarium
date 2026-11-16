@@ -303,7 +303,6 @@ seconds=$2
 mkdir -p /tmp
 thaw_file=/tmp/hermetarium-thaw.current
 lock=/tmp/hermetarium-thaw.lock
-rc=0
 flock -x "$lock" sh -c '
 if ! fsfreeze -f /data; then
   exit 1
@@ -320,17 +319,7 @@ if fsfreeze -u /data; then
 fi
 echo "data disk stayed frozen" >&2
 exit 3
-' sh "$token" "$thaw_file" || rc=$?
-if [ "$rc" -eq 1 ]; then
-  exit 1
-fi
-if [ "$rc" -eq 3 ]; then
-  exit 3
-fi
-if [ "$rc" -ne 0 ]; then
-  echo "could not arm the thaw timer" >&2
-  exit 1
-fi
+' sh "$token" "$thaw_file" || exit $?
 setsid -f sh -c 'sleep "$1"; flock -x "$2" sh -c '"'"'cur=$(cat "$2" 2>/dev/null || true); if [ "$cur" = "$1" ]; then fsfreeze -u /data && printf "done\n" > "$2"; fi'"'"' sh "$3" "$4"' sh "$seconds" "$lock" "$token" "$thaw_file" </dev/null >/dev/null 2>&1 || exit 2
 END
 )
@@ -360,8 +349,8 @@ if [ "$rc" -ne 0 ]; then
     freeze_ok=1
     die "could not arm the thaw timer"
   fi
-  # 3: froze, could not publish the token, and could not thaw under the lock.
-  if [ "$rc" -eq 3 ] || grep -q "data disk stayed frozen" "$freeze_log"; then
+  # Publish failed and the thaw under this lock failed. The guest line is the signal.
+  if grep -q "data disk stayed frozen" "$freeze_log"; then
     frozen=0
     die "data disk stayed frozen; hermetarium attach $HERMETARIUM_ID -- fsfreeze -u /data"
   fi
