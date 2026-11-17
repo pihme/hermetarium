@@ -278,8 +278,12 @@ func TestOpenCodeTUI(t *testing.T) {
 				"HTTP GET https://api.github.com/search/issues?q=a..b 200",
 				"HTTP POST https://api.github.com/repos/octo/../pulls 403",
 				"HTTP POST https://api.github.com/repos/octo/%2e%2e/pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/%2E%2E/pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/%2e./pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/.%2E/pulls 403",
 				"HTTP POST https://api.github.com/repos/octo/a%25b/pulls 200",
 				"HTTP POST https://github.com/octo/../hello.git/git-receive-pack 403",
+				"HTTP POST https://github.com/octo/%2E%2E/hello.git/git-receive-pack 403",
 				"HTTP GET http://api.github.com/user 403",
 				"HTTP GET http://github.com/octo/hello.git/info/refs?service=git-upload-pack 403",
 			} {
