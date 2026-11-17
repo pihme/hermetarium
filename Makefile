@@ -17,11 +17,13 @@ build: gatedns
 
 TEST_PKGS ?= ./supervisor ./supervisor/gatedns ./firecracker-scripts ./examples/... ./porter ./tests/...
 
+# An empty HERMETARIUM_ROOT is unset. The suite uses this checkout,
+# not a live data root exported by the operator's shell.
 test: gatedns
-	$(GO) test $(TEST_PKGS) -count=1 -p 1 -timeout 15m -v
+	HERMETARIUM_ROOT= $(GO) test $(TEST_PKGS) -count=1 -p 1 -timeout 15m -v
 
 test-live:
-	$(GO) test -tags live ./tests/agentd ./tests/inhabitants -count=1 -p 1 -timeout 15m -v
+	HERMETARIUM_ROOT= $(GO) test -tags live ./tests/agentd ./tests/inhabitants -count=1 -p 1 -timeout 15m -v
 
 tidy:
 	$(GO) mod tidy

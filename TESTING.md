@@ -11,7 +11,7 @@ What the suite checks in this tree today. Product rules for tests stay in [SPEC.
 
 Both use `go test -count=1 -p 1 -timeout 15m -v`. Live files are `//go:build live`, so `make test` does not compile them. `make test-live` also runs the untagged tests in those two packages (agentd mock on both walls, official-CLI smoke).
 
-Needs Docker and Go 1.24+. Strong-wall cases need `/dev/kvm` and x86_64. Data root is `HERMETARIUM_ROOT`, else this checkout.
+Needs Docker and Go 1.24+. Strong-wall cases need `/dev/kvm` and x86_64. `make test` and `make test-live` clear `HERMETARIUM_ROOT`, so the suite uses this checkout. The `hermetarium` command still uses that variable when the shell exports it.
 
 Habitats are created through the supervisor Go API. Chat and echo are HTTP POST via `supervisor.Call` to the inbound URL. On the weak wall, `ExecWeak` runs the leak ping, the probe curl, `printenv`, and the official CLI version command. On the strong wall, `WaitStrongSerial` supplies `GUEST_UNAME` and `LEAK_FAIL`.
 
