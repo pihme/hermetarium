@@ -1,0 +1,18 @@
+# Interactive attach shell. Login bash sources this from .bash_profile.
+case $- in
+*i*) ;;
+*) return ;;
+esac
+# Folder in the prompt. Up and down walk the history. Tab completes.
+PS1='\w \$ '
+export HISTFILE=/root/.bash_history
+export HISTSIZE=1000
+export HISTFILESIZE=2000
+export HISTCONTROL=ignoredups
+shopt -s histappend
+shopt -s checkwinsize
+set -o emacs
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+	. /usr/share/bash-completion/bash_completion
+fi
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }history -a"

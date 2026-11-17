@@ -25,8 +25,8 @@ func CreateWeak(root, id string, opts CreateOpts) (*WeakInstance, error) {
 	plan := WeakPlan(id)
 	logPath := filepath.Join(dir, "io.jsonl")
 	network := "htm-" + id
-	gate := "htm-gate-" + id
-	box := "htm-box-" + id
+	gate := ContainerName(id, "gate")
+	box := ContainerName(id, "box")
 
 	if _, err := Docker(30*time.Second,
 		// --internal makes Docker block every route out of this network, so
@@ -154,7 +154,7 @@ func DestroyWeak(id string) error {
 	// bridge.name still names the FORWARD rule after the network is gone, so
 	// a failed forget must not skip the box and the network.
 	err := forgetSavedBridge(id)
-	DockerIgnore("rm", "-fv", "htm-box-"+id)
+	DockerIgnore("rm", "-fv", ContainerName(id, "box"))
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)

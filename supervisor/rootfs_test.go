@@ -376,7 +376,7 @@ func TestDropUnmountedRootfs(t *testing.T) {
 		t.Fatal(err)
 	}
 	live := plantRootfsFixture(t, root, present)
-	name := "htm-fc-" + present
+	name := ContainerName(present, "fc")
 	if _, err := DockerLabeled(t, 30*time.Second, "create", "--name", name, AlpineImage, "true"); err != nil {
 		t.Fatal(err)
 	}

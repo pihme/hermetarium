@@ -20,6 +20,13 @@ const InboundPort = 18081
 const BusyboxImage = "busybox:1.36.1"
 const NetToolsImage = "hermetarium-nettools:local"
 
+// ContainerName is one habitat container. The id comes first, so
+// htm-<id>-dns, htm-<id>-fc, and htm-<id>-gate sort together.
+// The weak wall uses htm-<id>-box for the inhabitant.
+func ContainerName(id, part string) string {
+	return "htm-" + id + "-" + part
+}
+
 type layout struct {
 	data   string
 	cache  string

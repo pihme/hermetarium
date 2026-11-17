@@ -37,7 +37,7 @@ The image is the same on either wall. The wall is outside the image.
 
 On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the Firecracker container holds a microVM with its own kernel, and root stays inside that microVM.
 
-On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-fc-<id>`) holds the TAP device, the firewall, and the microVM. The gate (`htm-gate-<id>`) is Squid. It is a second container and joins the Firecracker container's network namespace.
+On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-<id>-fc`) holds the TAP device, the firewall, and the microVM. The gate (`htm-<id>-gate`) is Squid. It is a second container and joins the Firecracker container's network namespace.
 
 Both walls let only the gate reach the Internet. The Docker wall puts the container on an internal network with no NAT, and gives only the gate a second path out. [How that works](inhabitants/README.md#how-the-gate-reaches-the-internet).
 
@@ -69,7 +69,7 @@ To choose the size, pass MiB. The disk size is in MiB too.
 
 `--image` is required. Any local tag works, and so does a name Docker can pull. Something in the image must listen on port 8080, unless you pass `--no-inbound`. That flag publishes no host port and does not wait for port 8080. The gate file can then omit the `inhabitant` peer and port 18081. The bridge gateway is not allowed to reach port 18081, even when the gate file still listens there. `--acl FILE` is the gate file. Hermetarium copies it to `var/<id>/squid.conf` as you wrote it.
 
-`--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out.
+`--mem` and `--disk` belong to the strong wall. The Docker wall refuses them. The root disk is a sparse file, so a large `--disk` does not write the whole image out. `--mem` is the guest's ceiling for the life of the habitat. The guest reports pages it has freed, and the host kernel takes those pages back. Pages the guest keeps, including its file cache, stay allocated on the host. The ceilings of several habitats can add up to more than the machine has. The host still has to hold whatever they are using at the same time.
 
 `--cpus N` works on both walls. The strong wall gives the guest that many processors, from 1 to 32. The Docker wall sets that CPU quota (`--cpus`), from 1 up to the host's CPU count. A value outside that range is rejected before a virtual machine or container starts. Leave it off and the guest has one processor, and the Docker wall has no quota.
 
@@ -106,14 +106,14 @@ Stop it:
 
 The address from `url` is how you talk to the habitat.
 
-`attach` opens a terminal in a running habitat on either wall. With no command it runs `sh`. On the Docker wall that is `docker exec` with a TTY. On the strong wall it is SSH to the guest. An image that wants that terminal includes an SSH server. `create` makes a key pair for the habitat, hands the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the Firecracker container's network namespace.
+`attach` opens a terminal in a running habitat on either wall. With no command it runs an interactive login bash when the image has bash, and `sh` otherwise. On the Docker wall that is `docker exec` with a TTY. On the strong wall it is SSH to the guest. An image that wants that terminal includes an SSH server. `create` makes a key pair for the habitat, hands the public key to the guest at start, and keeps the private key on the host. The guest SSH port is reachable only from the Firecracker container's network namespace.
 
 ```bash
 ./bin/hermetarium attach YOUR_ID
 ./bin/hermetarium attach YOUR_ID -- sh -c 'tty; stty size'
 ```
 
-The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. On the strong wall, closing the terminal sends SIGHUP to a command that is not in `tmux`. Escape sequences from the habitat reach the operator's terminal as they are. This path is not in the I/O log. It opens no network route out of the habitat.
+The window size follows the operator's terminal. Closing the terminal leaves a `tmux` session inside the habitat running, and a later `attach` shows it. On the strong wall, closing the terminal sends SIGHUP to a command that is not in `tmux`. Escape sequences from the habitat reach the operator's terminal as they are. A copy command that sends OSC 52 is one of those sequences. GNOME Terminal 3.52 with VTE 0.76 drops it. Mouse tracking stays on: hold Shift to select, then Ctrl+Shift+C. Ctrl+Shift+V pastes into the habitat. This path is not in the I/O log. It opens no network route out of the habitat.
 
 The folders `examples/` and `inhabitants/` are images you build. They are not command names.
 
@@ -295,7 +295,7 @@ Take the Claude install from one folder and Grok's model address from another, o
 
 The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another base is fine when it keeps the contract above: root, port 8080, `ip`, the stand-in model address, and a stand-in key. A strong-wall terminal needs an SSH server at `/usr/sbin/sshd` (see above). A backup does not: it pauses the Firecracker container and does not freeze the guest. An image that only uses the weak wall does not need that server.
 
-**Docker in Docker.** Start from an image that can run Docker, such as `docker:29-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. On the strong wall the guest init mounts cgroup2 at `/sys/fs/cgroup`, plus `/dev/pts`, `/dev/shm`, and `/run`. This kernel rejects at least one cgroup controller, so the stock `docker:29-dind` entrypoint loops. Enable controllers one at a time, as `tests/guest-docker/start.sh` does, or start `dockerd` directly. This kernel has no `CONFIG_IP_NF_RAW`, so set `DOCKER_INSECURE_NO_IPTABLES_RAW=1` in the image. Give the machine room with `--mem` and `--disk`.
+**Docker in Docker.** Start from an image that can run Docker, such as `docker:29-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. On the strong wall the guest init mounts cgroup2 at `/sys/fs/cgroup`, plus `/dev/pts`, `/dev/shm`, and `/run`. This kernel rejects at least one cgroup controller, so the stock `docker:29-dind` entrypoint loops. Enable controllers one at a time, as `tests/guest-docker/start.sh` does, or start `dockerd` directly. This kernel has no `CONFIG_IP_NF_RAW`, so set `DOCKER_INSECURE_NO_IPTABLES_RAW=1` in the image. Give the machine room with `--mem` and `--disk`. The OpenCode image installs Debian's `docker.io` and starts `dockerd` with iptables off. A container that should reach the gate uses `--network host`.
 
 **Kubernetes in Docker.** The image can contain `kind`, `k3s`, or `minikube`. Those want privileged mode, nested cgroups, and gigabytes of memory. The Docker wall is the one to try. On the strong wall, raise the size with `--mem` and `--disk`. The defaults are 512 MiB and 1024 MiB. The tests ask for 128 MiB for echo and agentd, and 2 GiB for the official inhabitants, including OpenCode. KinD wants more still.
 

@@ -163,16 +163,16 @@ func waitMarker(t *testing.T, wall, id, marker string) string {
 	var logs string
 	for time.Now().Before(deadline) {
 		if wall == "weak" {
-			logs, _ = Docker(10*time.Second, "logs", "htm-box-"+id)
+			logs, _ = Docker(10*time.Second, "logs", ContainerName(id, "box"))
 		} else {
-			logs = containerLogs("htm-fc-" + id)
+			logs = containerLogs(ContainerName(id, "fc"))
 		}
 		if strings.Contains(logs, marker) {
 			return logs
 		}
-		name := "htm-box-" + id
+		name := ContainerName(id, "box")
 		if wall != "weak" {
-			name = "htm-fc-" + id
+			name = ContainerName(id, "fc")
 		}
 		if !containerRunning(name) && wall != "weak" {
 			t.Fatalf("Firecracker container exited\n%s", logs)

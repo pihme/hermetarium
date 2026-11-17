@@ -25,7 +25,7 @@ func TestGateHasNoAnonymousVolumes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		name := "htm-gate-" + id
+		name := ContainerName(id, "gate")
 		t.Cleanup(func() { _ = destroy(id) })
 		if err := runSquid(root, name, dir, TrackTestContainers(t), nil); err != nil {
 			t.Fatal(err)
@@ -93,7 +93,7 @@ func TestDestroyRemovesBoxVolumes(t *testing.T) {
 	if _, err := CreateWeak(root, id, WithTestLabel(t, CreateOpts{Image: image, ACL: acl, NoInbound: true})); err != nil {
 		t.Fatal(err)
 	}
-	box := "htm-box-" + id
+	box := ContainerName(id, "box")
 	vols := volumeNames(t, box)
 	if len(vols) == 0 {
 		t.Fatal("box container has no anonymous volumes")

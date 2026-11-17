@@ -26,7 +26,7 @@ func TestDestroyStaysOnWall(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "bridge.name"), []byte("\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeInstance(&Instance{ID: id, Wall: "strong", FirecrackerContainer: "htm-fc-" + id, Dir: dir}); err != nil {
+		if err := writeInstance(&Instance{ID: id, Wall: "strong", FirecrackerContainer: ContainerName(id, "fc"), Dir: dir}); err != nil {
 			t.Fatal(err)
 		}
 		if err := Destroy(root, id); err != nil {

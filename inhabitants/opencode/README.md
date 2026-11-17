@@ -8,7 +8,7 @@ Inside the box, OpenCode may run commands and edit files without stopping to ask
 
 The picture of the gate is in the [inhabitants README](../README.md). In that picture the model is whatever OpenAI-compatible endpoint you name. The box calls `http://model.hermetarium.test/v1`.
 
-This image is also what [omakase/opencode-tui](../../omakase/opencode-tui/README.md) boots on the strong wall. That setup does not publish Porter's port. You attach, and OpenCode runs in `tmux`. The image has `tmux`, an SSH server at `/usr/sbin/sshd`, `git`, `rg`, and the usual build tools for that.
+This image is also what [omakase/opencode-tui](../../omakase/opencode-tui/README.md) boots on the strong wall. That setup does not publish Porter's port. You attach, and OpenCode runs in `tmux`. The image has `tmux`, an SSH server at `/usr/sbin/sshd`, `git`, `gh`, `rg`, `nano`, Docker, and the usual build tools for that. An interactive login shell from `attach` reads `/root/.bash_profile`. A local plugin reads the model list from `baseURL` when OpenCode starts. This gate file stays closed. The terminal setup's gate file is the one that allows ordinary HTTP.
 
 Free OpenCode Zen models, such as `opencode/big-pickle`, need no key. This image does not use them, and this gate file does not open a path to them. The smoke path with no paid key is a pretend model on the gate.
 
@@ -109,7 +109,7 @@ go build -o inhabitants/opencode/porter ./porter
 docker build -t opencode inhabitants/opencode
 ```
 
-Copy the gate file and fill the four words. The model id is the `model` field in `opencode.json`, written as `provider/model`. The pretend model is `hermetarium/mock`. The `models` key under that provider is only the part after the slash (`mock`, not `hermetarium/mock`). Porter does not pass `-m`, so that file is what OpenCode requests. Change the field and that key together when the upstream uses another id.
+Copy the gate file and fill the four words. The model id is the `model` field in `opencode.json`, written as `provider/model`. The pretend model is `hermetarium/mock`. A real catalog has no model with that id, so selecting `hermetarium/mock` for a turn fails and OpenCode reports the model is not found or inactive. The [terminal setup](../../omakase/opencode-tui/README.md) says how to point one habitat at a real catalog. The `models` key under that provider is only the part after the slash (`mock`, not `hermetarium/mock`). Porter does not pass `-m`, so that file is what OpenCode requests. Change the field and that key together when the upstream uses another id.
 
 ```bash
 cp inhabitants/opencode/squid.conf /tmp/opencode.acl

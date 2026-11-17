@@ -1,0 +1,8 @@
+# Login shell for hermetarium attach. Placeholders only. The gate replaces Authorization.
+# The public model catalog stays off. Autoupdate is on, from opencode.json.
+export PATH="/root/.opencode/bin:$PATH"
+export OPENCODE_DISABLE_MODELS_FETCH=1
+export OPENCODE_API_KEY=not-the-supervisor-key
+export GH_TOKEN=not-the-supervisor-key
+cd /work
+. /root/.bashrc

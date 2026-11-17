@@ -79,7 +79,7 @@ func TestSquidStartupQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = DestroyWeak(id) })
-	name := "htm-gate-" + id
+	name := ContainerName(id, "gate")
 	if err := runSquid(root, name, dir, TrackTestContainers(t), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 	label := TrackTestContainers(t)
 	t.Cleanup(func() {
 		DockerIgnore("rm", "-fv", "htm-peer-"+id)
-		DockerIgnore("rm", "-fv", "htm-gate-"+id)
+		DockerIgnore("rm", "-fv", ContainerName(id, "gate"))
 		DockerIgnore("rm", "-fv", holder)
 	})
 	if _, err := Docker(30*time.Second, "run", "-d", "--name", holder, "--label", TestLabelKey+"="+label, "--entrypoint", "sleep", AlpineImage, "600"); err != nil {
@@ -173,7 +173,7 @@ func TestUntrustedVendorGetsNoKey(t *testing.T) {
 		_ = os.Remove(filepath.Join(dir, "peer.log"))
 	}
 
-	name := "htm-gate-" + id
+	name := ContainerName(id, "gate")
 	writePeerConf("/etc/ssl/certs/ca-certificates.crt")
 	// Peer first. Squid's startup probe marks a parent dead when nothing is
 	// listening, and a later request then never attempts certificate checks.

@@ -44,7 +44,7 @@ func TestCPUs(t *testing.T) {
 		if _, err := CreateWeak(root, id, WithTestLabel(t, opts)); err != nil {
 			t.Fatal(err)
 		}
-		stdout, stderr, code := ExecWeak(&WeakInstance{Box: "htm-box-" + id}, []string{"cat", "/sys/fs/cgroup/cpu.max"})
+		stdout, stderr, code := ExecWeak(&WeakInstance{Box: ContainerName(id, "box")}, []string{"cat", "/sys/fs/cgroup/cpu.max"})
 		if code != 0 {
 			t.Fatalf("cpu.max code=%d %s %s", code, stdout, stderr)
 		}

@@ -36,15 +36,20 @@ type running struct {
 	Dir                  string `json:"dir"`
 }
 
-// Attach opens a terminal in a running habitat. argv defaults to sh when empty.
+// Attach opens a terminal in a running habitat. With no command, the shell is
+// an interactive login bash when the image has bash, and sh otherwise.
 // Bytes on this path are not written to the I/O log.
 func Attach(root, id string, argv []string) (int, error) {
 	return attachTerm(root, id, argv, os.Stdin, os.Stdout, os.Stderr)
 }
 
+func defaultAttachArgv() []string {
+	return []string{"/bin/sh", "-c", "if [ -x /usr/bin/bash ]; then exec /usr/bin/bash -il; else exec /bin/sh; fi"}
+}
+
 func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, error) {
 	if len(argv) == 0 {
-		argv = []string{"sh"}
+		argv = defaultAttachArgv()
 	}
 	inst, err := loadRunning(root, id)
 	if err != nil {
@@ -68,7 +73,7 @@ func attachTerm(root, id string, argv []string, in, out, errOut *os.File) (int, 
 	case "strong":
 		fcContainer := inst.FirecrackerContainer
 		if fcContainer == "" {
-			fcContainer = "htm-fc-" + id
+			fcContainer = ContainerName(id, "fc")
 		}
 		return attachSSH(root, id, fcContainer, argv, in, out, errOut, sig, stop)
 	default:

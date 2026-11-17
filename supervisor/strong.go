@@ -34,6 +34,18 @@ const (
 // binary can be rejected without downloading the release asset.
 var fcPin = fcSHA256
 
+// freePageBalloon is the virtio-balloon device with free page reporting.
+// The target size stays 0, so the balloon does not inflate. Stats polling
+// stays off because the API socket is not open.
+func freePageBalloon() map[string]any {
+	return map[string]any{
+		"amount_mib":               0,
+		"deflate_on_oom":           false,
+		"stats_polling_interval_s": 0,
+		"free_page_reporting":      true,
+	}
+}
+
 func cacheFile(root, name string) (string, error) {
 	dir := CacheDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -180,9 +192,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			return nil, err
 		}
 	}
-	// Return before the rootfs copy. A live htm-fc-<id> still has that
+	// Return before the rootfs copy. A live htm-<id>-fc still has that
 	// file open, and a second copy would replace it.
-	fcContainer := "htm-fc-" + id
+	fcContainer := ContainerName(id, "fc")
 	if err := containerFree(fcContainer); err != nil {
 		return nil, err
 	}
@@ -210,12 +222,12 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	// The copy is in place before docker run. On a later error, remove it
-	// only when htm-fc-<id> does not exist. An existing Firecracker container
+	// only when htm-<id>-fc does not exist. An existing Firecracker container
 	// keeps its disk.
 	defer func() {
 		if err != nil {
 			dropUnmountedRootfs(id, dir)
-			if containerFree("htm-fc-"+id) == nil {
+			if containerFree(ContainerName(id, "fc")) == nil {
 				_ = os.RemoveAll(attachKeyDir(root, id))
 			}
 		}
@@ -252,6 +264,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		// does not depend on the host CPU exposing RDRAND to the guest.
 		"entropy":        map[string]any{},
 		"machine-config": map[string]any{"vcpu_count": cpuCount(opts), "mem_size_mib": memMiB(opts)},
+		// The guest keeps mem_size_mib. It reports pages it has freed, and the
+		// host kernel drops those pages. amount_mib 0 does not take memory away.
+		"balloon": freePageBalloon(),
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",
 			"guest_mac":     "AA:FC:00:00:00:01",
@@ -307,7 +322,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 
-	gate := "htm-gate-" + id
+	gate := ContainerName(id, "gate")
 	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + fcContainer}); err != nil {
 		endStrong(id, dir)
 		return nil, err
@@ -407,13 +422,13 @@ func strongRootfsVolume(dir string) string {
 	return habitatRootfsPath(dir) + ":/opt/rootfs.ext4"
 }
 
-// endStrong removes the private rootfs only after htm-fc-<id> is gone.
+// endStrong removes the private rootfs only after htm-<id>-fc is gone.
 // DestroyStrong takes only an id, and tests pass a different root, so the
 // caller supplies the instance directory. The cache is not in that directory.
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
 	dropUnmountedRootfs(id, dir)
-	if dir == "" || containerFree("htm-fc-"+id) != nil {
+	if dir == "" || containerFree(ContainerName(id, "fc")) != nil {
 		return
 	}
 	_ = os.RemoveAll(attachKeyDir(filepath.Dir(filepath.Dir(dir)), id))
@@ -422,7 +437,7 @@ func endStrong(id, dir string) {
 // dropUnmountedRootfs removes the private rootfs when no Firecracker container
 // has this id. The cache is not in dir.
 func dropUnmountedRootfs(id, dir string) {
-	if err := containerFree("htm-fc-" + id); err != nil {
+	if err := containerFree(ContainerName(id, "fc")); err != nil {
 		return
 	}
 	removePrivateRootfs(dir)
@@ -507,8 +522,8 @@ func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)
 	removeGate(id)
-	DockerIgnore("rm", "-f", "htm-fc-"+id)
-	if root, err := Root(); err == nil && containerFree("htm-fc-"+id) == nil {
+	DockerIgnore("rm", "-f", ContainerName(id, "fc"))
+	if root, err := Root(); err == nil && containerFree(ContainerName(id, "fc")) == nil {
 		_ = os.RemoveAll(attachKeyDir(root, id))
 	}
 	return nil

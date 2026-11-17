@@ -62,7 +62,7 @@ func startGateDNS(root, id, netns, gateContainer, gateIP, label string, conf []b
 	if err := os.WriteFile(filepath.Join(dir, "dns.conf"), []byte(b.String()), 0o644); err != nil {
 		return err
 	}
-	name := "htm-dns-" + id
+	name := ContainerName(id, "dns")
 	args := []string{"run", "-d", "--name", name,
 		"--network", "container:" + netns,
 		"-v", dir + ":/log",
@@ -120,5 +120,5 @@ func gateResolvers(container string) ([]string, error) {
 }
 
 func stopGateDNS(id string) {
-	DockerIgnore("rm", "-f", "htm-dns-"+id)
+	DockerIgnore("rm", "-f", ContainerName(id, "dns"))
 }

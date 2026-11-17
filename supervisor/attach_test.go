@@ -30,6 +30,16 @@ func TestAttachUsage(t *testing.T) {
 	}
 }
 
+func TestDefaultAttachArgv(t *testing.T) {
+	got := defaultAttachArgv()
+	if len(got) != 3 || got[0] != "/bin/sh" || got[1] != "-c" {
+		t.Fatalf("default attach: %#v", got)
+	}
+	if !strings.Contains(got[2], "exec /usr/bin/bash -il") || !strings.Contains(got[2], "exec /bin/sh") {
+		t.Fatalf("default attach: %#v", got)
+	}
+}
+
 func TestSSHRemoteCommand(t *testing.T) {
 	got := sshRemoteCommand([]string{"sh", "-c", "echo hi\necho 'there'"})
 	want := "exec 'sh' '-c' 'echo hi\necho '\"'\"'there'\"'\"''"
@@ -301,7 +311,7 @@ func TestAttachGuestStderr(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("attach code %d\nstdout:\n%s\nstderr:\n%s\n%s", code, stdout, stderr, containerLogs("htm-fc-"+id))
+			t.Fatalf("attach code %d\nstdout:\n%s\nstderr:\n%s\n%s", code, stdout, stderr, containerLogs(ContainerName(id, "fc")))
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -546,7 +556,7 @@ func assertStrongAttachSealed(t *testing.T, root, id, dir string) {
 	if err := privateKeyLeak(dir, priv); err != nil {
 		t.Fatal(err)
 	}
-	assertNoPublishedPorts(t, "htm-fc-"+id, "htm-gate-"+id)
+	assertNoPublishedPorts(t, ContainerName(id, "fc"), ContainerName(id, "gate"))
 }
 
 // privateKeyLeak walks every file under the instance directory. The guest
@@ -847,9 +857,9 @@ func setWinsize(f *os.File, row, col uint16) {
 
 func habitatLogs(wall, id, dir string) string {
 	if wall == "strong" {
-		return containerLogs("htm-fc-"+id) + extraFC(&StrongInstance{Dir: dir})
+		return containerLogs(ContainerName(id, "fc")) + extraFC(&StrongInstance{Dir: dir})
 	}
-	out, _ := Docker(10*time.Second, "logs", "htm-box-"+id)
+	out, _ := Docker(10*time.Second, "logs", ContainerName(id, "box"))
 	return out
 }
 
@@ -974,7 +984,7 @@ func TestAttachDestroyRemovesKey(t *testing.T) {
 	if err := os.MkdirAll(instDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeInstance(&Instance{ID: id, Wall: "strong", FirecrackerContainer: "htm-fc-" + id, Dir: instDir}); err != nil {
+	if err := writeInstance(&Instance{ID: id, Wall: "strong", FirecrackerContainer: ContainerName(id, "fc"), Dir: instDir}); err != nil {
 		t.Fatal(err)
 	}
 	if code := Run([]string{"destroy", id}); code != 0 {

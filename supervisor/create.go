@@ -91,7 +91,7 @@ func runGateReady(root, id, netns string) error {
 }
 
 // JoinGate starts name in the gate netns create recorded for id.
-// Callers do not pass htm-gate-<id> or htm-fc-<id>.
+// Callers do not pass htm-<id>-gate or htm-<id>-fc.
 func JoinGate(id, name string, args ...string) error {
 	v, ok := gateNetNS.Load(id)
 	if !ok {

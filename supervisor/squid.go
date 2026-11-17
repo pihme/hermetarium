@@ -139,7 +139,7 @@ func EnsureNetTools(root string) error {
 // Volumes left by earlier runs are not removed.
 // Release-Notes: The gate mounts tmpfs on /var/log/squid and /var/spool/squid, so a habitat no longer leaves anonymous Docker volumes for those paths. Volumes left by earlier releases still appear in `docker volume ls -qf dangling=true`; inspect before `docker volume rm`.
 func removeGate(id string) {
-	DockerIgnore("rm", "-fv", "htm-gate-"+id)
+	DockerIgnore("rm", "-fv", ContainerName(id, "gate"))
 }
 
 func runSquid(root, name, logDir, label string, extra []string) error {

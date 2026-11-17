@@ -109,9 +109,6 @@ func Run(args []string) int {
 		if len(argv) > 0 && argv[0] == "--" {
 			argv = argv[1:]
 		}
-		if len(argv) == 0 {
-			argv = []string{"sh"}
-		}
 		code, err := Attach(root, id, argv)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -281,6 +278,6 @@ func usage() {
        hermetarium version
 
 --cpus N works on both walls: that many processors in the virtual machine (1 to 32), or that CPU quota on Docker (1 to the host CPU count). The default is one processor, and no Docker quota.
-attach opens a terminal on either wall. With no command it runs sh. The strong wall reaches it over SSH, so that image includes an SSH server. Bytes on that terminal stay out of the I/O log.
+attach opens a terminal on either wall. With no command it runs an interactive login bash when the image has bash, and sh otherwise. The strong wall reaches it over SSH, so that image includes an SSH server. Bytes on that terminal stay out of the I/O log.
 `)
 }
