@@ -66,15 +66,16 @@ func TestDestroyRemovesLegacyContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(rms, "\n")
-	for _, name := range []string{"htm-fc-" + id, "htm-gate-" + id} {
+	for _, name := range []string{
+		"htm-fc-" + id, "htm-gate-" + id,
+		"htm-" + id + "-fc", "htm-" + id + "-gate", "htm-" + id + "-dns",
+	} {
 		if !strings.Contains(joined, name) {
-			t.Fatalf("destroy did not remove stored name %s\n%s", name, joined)
+			t.Fatalf("destroy did not remove %s\n%s", name, joined)
 		}
 	}
-	for _, name := range []string{"htm-" + id + "-fc", "htm-" + id + "-dns", "htm-dns-" + id} {
-		if strings.Contains(joined, name) {
-			t.Fatalf("destroy removed %s without a stored name or this habitat's /log\n%s", name, joined)
-		}
+	if strings.Contains(joined, "htm-dns-"+id) {
+		t.Fatalf("destroy removed legacy dns without a stored name or this habitat's /log\n%s", joined)
 	}
 	if _, err := os.Stat(rootfs); !os.IsNotExist(err) {
 		t.Fatal("rootfs still present after the old Firecracker container was removed")
@@ -111,15 +112,16 @@ func TestDestroyRemovesLegacyWeakContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(rms, "\n")
-	for _, name := range []string{"htm-box-" + id, "htm-gate-" + id} {
+	for _, name := range []string{
+		"htm-box-" + id, "htm-gate-" + id,
+		"htm-" + id + "-box", "htm-" + id + "-gate", "htm-" + id + "-dns",
+	} {
 		if !strings.Contains(joined, name) {
-			t.Fatalf("destroy did not remove stored name %s\n%s", name, joined)
+			t.Fatalf("destroy did not remove %s\n%s", name, joined)
 		}
 	}
-	for _, name := range []string{"htm-" + id + "-box", "htm-" + id + "-dns", "htm-dns-" + id} {
-		if strings.Contains(joined, name) {
-			t.Fatalf("destroy removed %s without a stored name or this habitat's /log\n%s", name, joined)
-		}
+	if strings.Contains(joined, "htm-dns-"+id) {
+		t.Fatalf("destroy removed legacy dns without a stored name or this habitat's /log\n%s", joined)
 	}
 }
 

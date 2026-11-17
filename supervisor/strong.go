@@ -450,13 +450,13 @@ func firecrackerNames(id, dir string) []string {
 	return habitatContainerNames(id, "fc", stored, dir)
 }
 
-// habitatContainerNames is the current name and the pre-rename name, each
-// kept only when it belongs to this habitat. The two schemes are each
+// habitatContainerNames always includes the current name. A pre-rename name
+// is included only when it belongs to this habitat. The two schemes are each
 // collision-free; mixed, legacyContainerName("y-fc", "gate") is
 // ContainerName("gate-y", "fc").
 func habitatContainerNames(id, part, stored, dir string) []string {
-	var names []string
-	for _, name := range []string{ContainerName(id, part), legacyContainerName(id, part), stored} {
+	names := []string{ContainerName(id, part)}
+	for _, name := range []string{legacyContainerName(id, part), stored} {
 		if name == "" || containsName(names, name) {
 			continue
 		}
