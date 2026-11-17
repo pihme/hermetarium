@@ -114,7 +114,7 @@ func TestDestroyWeakMissingNetTools(t *testing.T) {
 	if !bridgeForwardRule(t, network, "iptables-nft") || !bridgeForwardRule(t, network, "iptables-legacy") {
 		t.Fatal("FORWARD accept missing before destroy")
 	}
-	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", "htm-box-"+id); err != nil {
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", ContainerName(id, "box")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Docker(30*time.Second, "rmi", NetToolsImage); err != nil {
@@ -125,7 +125,7 @@ func TestDestroyWeakMissingNetTools(t *testing.T) {
 	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", NetToolsImage); err != nil {
 		t.Fatalf("rebuild %s: %v", NetToolsImage, err)
 	}
-	boxLeft := dockerNameExists("inspect", "-f", "{{.Id}}", "htm-box-"+id)
+	boxLeft := dockerNameExists("inspect", "-f", "{{.Id}}", ContainerName(id, "box"))
 	netLeft := dockerNameExists("network", "inspect", network)
 	nftLeft := forwardAcceptOnBridge(bridge, "iptables-nft")
 	legacyLeft := forwardAcceptOnBridge(bridge, "iptables-legacy")
@@ -182,7 +182,7 @@ func TestDestroyWeakForgetError(t *testing.T) {
 	if bridge == "" {
 		t.Fatal("empty bridge name")
 	}
-	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", "htm-box-"+id); err != nil {
+	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", ContainerName(id, "box")); err != nil {
 		t.Fatal(err)
 	}
 	network := "htm-" + id
@@ -211,7 +211,7 @@ func TestDestroyWeakForgetError(t *testing.T) {
 	if !bytes.Contains(msg, []byte("empty bridge name")) {
 		t.Fatalf("stderr %q", msg)
 	}
-	if dockerNameExists("inspect", "-f", "{{.Id}}", "htm-box-"+id) {
+	if dockerNameExists("inspect", "-f", "{{.Id}}", ContainerName(id, "box")) {
 		t.Fatal("box still present")
 	}
 	if dockerNameExists("network", "inspect", network) {

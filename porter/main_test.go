@@ -29,7 +29,10 @@ func TestCmdFirstTurn(t *testing.T) {
 		}
 		if c.harness == "opencode" {
 			env := strings.Join(cmd.Env, "\n")
-			if !strings.Contains(env, "OPENCODE_DISABLE_AUTOUPDATE=1") || !strings.Contains(env, "OPENCODE_DISABLE_MODELS_FETCH=1") {
+			if strings.Contains(env, "OPENCODE_DISABLE_AUTOUPDATE=1") {
+				t.Fatal("porter disables OpenCode autoupdate")
+			}
+			if !strings.Contains(env, "OPENCODE_DISABLE_MODELS_FETCH=1") {
 				t.Fatalf("opencode env missing fetch lock: %v", cmd.Env)
 			}
 		}

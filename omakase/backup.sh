@@ -7,7 +7,8 @@
 # Firecracker container for the read so the file is one moment. Do not
 # restart it: a restart kills Firecracker. The pause is bounded. INT and
 # TERM unpause without waiting out that bound. SIGKILL skips the trap;
-# then run docker unpause htm-fc-<id>.
+# then run docker unpause htm-<id>-fc. A habitat from before the rename
+# is htm-fc-<id>; the script pauses whichever of those is running.
 set -eu
 
 die() {
@@ -186,11 +187,18 @@ fi
 
 # The Firecracker container name is only the habitat id. A different HERMETARIUM_ROOT can
 # hold var/<id>/squid.conf and would otherwise be the secret check's root.
-if ! logdir=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/log"}}{{.Source}}{{end}}{{end}}' "htm-fc-$HERMETARIUM_ID"); then
-  die "cannot inspect htm-fc-$HERMETARIUM_ID"
+# A habitat from before the rename is htm-fc-<id>.
+fc=htm-$HERMETARIUM_ID-fc
+if ! docker inspect "$fc" >/dev/null 2>&1; then
+  if docker inspect "htm-fc-$HERMETARIUM_ID" >/dev/null 2>&1; then
+    fc=htm-fc-$HERMETARIUM_ID
+  fi
+fi
+if ! logdir=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/log"}}{{.Source}}{{end}}{{end}}' "$fc"); then
+  die "cannot inspect $fc"
 fi
 if [ -z "$logdir" ] || [ ! -d "$logdir" ] || [ "$(realpath "$logdir")" != "$(realpath "$inst")" ]; then
-  die "htm-fc-$HERMETARIUM_ID is not habitat $HERMETARIUM_ID under $root"
+  die "$fc is not habitat $HERMETARIUM_ID under $root"
 fi
 
 # Rewrite io.jsonl from the access log before the pause, so the snapshot
@@ -209,7 +217,6 @@ done
 # paused.
 paused=0
 backup_pid=0
-fc=htm-fc-$HERMETARIUM_ID
 cleanup() {
   rc=${1:-$?}
   trap - EXIT INT TERM

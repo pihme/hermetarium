@@ -45,9 +45,11 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 		"--image opencode",
 		"--wall strong",
 		"--no-inbound",
-		"htm-fc-<id>",
-		"htm-gate-<id>",
+		"htm-<id>-fc",
+		"htm-<id>-gate",
 		"Porter",
+		"OSC 52",
+		"not found or inactive",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("README missing %q", want)
@@ -65,20 +67,74 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 	}
 	image := string(df)
 	for _, want := range []string{
-		"opencode-linux-x64.tar.gz",
-		"v1.19.5",
+		"https://opencode.ai/v2/install",
 		"git",
 		"ripgrep",
 		"tmux",
 		"openssh-server",
 		"build-essential",
-		"OPENCODE_DISABLE_AUTOUPDATE=1",
 		"OPENCODE_DISABLE_MODELS_FETCH=1",
 		"OPENCODE_API_KEY=not-the-supervisor-key",
+		"docker.io",
+		"gh_2.104.0_linux_amd64.tar.gz",
+		"auto-models.ts",
+		"bash_profile",
+		"bashrc",
+		"nano",
+		"bash-completion",
+		"opencode-start",
 	} {
 		if !strings.Contains(image, want) {
 			t.Fatalf("OpenCode image missing %q", want)
 		}
+	}
+	plugin, err := os.ReadFile(filepath.Join(root, "inhabitants", "opencode", "auto-models.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(plugin), "if (output === undefined) output = Math.min(context ?? 8192, 8192)") {
+		t.Fatal("model plugin does not fill a missing output limit")
+	}
+	profile, err := os.ReadFile(filepath.Join(root, "inhabitants", "opencode", "bash_profile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"OPENCODE_API_KEY=not-the-supervisor-key", "GH_TOKEN=not-the-supervisor-key", "cd /work", ". /root/.bashrc"} {
+		if !strings.Contains(string(profile), want) {
+			t.Fatalf("login profile missing %q", want)
+		}
+	}
+	bashrc, err := os.ReadFile(filepath.Join(root, "inhabitants", "opencode", "bashrc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`PS1='\w \$ '`, "HISTFILE=/root/.bash_history", "set -o emacs", "bash_completion"} {
+		if !strings.Contains(string(bashrc), want) {
+			t.Fatalf("interactive shell missing %q", want)
+		}
+	}
+	cfg, err := os.ReadFile(filepath.Join(root, "inhabitants", "opencode", "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cfg), "opencode-auto-models") {
+		t.Fatal("image config installs the model plugin from npm")
+	}
+	if !strings.Contains(string(cfg), `"update": "auto"`) {
+		t.Fatal("OpenCode autoupdate is off")
+	}
+	if !strings.Contains(string(plugin), "Plugin.define") {
+		t.Fatal("model plugin is not an OpenCode 2 plugin")
+	}
+	if strings.Contains(image, "OPENCODE_DISABLE_AUTOUPDATE") || strings.Contains(string(profile), "OPENCODE_DISABLE_AUTOUPDATE") || strings.Contains(image, "anomalyco/opencode/releases/download/v") {
+		t.Fatal("image pins OpenCode or disables autoupdate")
+	}
+	daemon, err := os.ReadFile(filepath.Join(root, "inhabitants", "opencode", "daemon.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(daemon), `"iptables": false`) {
+		t.Fatal("dockerd would take over iptables")
 	}
 	conf, err := os.ReadFile(filepath.Join(root, "omakase", "opencode-tui", "squid.conf"))
 	if err != nil {
@@ -112,7 +168,7 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 	if !supervisor.ACLOpensWeb(conf) {
 		t.Fatal("gate file would not resolve outside names")
 	}
-	if !squidLine(gate, "ssl_bump splice passthrough") || !squidLine(gate, "request_header_access Authorization deny modelhost") || !squidLine(gate, "request_header_access Authorization deny githubhost") || !squidLine(gate, "request_header_access Authorization deny githost") || !squidLine(gate, `request_header_add Authorization "Basic __GITHUB_GIT_BASIC__" githost`) || !squidLine(gate, "acl gh_traverse urlpath_regex -i ^[^?]*\\.\\. ^[^?]*%2e%2e ^[^?]*%2e\\. ^[^?]*\\.%2e") {
+	if !squidLine(gate, "ssl_bump splice passthrough") || !squidLine(gate, "request_header_access Authorization deny modelhost") || !squidLine(gate, "request_header_access Authorization deny githubhost") || !squidLine(gate, "request_header_access Authorization deny githost") || !squidLine(gate, `request_header_add Authorization "Basic __GITHUB_GIT_BASIC__" githost`) || !squidLine(gate, "acl gh_traverse urlpath_regex -i ^[^?]*\\.\\. ^[^?]*%2e%2e ^[^?]*%2e\\. ^[^?]*\\.%2e") || !squidLine(gate, "http_access allow !githubhost !githost") || !squidLine(gate, "always_direct allow !modelhost") {
 		t.Fatal("gate file lost the model or GitHub header rules")
 	}
 	if strings.Contains(gate, `urlpath_regex \.\. %`) {
@@ -579,7 +635,7 @@ func (e *buildError) Error() string {
 func assertBoxHasNoSecret(t *testing.T, id string) {
 	t.Helper()
 	for _, secret := range []string{modelKey, githubToken} {
-		out, _, code := supervisor.DockerExec(30*time.Second, "exec", "htm-box-"+id,
+		out, _, code := supervisor.DockerExec(30*time.Second, "exec", supervisor.ContainerName(id, "box"),
 			"grep", "-R", "-a", "-F", "-e", secret,
 			"/etc", "/usr", "/bin", "/lib", "/root", "/tmp", "/modelclient", "/page", "/probe.sh")
 		if code == 0 || strings.Contains(out, secret) {
@@ -592,7 +648,7 @@ func rootfsHas(t *testing.T, id, token string) bool {
 	t.Helper()
 	src, err := supervisor.Docker(10*time.Second, "inspect", "-f",
 		`{{range .Mounts}}{{if eq .Destination "/opt/rootfs.ext4"}}{{.Source}}{{end}}{{end}}`,
-		"htm-fc-"+id)
+		supervisor.ContainerName(id, "fc"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,9 +662,9 @@ func rootfsHas(t *testing.T, id, token string) bool {
 func waitMarker(t *testing.T, wall, id, marker string) string {
 	t.Helper()
 	deadline := time.Now().Add(120 * time.Second)
-	name := "htm-box-" + id
+	name := supervisor.ContainerName(id, "box")
 	if wall != "weak" {
-		name = "htm-fc-" + id
+		name = supervisor.ContainerName(id, "fc")
 	}
 	var logs string
 	for time.Now().Before(deadline) {
@@ -730,7 +786,7 @@ func streamedGaps(logs string) int {
 }
 
 func diag(id, dir string) string {
-	access, _ := supervisor.Docker(10*time.Second, "exec", "htm-gate-"+id, "cat", "/log/access.log")
+	access, _ := supervisor.Docker(10*time.Second, "exec", supervisor.ContainerName(id, "gate"), "cat", "/log/access.log")
 	cache, _ := os.ReadFile(filepath.Join(dir, "cache.log"))
 	return "ACCESS\n" + access + "\nCACHE\n" + string(cache)
 }

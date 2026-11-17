@@ -1,6 +1,6 @@
 # Backup
 
-A host script and a systemd user timer. They back up one running habitat with [Restic](https://restic.net/). The script pauses the Firecracker container `htm-fc-<id>` and the guest for the restic read, then unpauses that same container. The habitat continues without a restart. A restart kills Firecracker. While the container is paused, `url` and `attach` to that habitat do not answer. The pause bound defaults to 900 seconds (`HERMETARIUM_PAUSE_SECONDS`, at most 21600).
+A host script and a systemd user timer. They back up one running habitat with [Restic](https://restic.net/). The script pauses the Firecracker container `htm-<id>-fc` and the guest for the restic read, then unpauses that same container. The habitat continues without a restart. A restart kills Firecracker. While the container is paused, `url` and `attach` to that habitat do not answer. The pause bound defaults to 900 seconds (`HERMETARIUM_PAUSE_SECONDS`, at most 21600).
 
 ## What is backed up
 
@@ -18,7 +18,7 @@ A host script and a systemd user timer. They back up one running habitat with [R
 
 The script refuses a journal path that is one of those files, a hard link to one of them, or a directory that contains one of them, including by a hard link or a nested mount. That includes another habitat's `var/<id>/squid.conf` and `var/<id>/mitm/ca.key` under the same data directory. It also refuses `/` and any directory that contains `var/`. The root file is under `var/<id>/` and is not one of those two secrets.
 
-The running Firecracker container must be this habitat. `htm-fc-<id>` is used only when its `/log` mount is `var/<id>` under `HERMETARIUM_ROOT`. A different root that also has `var/<id>/squid.conf` is not this habitat.
+The running Firecracker container must be this habitat. `htm-<id>-fc` is used only when its `/log` mount is `var/<id>` under `HERMETARIUM_ROOT`. A habitat created before that name is `htm-fc-<id>`. The script pauses that container when `htm-<id>-fc` is absent. A different root that also has `var/<id>/squid.conf` is not this habitat.
 
 ## Settings
 
@@ -71,10 +71,10 @@ systemctl --user enable --now hermetarium-backup.timer
 
 `loginctl enable-linger` keeps the timer running when you are logged out.
 
-`restic backup` is stopped after `HERMETARIUM_PAUSE_SECONDS` (default 900, at most 6 hours). The script unpauses `htm-fc-<id>` then. If `restic` hits that limit or exits non-zero, the script unpauses and exits non-zero. The shell EXIT trap unpauses on a failure the shell can catch. SIGKILL skips the trap. If that happens, unpause the Firecracker container yourself:
+`restic backup` is stopped after `HERMETARIUM_PAUSE_SECONDS` (default 900, at most 6 hours). The script unpauses `htm-<id>-fc` then. If `restic` hits that limit or exits non-zero, the script unpauses and exits non-zero. The shell EXIT trap unpauses on a failure the shell can catch. SIGKILL skips the trap. If that happens, unpause the Firecracker container yourself:
 
 ```bash
-docker unpause htm-fc-YOUR_ID
+docker unpause htm-YOUR_ID-fc
 ```
 
 ## Restore

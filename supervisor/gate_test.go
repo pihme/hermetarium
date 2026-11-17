@@ -182,7 +182,7 @@ func TestGateCAAcceptsBeforeDNS(t *testing.T) {
 	}
 	plan := StrongPlan()
 	id := newTestID(t)
-	name := "htm-fc-" + id
+	name := ContainerName(id, "fc")
 	t.Cleanup(func() { DockerIgnore("rm", "-f", name) })
 	args := []string{
 		"run", "-d", "--name", name,

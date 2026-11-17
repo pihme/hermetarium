@@ -92,8 +92,8 @@ func TestNoInbound(t *testing.T) {
 		if inst.InboundURL != "" {
 			t.Fatalf("inbound url %q", inst.InboundURL)
 		}
-		assertNoPublishedPorts(t, "htm-gate-"+id, "htm-box-"+id)
-		assertRunning(t, "htm-box-"+id)
+		assertNoPublishedPorts(t, ContainerName(id, "gate"), ContainerName(id, "box"))
+		assertRunning(t, ContainerName(id, "box"))
 		assertURLSaysNone(t, id)
 	})
 
@@ -107,9 +107,9 @@ func TestNoInbound(t *testing.T) {
 		if inst.InboundURL != "" {
 			t.Fatalf("inbound url %q", inst.InboundURL)
 		}
-		assertNoPublishedPorts(t, "htm-fc-"+id, "htm-gate-"+id)
-		assertRunning(t, "htm-fc-"+id)
-		waitGuestCmd(t, "htm-fc-"+id, "sleep")
+		assertNoPublishedPorts(t, ContainerName(id, "fc"), ContainerName(id, "gate"))
+		assertRunning(t, ContainerName(id, "fc"))
+		waitGuestCmd(t, ContainerName(id, "fc"), "sleep")
 		assertURLSaysNone(t, id)
 	})
 }
@@ -174,7 +174,7 @@ func TestNoInboundGatePort(t *testing.T) {
 			if inst.InboundURL != "" {
 				t.Fatalf("inbound url %q", inst.InboundURL)
 			}
-			gate := "htm-gate-" + id
+			gate := ContainerName(id, "gate")
 			assertNoPublishedPorts(t, gate)
 			assertSquidListensOnInbound(t, gate)
 			assertGatewayInbound(t, gate, false)
@@ -189,7 +189,7 @@ func TestNoInboundGatePort(t *testing.T) {
 			if inst.InboundURL == "" {
 				t.Fatal("inbound url empty")
 			}
-			gate := "htm-gate-" + id
+			gate := ContainerName(id, "gate")
 			assertInboundPublished(t, gate)
 			assertGatewayInbound(t, gate, true)
 		})
@@ -206,8 +206,8 @@ func TestNoInboundGatePort(t *testing.T) {
 			if inst.InboundURL != "" {
 				t.Fatalf("inbound url %q", inst.InboundURL)
 			}
-			fcContainer := "htm-fc-" + id
-			assertNoPublishedPorts(t, fcContainer, "htm-gate-"+id)
+			fcContainer := ContainerName(id, "fc")
+			assertNoPublishedPorts(t, fcContainer, ContainerName(id, "gate"))
 			assertSquidListensOnInbound(t, fcContainer)
 			assertGatewayInbound(t, fcContainer, false)
 		})
@@ -221,7 +221,7 @@ func TestNoInboundGatePort(t *testing.T) {
 			if inst.InboundURL == "" {
 				t.Fatal("inbound url empty")
 			}
-			fcContainer := "htm-fc-" + id
+			fcContainer := ContainerName(id, "fc")
 			assertInboundPublished(t, fcContainer)
 			assertGatewayInbound(t, fcContainer, true)
 		})

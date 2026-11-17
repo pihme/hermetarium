@@ -223,7 +223,7 @@ func TestBackupWhileWriting(t *testing.T) {
 	if out, err := create.CombinedOutput(); err != nil {
 		t.Fatalf("create --rootfs: %v\n%s", err, out)
 	}
-	restoredSerial := waitSerial(t, "htm-fc-"+id2, "RESTORED_BOOT")
+	restoredSerial := waitSerial(t, supervisor.ContainerName(id2, "fc"), "RESTORED_BOOT")
 	if !strings.Contains(restoredSerial, "KNOWN="+knownText) {
 		t.Fatalf("restored boot did not see the known file\n%s", restoredSerial)
 	}

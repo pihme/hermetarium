@@ -241,7 +241,7 @@ func TestCreateDoesNotSetTestLabel(t *testing.T) {
 	if _, err := CreateWeak(root, id, CreateOpts{Image: image, ACL: acl, NoInbound: true}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"htm-gate-" + id, "htm-box-" + id, "htm-dns-" + id} {
+	for _, name := range []string{ContainerName(id, "gate"), ContainerName(id, "box"), ContainerName(id, "dns")} {
 		got, err := Docker(15*time.Second, "inspect", "-f", `{{index .Config.Labels "`+TestLabelKey+`"}}`, name)
 		if err != nil {
 			t.Fatal(err)

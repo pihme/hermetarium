@@ -56,6 +56,28 @@ func DockerIgnore(args ...string) {
 	_, _ = Docker(30*time.Second, args...)
 }
 
+// dockerRemove runs docker rm on each distinct name. A missing name does not
+// stop the others: the CLI removes every name it finds and DockerIgnore
+// drops the non-zero status.
+func dockerRemove(flag string, names ...string) {
+	args := []string{"rm", flag}
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		args = append(args, name)
+	}
+	if len(args) == 2 {
+		return
+	}
+	DockerIgnore(args...)
+}
+
 func EnsureImageExists(name string) error {
 	if _, err := Docker(15*time.Second, "inspect", "-f", "{{.Id}}", name); err == nil {
 		return nil

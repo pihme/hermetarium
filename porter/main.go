@@ -125,8 +125,8 @@ func (s *server) cmd(prompt string) (*exec.Cmd, error) {
 		}
 		args = append(args, "--", prompt)
 		c := exec.Command("opencode", args...)
+		// Autoupdate is opencode.json. The public model list stays off.
 		c.Env = append(env,
-			"OPENCODE_DISABLE_AUTOUPDATE=1",
 			"OPENCODE_DISABLE_MODELS_FETCH=1",
 		)
 		return c, nil

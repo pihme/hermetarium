@@ -200,7 +200,7 @@ func startModelMock(root, id, report, port, label string) error {
 
 func assertBoxHasNoKey(t *testing.T, id string) {
 	t.Helper()
-	out, _, code := supervisor.DockerExec(30*time.Second, "exec", "htm-box-"+id,
+	out, _, code := supervisor.DockerExec(30*time.Second, "exec", supervisor.ContainerName(id, "box"),
 		"grep", "-R", "-a", "-F", "-e", modelKey,
 		"/etc", "/usr", "/bin", "/lib", "/root", "/tmp", "/modelclient", "/probe.sh")
 	if code == 0 || strings.Contains(out, modelKey) {
@@ -212,7 +212,7 @@ func assertRootfsHasNoKey(t *testing.T, id string) {
 	t.Helper()
 	src, err := supervisor.Docker(10*time.Second, "inspect", "-f",
 		`{{range .Mounts}}{{if eq .Destination "/opt/rootfs.ext4"}}{{.Source}}{{end}}{{end}}`,
-		"htm-fc-"+id)
+		supervisor.ContainerName(id, "fc"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,9 +233,9 @@ func waitModel(t *testing.T, wall, id string) string {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	var logs string
-	name := "htm-box-" + id
+	name := supervisor.ContainerName(id, "box")
 	if wall != "weak" {
-		name = "htm-fc-" + id
+		name = supervisor.ContainerName(id, "fc")
 	}
 	for time.Now().Before(deadline) {
 		logs, _ = supervisor.Docker(10*time.Second, "logs", name)

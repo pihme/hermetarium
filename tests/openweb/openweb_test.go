@@ -199,7 +199,7 @@ func TestOpenWeb(t *testing.T) {
 				t.Fatalf("denied request reached the mock\n%s", text)
 			}
 			if wall == "weak" {
-				out, _, code := supervisor.DockerExec(30*time.Second, "exec", "htm-box-"+id,
+				out, _, code := supervisor.DockerExec(30*time.Second, "exec", supervisor.ContainerName(id, "box"),
 					"grep", "-R", "-a", "-F", "-e", gateToken,
 					"/etc", "/usr", "/bin", "/lib", "/root", "/tmp", "/webclient", "/probe.sh")
 				if code == 0 || strings.Contains(out, gateToken) {
@@ -332,9 +332,9 @@ func writeOriginCert(dir string) error {
 func waitWeb(t *testing.T, wall, id string) string {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
-	name := "htm-box-" + id
+	name := supervisor.ContainerName(id, "box")
 	if wall != "weak" {
-		name = "htm-fc-" + id
+		name = supervisor.ContainerName(id, "fc")
 	}
 	var logs string
 	for time.Now().Before(deadline) {
@@ -392,7 +392,7 @@ func betweenCert(logs, host string) string {
 }
 
 func diag(id, dir string) string {
-	access, _ := supervisor.Docker(10*time.Second, "exec", "htm-gate-"+id, "cat", "/log/access.log")
+	access, _ := supervisor.Docker(10*time.Second, "exec", supervisor.ContainerName(id, "gate"), "cat", "/log/access.log")
 	cache, _ := os.ReadFile(filepath.Join(dir, "cache.log"))
 	return "ACCESS\n" + access + "\nCACHE\n" + string(cache)
 }
@@ -401,7 +401,7 @@ func rootfsHas(t *testing.T, id, token string) bool {
 	t.Helper()
 	src, err := supervisor.Docker(10*time.Second, "inspect", "-f",
 		`{{range .Mounts}}{{if eq .Destination "/opt/rootfs.ext4"}}{{.Source}}{{end}}{{end}}`,
-		"htm-fc-"+id)
+		supervisor.ContainerName(id, "fc"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,18 @@ const (
 // binary can be rejected without downloading the release asset.
 var fcPin = fcSHA256
 
+// freePageBalloon is the virtio-balloon device with free page reporting.
+// The target size stays 0, so the balloon does not inflate. Stats polling
+// stays off because the API socket is not open.
+func freePageBalloon() map[string]any {
+	return map[string]any{
+		"amount_mib":               0,
+		"deflate_on_oom":           false,
+		"stats_polling_interval_s": 0,
+		"free_page_reporting":      true,
+	}
+}
+
 func cacheFile(root, name string) (string, error) {
 	dir := CacheDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -180,10 +192,11 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			return nil, err
 		}
 	}
-	// Return before the rootfs copy. A live htm-fc-<id> still has that
-	// file open, and a second copy would replace it.
-	fcContainer := "htm-fc-" + id
-	if err := containerFree(fcContainer); err != nil {
+	// Return before the rootfs copy. A live Firecracker container still has
+	// that file open, and a second copy would replace it. The previous
+	// release named it htm-fc-<id>.
+	fcContainer := ContainerName(id, "fc")
+	if err := refuseLiveFirecracker(root, id); err != nil {
 		return nil, err
 	}
 	firecracker, kernel, err := EnsureStrongAssets(root)
@@ -210,12 +223,12 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 	// The copy is in place before docker run. On a later error, remove it
-	// only when htm-fc-<id> does not exist. An existing Firecracker container
+	// only when htm-<id>-fc does not exist. An existing Firecracker container
 	// keeps its disk.
 	defer func() {
 		if err != nil {
 			dropUnmountedRootfs(id, dir)
-			if containerFree("htm-fc-"+id) == nil {
+			if anyContainerExists(firecrackerNames(id, dir)...) == nil {
 				_ = os.RemoveAll(attachKeyDir(root, id))
 			}
 		}
@@ -252,6 +265,9 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		// does not depend on the host CPU exposing RDRAND to the guest.
 		"entropy":        map[string]any{},
 		"machine-config": map[string]any{"vcpu_count": cpuCount(opts), "mem_size_mib": memMiB(opts)},
+		// The guest keeps mem_size_mib. It reports pages it has freed, and the
+		// host kernel drops those pages. amount_mib 0 does not take memory away.
+		"balloon": freePageBalloon(),
 		"network-interfaces": []map[string]any{{
 			"iface_id":      "eth0",
 			"guest_mac":     "AA:FC:00:00:00:01",
@@ -307,7 +323,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 		return nil, err
 	}
 
-	gate := "htm-gate-" + id
+	gate := ContainerName(id, "gate")
 	if err := runSquid(root, gate, dir, opts.TestLabel, []string{"--network", "container:" + fcContainer}); err != nil {
 		endStrong(id, dir)
 		return nil, err
@@ -407,22 +423,65 @@ func strongRootfsVolume(dir string) string {
 	return habitatRootfsPath(dir) + ":/opt/rootfs.ext4"
 }
 
-// endStrong removes the private rootfs only after htm-fc-<id> is gone.
-// DestroyStrong takes only an id, and tests pass a different root, so the
-// caller supplies the instance directory. The cache is not in that directory.
+// endStrong removes the private rootfs only after every Firecracker container
+// for this id is gone, including the pre-rename name. DestroyStrong takes
+// only an id, and tests pass a different root, so the caller supplies the
+// instance directory. The cache is not in that directory.
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
 	dropUnmountedRootfs(id, dir)
-	if dir == "" || containerFree("htm-fc-"+id) != nil {
+	if dir == "" || anyContainerExists(firecrackerNames(id, dir)...) != nil {
 		return
 	}
 	_ = os.RemoveAll(attachKeyDir(filepath.Dir(filepath.Dir(dir)), id))
 }
 
+// firecrackerNames is the current name, the pre-rename name, and the name
+// stored in the instance file when that file is present.
+func firecrackerNames(id, dir string) []string {
+	stored := ""
+	if dir != "" {
+		if inst, err := readInstanceFile(dir); err == nil {
+			stored = inst.FirecrackerContainer
+		}
+	}
+	return []string{ContainerName(id, "fc"), legacyContainerName(id, "fc"), stored}
+}
+
+// refuseLiveFirecracker fails create when any Firecracker container for this
+// id is still running. The instance file may still name htm-fc-<id>.
+func refuseLiveFirecracker(root, id string) error {
+	stored := ""
+	if inst, err := loadInstance(root, id); err == nil {
+		stored = inst.FirecrackerContainer
+	}
+	return anyContainerExists(ContainerName(id, "fc"), legacyContainerName(id, "fc"), stored)
+}
+
+// anyContainerExists is nil when every named container is absent. An empty
+// name is skipped. A docker failure is returned, so a dead daemon is not
+// treated as absence.
+func anyContainerExists(names ...string) error {
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		if err := containerFree(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // dropUnmountedRootfs removes the private rootfs when no Firecracker container
 // has this id. The cache is not in dir.
 func dropUnmountedRootfs(id, dir string) {
-	if err := containerFree("htm-fc-" + id); err != nil {
+	if anyContainerExists(firecrackerNames(id, dir)...) != nil {
 		return
 	}
 	removePrivateRootfs(dir)
@@ -507,8 +566,14 @@ func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)
 	removeGate(id)
-	DockerIgnore("rm", "-f", "htm-fc-"+id)
-	if root, err := Root(); err == nil && containerFree("htm-fc-"+id) == nil {
+	names := []string{ContainerName(id, "fc"), legacyContainerName(id, "fc")}
+	if root, err := Root(); err == nil {
+		if inst, err := loadInstance(root, id); err == nil {
+			names = append(names, inst.FirecrackerContainer)
+		}
+	}
+	dockerRemove("-f", names...)
+	if root, err := Root(); err == nil && anyContainerExists(names...) == nil {
 		_ = os.RemoveAll(attachKeyDir(root, id))
 	}
 	return nil
