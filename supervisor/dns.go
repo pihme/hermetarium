@@ -120,5 +120,5 @@ func gateResolvers(container string) ([]string, error) {
 }
 
 func stopGateDNS(id string) {
-	DockerIgnore("rm", "-f", ContainerName(id, "dns"))
+	dockerRemove("-f", ContainerName(id, "dns"), legacyContainerName(id, "dns"))
 }

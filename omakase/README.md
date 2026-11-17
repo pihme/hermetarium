@@ -18,7 +18,7 @@ A host script and a systemd user timer. They back up one running habitat with [R
 
 The script refuses a journal path that is one of those files, a hard link to one of them, or a directory that contains one of them, including by a hard link or a nested mount. That includes another habitat's `var/<id>/squid.conf` and `var/<id>/mitm/ca.key` under the same data directory. It also refuses `/` and any directory that contains `var/`. The root file is under `var/<id>/` and is not one of those two secrets.
 
-The running Firecracker container must be this habitat. `htm-<id>-fc` is used only when its `/log` mount is `var/<id>` under `HERMETARIUM_ROOT`. A different root that also has `var/<id>/squid.conf` is not this habitat.
+The running Firecracker container must be this habitat. `htm-<id>-fc` is used only when its `/log` mount is `var/<id>` under `HERMETARIUM_ROOT`. A habitat created before that name is `htm-fc-<id>`. The script pauses that container when `htm-<id>-fc` is absent. A different root that also has `var/<id>/squid.conf` is not this habitat.
 
 ## Settings
 

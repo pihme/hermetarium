@@ -192,10 +192,11 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 			return nil, err
 		}
 	}
-	// Return before the rootfs copy. A live htm-<id>-fc still has that
-	// file open, and a second copy would replace it.
+	// Return before the rootfs copy. A live Firecracker container still has
+	// that file open, and a second copy would replace it. The previous
+	// release named it htm-fc-<id>.
 	fcContainer := ContainerName(id, "fc")
-	if err := containerFree(fcContainer); err != nil {
+	if err := refuseLiveFirecracker(root, id); err != nil {
 		return nil, err
 	}
 	firecracker, kernel, err := EnsureStrongAssets(root)
@@ -227,7 +228,7 @@ func CreateStrong(root, id string, opts CreateOpts) (_ *StrongInstance, err erro
 	defer func() {
 		if err != nil {
 			dropUnmountedRootfs(id, dir)
-			if containerFree(ContainerName(id, "fc")) == nil {
+			if anyContainerExists(firecrackerNames(id, dir)...) == nil {
 				_ = os.RemoveAll(attachKeyDir(root, id))
 			}
 		}
@@ -422,22 +423,65 @@ func strongRootfsVolume(dir string) string {
 	return habitatRootfsPath(dir) + ":/opt/rootfs.ext4"
 }
 
-// endStrong removes the private rootfs only after htm-<id>-fc is gone.
-// DestroyStrong takes only an id, and tests pass a different root, so the
-// caller supplies the instance directory. The cache is not in that directory.
+// endStrong removes the private rootfs only after every Firecracker container
+// for this id is gone, including the pre-rename name. DestroyStrong takes
+// only an id, and tests pass a different root, so the caller supplies the
+// instance directory. The cache is not in that directory.
 func endStrong(id, dir string) {
 	_ = DestroyStrong(id)
 	dropUnmountedRootfs(id, dir)
-	if dir == "" || containerFree(ContainerName(id, "fc")) != nil {
+	if dir == "" || anyContainerExists(firecrackerNames(id, dir)...) != nil {
 		return
 	}
 	_ = os.RemoveAll(attachKeyDir(filepath.Dir(filepath.Dir(dir)), id))
 }
 
+// firecrackerNames is the current name, the pre-rename name, and the name
+// stored in the instance file when that file is present.
+func firecrackerNames(id, dir string) []string {
+	stored := ""
+	if dir != "" {
+		if inst, err := readInstanceFile(dir); err == nil {
+			stored = inst.FirecrackerContainer
+		}
+	}
+	return []string{ContainerName(id, "fc"), legacyContainerName(id, "fc"), stored}
+}
+
+// refuseLiveFirecracker fails create when any Firecracker container for this
+// id is still running. The instance file may still name htm-fc-<id>.
+func refuseLiveFirecracker(root, id string) error {
+	stored := ""
+	if inst, err := loadInstance(root, id); err == nil {
+		stored = inst.FirecrackerContainer
+	}
+	return anyContainerExists(ContainerName(id, "fc"), legacyContainerName(id, "fc"), stored)
+}
+
+// anyContainerExists is nil when every named container is absent. An empty
+// name is skipped. A docker failure is returned, so a dead daemon is not
+// treated as absence.
+func anyContainerExists(names ...string) error {
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		if err := containerFree(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // dropUnmountedRootfs removes the private rootfs when no Firecracker container
 // has this id. The cache is not in dir.
 func dropUnmountedRootfs(id, dir string) {
-	if err := containerFree(ContainerName(id, "fc")); err != nil {
+	if anyContainerExists(firecrackerNames(id, dir)...) != nil {
 		return
 	}
 	removePrivateRootfs(dir)
@@ -522,8 +566,14 @@ func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)
 	removeGate(id)
-	DockerIgnore("rm", "-f", ContainerName(id, "fc"))
-	if root, err := Root(); err == nil && containerFree(ContainerName(id, "fc")) == nil {
+	names := []string{ContainerName(id, "fc"), legacyContainerName(id, "fc")}
+	if root, err := Root(); err == nil {
+		if inst, err := loadInstance(root, id); err == nil {
+			names = append(names, inst.FirecrackerContainer)
+		}
+	}
+	dockerRemove("-f", names...)
+	if root, err := Root(); err == nil && anyContainerExists(names...) == nil {
 		_ = os.RemoveAll(attachKeyDir(root, id))
 	}
 	return nil

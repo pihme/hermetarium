@@ -154,7 +154,13 @@ func DestroyWeak(id string) error {
 	// bridge.name still names the FORWARD rule after the network is gone, so
 	// a failed forget must not skip the box and the network.
 	err := forgetSavedBridge(id)
-	DockerIgnore("rm", "-fv", ContainerName(id, "box"))
+	names := []string{ContainerName(id, "box"), legacyContainerName(id, "box")}
+	if root, err := Root(); err == nil {
+		if inst, err := loadInstance(root, id); err == nil {
+			names = append(names, inst.Box)
+		}
+	}
+	dockerRemove("-fv", names...)
 	DockerIgnore("rm", "-f", "htm-probe-"+id)
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)

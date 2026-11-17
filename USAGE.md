@@ -37,7 +37,7 @@ The image is the same on either wall. The wall is outside the image.
 
 On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the Firecracker container holds a microVM with its own kernel, and root stays inside that microVM.
 
-On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-<id>-fc`) holds the TAP device, the firewall, and the microVM. The gate (`htm-<id>-gate`) is Squid. It is a second container and joins the Firecracker container's network namespace.
+On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-<id>-fc`) holds the TAP device, the firewall, and the microVM. The gate (`htm-<id>-gate`) is Squid. It is a second container and joins the Firecracker container's network namespace. A habitat created before this naming still uses `htm-fc-<id>`, `htm-gate-<id>`, and `htm-dns-<id>`. `destroy` removes those containers too. On the Docker wall the old inhabitant name is `htm-box-<id>`.
 
 Both walls let only the gate reach the Internet. The Docker wall puts the container on an internal network with no NAT, and gives only the gate a second path out. [How that works](inhabitants/README.md#how-the-gate-reaches-the-internet).
 

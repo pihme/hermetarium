@@ -27,6 +27,11 @@ func ContainerName(id, part string) string {
 	return "htm-" + id + "-" + part
 }
 
+// legacyContainerName is htm-<part>-<id>, the name from before the id came first.
+func legacyContainerName(id, part string) string {
+	return "htm-" + part + "-" + id
+}
+
 type layout struct {
 	data   string
 	cache  string
