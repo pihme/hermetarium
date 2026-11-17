@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"os"
@@ -29,6 +30,8 @@ const (
 	systemCA    = "/etc/ssl/certs/ca-certificates.crt"
 	peerPort    = "18082"
 )
+
+var gitBasic = "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+githubToken))
 
 func TestOpenCodeTUIFiles(t *testing.T) {
 	root := repoRoot(t)
@@ -82,10 +85,20 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	gate := string(conf)
-	for _, want := range []string{"__MODEL_PEER__", "__MODEL_HOST__", "__MODEL_PREFIX__", "__MODEL_KEY__", "__GITHUB_TOKEN__"} {
+	for _, want := range []string{"__MODEL_PEER__", "__MODEL_HOST__", "__MODEL_PREFIX__", "__MODEL_KEY__", "__GITHUB_TOKEN__", "__GITHUB_GIT_BASIC__"} {
 		if !strings.Contains(gate, want) {
 			t.Fatalf("gate file missing %s", want)
 		}
+	}
+	if strings.Contains(gate, "acl gh_repo") || strings.Contains(gate, "acl gh_pr") {
+		t.Fatal("omakase gate file still filters GitHub calls")
+	}
+	openweb, err := os.ReadFile(filepath.Join(root, "examples", "openweb", "squid.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(openweb, []byte("acl gh_repo")) || !bytes.Contains(openweb, []byte("http_access deny githubhost")) {
+		t.Fatal("openweb allow-list was removed")
 	}
 	if strings.Contains(gate, "18081") || strings.Contains(gate, "name=inbound") || strings.Contains(gate, "name=inhabitant") {
 		t.Fatal("gate file still has an inbound port")
@@ -99,7 +112,7 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 	if !supervisor.ACLOpensWeb(conf) {
 		t.Fatal("gate file would not resolve outside names")
 	}
-	if !squidLine(gate, "ssl_bump splice passthrough") || !squidLine(gate, "request_header_access Authorization deny modelhost") || !squidLine(gate, "request_header_access Authorization deny githubhost") {
+	if !squidLine(gate, "ssl_bump splice passthrough") || !squidLine(gate, "request_header_access Authorization deny modelhost") || !squidLine(gate, "request_header_access Authorization deny githubhost") || !squidLine(gate, "request_header_access Authorization deny githost") || !squidLine(gate, `request_header_add Authorization "Basic __GITHUB_GIT_BASIC__" githost`) {
 		t.Fatal("gate file lost the model or GitHub header rules")
 	}
 }
@@ -126,13 +139,14 @@ func TestOpenCodeTUI(t *testing.T) {
 	conf = strings.ReplaceAll(conf, "__MODEL_HOST__", modelHost)
 	conf = strings.ReplaceAll(conf, "__MODEL_KEY__", modelKey)
 	conf = strings.ReplaceAll(conf, "__GITHUB_TOKEN__", githubToken)
+	conf = strings.ReplaceAll(conf, "__GITHUB_GIT_BASIC__", strings.TrimPrefix(gitBasic, "Basic "))
 	conf = strings.Replace(conf, "cache deny all\n", "cache deny all\nhosts_file /log/hosts\n", 1)
 	for _, line := range strings.Split(conf, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.Contains(line, "__MODEL_") || strings.Contains(line, "__GITHUB_TOKEN__") {
+		if strings.Contains(line, "__MODEL_") || strings.Contains(line, "__GITHUB_") {
 			t.Fatalf("unfilled gate file:\n%s", conf)
 		}
 	}
@@ -164,7 +178,7 @@ func TestOpenCodeTUI(t *testing.T) {
 			// Squid refuses an intercepted name whose address is not the
 			// destination the box connected to. The box uses the gate address.
 			gateIP := supervisor.PlanFor(wall, id).Gate
-			hosts := gateIP + " pinned.example api.github.com other.example\n"
+			hosts := gateIP + " pinned.example api.github.com github.com other.example\n"
 			if err := os.WriteFile(filepath.Join(instDir, "hosts"), []byte(hosts), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -247,15 +261,19 @@ func TestOpenCodeTUI(t *testing.T) {
 			}
 			for _, want := range []string{
 				"HTTP GET https://other.example/hello 200",
+				"HTTP GET https://github.com/octo/hello.git/info/refs?service=git-upload-pack 200",
+				"HTTP POST https://github.com/octo/hello.git/git-receive-pack 200",
 				"HTTP POST https://api.github.com/user/repos 200",
-				"HTTP DELETE https://api.github.com/repos/octo/hello 403",
-				"HTTP POST https://api.github.com/graphql 403",
-				"HTTP PATCH https://api.github.com/repos/octo/hello 403",
-				"HTTP POST https://api.github.com/repos/octo/hello/git/refs 403",
+				"HTTP DELETE https://api.github.com/repos/octo/hello 200",
+				"HTTP POST https://api.github.com/graphql 200",
+				"HTTP PATCH https://api.github.com/repos/octo/hello 200",
+				"HTTP POST https://api.github.com/repos/octo/hello/git/refs 200",
+				"HTTP PUT https://api.github.com/repos/octo/hello/contents/README.md 200",
 				"HTTP POST https://api.github.com/repos/octo/../pulls 403",
 				"HTTP POST https://api.github.com/repos/octo/a%25b/pulls 403",
-				"HTTP PUT https://api.github.com/repos/octo/hello/contents/README.md 403",
+				"HTTP POST https://github.com/octo/../hello.git/git-receive-pack 403",
 				"HTTP GET http://api.github.com/user 403",
+				"HTTP GET http://github.com/octo/hello.git/info/refs?service=git-upload-pack 403",
 			} {
 				if !strings.Contains(logs, want) {
 					t.Fatalf("missing %s\n%s\n%s", want, logs, diag(id, dir))
@@ -279,20 +297,36 @@ func TestOpenCodeTUI(t *testing.T) {
 				t.Fatal(err)
 			}
 			ghText := string(gh)
-			reposAuth, ok := fieldAuth(ghText, "path=/user/repos")
-			if !ok || reposAuth != "Bearer "+githubToken || strings.Contains(reposAuth, boxToken) || strings.Contains(reposAuth, modelKey) {
-				t.Fatalf("github auth %q\n%s", reposAuth, ghText)
+			for _, sub := range []string{
+				"path=/user/repos",
+				"path=/graphql",
+				"method=DELETE",
+				"method=PATCH",
+				"path=/repos/octo/hello/git/refs",
+				"path=/repos/octo/hello/contents/README.md",
+			} {
+				auth, ok := fieldAuth(ghText, sub)
+				if !ok || auth != "Bearer "+githubToken || strings.Contains(auth, boxToken) || strings.Contains(auth, modelKey) {
+					t.Fatalf("github auth %s %q\n%s", sub, auth, ghText)
+				}
+			}
+			for _, sub := range []string{
+				"path=/octo/hello.git/info/refs",
+				"path=/octo/hello.git/git-receive-pack",
+			} {
+				auth, ok := fieldAuth(ghText, sub)
+				if !ok || auth != gitBasic || strings.Contains(auth, boxToken) || strings.Contains(auth, modelKey) || strings.Contains(auth, githubToken) {
+					t.Fatalf("git auth %s %q\n%s", sub, auth, ghText)
+				}
+			}
+			if strings.Count(ghText, "path=/octo/hello.git/info/refs") != 1 {
+				t.Fatalf("cleartext git reached the mock\n%s", ghText)
 			}
 			pageAuth, ok := fieldAuth(ghText, "path=/hello")
 			if !ok || pageAuth != "Bearer "+boxToken || strings.Contains(pageAuth, githubToken) || strings.Contains(pageAuth, modelKey) {
 				t.Fatalf("page auth %q\n%s", pageAuth, ghText)
 			}
-			for _, line := range strings.Split(ghText, "\n") {
-				if strings.Contains(line, githubToken) && !strings.Contains(line, "path=/user/repos") {
-					t.Fatalf("gate token on the wrong request\n%s", ghText)
-				}
-			}
-			if strings.Contains(ghText, "method=DELETE") || strings.Contains(ghText, "/contents/") || strings.Contains(ghText, "path=/graphql") || strings.Contains(ghText, "method=PATCH") || strings.Contains(ghText, "/git/refs") || strings.Contains(ghText, "path=/user host") || strings.Contains(ghText, "..") || strings.Contains(ghText, "%") {
+			if strings.Contains(ghText, "..") || strings.Contains(ghText, "%") || strings.Contains(ghText, "path=/user host=") {
 				t.Fatalf("denied request reached the mock\n%s", ghText)
 			}
 			if err := supervisor.SyncInstanceLog(dir); err != nil {
@@ -313,23 +347,32 @@ func TestOpenCodeTUI(t *testing.T) {
 			if !ok || !page.Allowed || page.Destination != "other.example" || page.Path != "/hello" || page.Protocol != "https" || page.Port != 443 || page.TLS != "decrypted" {
 				t.Fatalf("page %+v\n%s", page, diag(id, dir))
 			}
-			put, ok := findRec(recs, "PUT", "/contents/")
-			if !ok || put.Allowed {
-				t.Fatalf("contents %+v\n%s", put, diag(id, dir))
-			}
-			for _, deny := range []struct{ method, path string }{
-				{"POST", "/graphql"},
-				{"PATCH", "/repos/octo/hello"},
-				{"POST", "/git/refs"},
-				{"POST", ".."},
-				{"POST", "%"},
-				{"GET", "/user"},
+			for _, allow := range []struct{ method, path, dest string }{
+				{"PUT", "/contents/", "api.github.com"},
+				{"POST", "/graphql", "api.github.com"},
+				{"PATCH", "/repos/octo/hello", "api.github.com"},
+				{"POST", "/git/refs", "api.github.com"},
+				{"DELETE", "/repos/octo/hello", "api.github.com"},
+				{"GET", "hello.git/info/refs", "github.com"},
+				{"POST", "git-receive-pack", "github.com"},
 			} {
-				rec, found := findRec(recs, deny.method, deny.path)
-				if !found || rec.Allowed || rec.Destination != "api.github.com" {
+				rec, found := findGitHub(recs, allow.method, allow.path, allow.dest, "https")
+				if !found || !rec.Allowed || rec.TLS != "decrypted" || rec.Port != 443 {
+					t.Fatalf("%s %s %+v\n%s", allow.method, allow.path, rec, diag(id, dir))
+				}
+			}
+			for _, deny := range []struct{ method, path, dest, protocol string }{
+				{"POST", "..", "api.github.com", "https"},
+				{"POST", "%", "api.github.com", "https"},
+				{"POST", "..", "github.com", "https"},
+				{"GET", "/user", "api.github.com", "http"},
+				{"GET", "hello.git/info/refs", "github.com", "http"},
+			} {
+				rec, found := findGitHub(recs, deny.method, deny.path, deny.dest, deny.protocol)
+				if !found || rec.Allowed {
 					t.Fatalf("%s %s %+v\n%s", deny.method, deny.path, rec, diag(id, dir))
 				}
-				if deny.path == "/user" && (rec.Path != "/user" || rec.Protocol != "http" || rec.Port != 80) {
+				if deny.protocol == "http" && rec.Port != 80 {
 					t.Fatalf("cleartext %+v\n%s", rec, diag(id, dir))
 				}
 			}
@@ -395,7 +438,7 @@ if timeout 3 nslookup example.com 1.1.1.1 >/dev/null 2>&1; then echo DNS_DIRECT=
 if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then echo LEAK=OK; else echo LEAK=FAIL; fi
 gw=$(awk '/probe.hermetarium.test/ {print $1; exit}' /etc/hosts)
 echo GATE "$gw"
-echo "$gw api.github.com other.example pinned.example" >> /etc/hosts
+echo "$gw api.github.com github.com other.example pinned.example" >> /etc/hosts
 /modelclient
 reached() {
   out=$(wget -T 3 -S -O /dev/null "$1" 2>&1) || true
@@ -586,6 +629,15 @@ func fieldAuth(text, sub string) (string, bool) {
 	return "", false
 }
 
+func findGitHub(recs []supervisor.Record, method, pathSub, dest, protocol string) (supervisor.Record, bool) {
+	for _, r := range recs {
+		if r.Method == method && r.Destination == dest && r.Protocol == protocol && strings.Contains(r.Path, pathSub) {
+			return r, true
+		}
+	}
+	return supervisor.Record{}, false
+}
+
 func findRec(recs []supervisor.Record, method, pathSub string) (supervisor.Record, bool) {
 	for _, r := range recs {
 		if r.Method == method && strings.Contains(r.Path, pathSub) {
@@ -662,7 +714,7 @@ func writeOriginCert(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "ca.pem"), caPEM, 0o644); err != nil {
 		return err
 	}
-	for i, name := range []string{"pinned.example", "api.github.com", "other.example"} {
+	for i, name := range []string{"pinned.example", "api.github.com", "github.com", "other.example"} {
 		leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return err

@@ -26,7 +26,7 @@ For a real model, change the id in `/root/.config/opencode/opencode.json` after 
 
 ## Gate file
 
-`squid.conf` is the gate. [Squid](https://www.squid-cache.org/) reads it. Every setting is described in the [Squid 6 config guide](https://www.squid-cache.org/Versions/v6/cfgman/). Hermetarium copies the file as you wrote it. Fill the five words in a copy before `create`. A new key means `destroy` and `create` again, and `destroy` deletes the root disk.
+`squid.conf` is the gate. [Squid](https://www.squid-cache.org/) reads it. Every setting is described in the [Squid 6 config guide](https://www.squid-cache.org/Versions/v6/cfgman/). Hermetarium copies the file as you wrote it. Fill the six words in a copy before `create`. A new key means `destroy` and `create` again, and `destroy` deletes the root disk.
 
 `__MODEL_PEER__` is the rest of the `cache_peer` line, and it includes `name=model`. One HTTPS upstream is:
 
@@ -40,11 +40,19 @@ api.openai.com parent 443 0 no-query no-digest originserver tls tls-cafile=/etc/
 
 `__MODEL_KEY__` is the model key. One key per habitat. It stays in this file.
 
-`__GITHUB_TOKEN__` is the GitHub API token. It stays in this file. Squid sends it only to `api.github.com`.
+`__GITHUB_TOKEN__` is the one GitHub token. It stays in this file. Squid sends it as `Bearer` to `api.github.com`.
+
+`__GITHUB_GIT_BASIC__` is that same token in the form git HTTPS accepts. On Linux, with the token in `$TOKEN`:
+
+```bash
+printf 'x-access-token:%s' "$TOKEN" | base64 -w 0
+```
+
+Squid sends that value as `Basic` to `github.com`. A line wrap in the middle of the value breaks the gate file.
 
 The box calls `http://model.hermetarium.test/v1`. Squid drops that call's `Authorization` and sets the model key. It also sets `Host` from this file. The rest of the web is HTTPS. Squid decrypts it. The I/O log then has the host and the path. The page body stays out of the log. Hosts on the pass-through list keep their own certificate. Squid speaks only HTTP/1.1 after it decrypts, so that list is for a program that pins a certificate or needs HTTP/2. The shipped list is `pinned.example`. Replace it with the hosts you need. A passed-through connection is in the log as the name, not the path.
 
-`api.github.com` is decrypted, not passed through. Squid drops any `Authorization` the box sends to that host and sets the API token. Reads are allowed. The writes that are allowed are creating a repository, a pull request, an issue, or a comment. Deletes, contents writes, Git data writes, and repository settings are denied. Cleartext to that host is denied, so the token is not sent on port 80.
+`github.com` and `api.github.com` are decrypted, not passed through. Squid drops any `Authorization` the box sends to those hosts and sets the gate credential. Git push and fetch use `https://github.com`. `gh` uses `api.github.com`, including pull requests and Projects. The gate does not choose which of those calls succeed. The token's own permissions are the limit. Cleartext to either host is denied, so the token is not sent on port 80. A path containing `..` or `%` on either host is denied.
 
 Names resolve through the gate. A query to another DNS server gets no answer.
 
@@ -54,13 +62,12 @@ The inhabitant sets no proxy and installs no certificate of its own. When you st
 
 Nobody logs in to a service from inside the habitat. Do not run `opencode auth login` or `gh auth login`, and do not save a git password in the habitat. Do not put a token in the image, in `opencode.json`, or in the habitat's files.
 
-Three credentials belong to this setup. Two are in the gate file. The third is not in this folder yet.
+Two credentials belong to this setup. Both are in the gate file.
 
-- Model key, in the gate file, one per habitat. The image holds a placeholder so OpenCode will start.
-- API token, in the gate file. A fine-grained GitHub token for all repositories: repository creation, pull requests, and issues. No Contents. No Administration.
-- Push token, held by a Push Guard of Git Warden when that exists. A fine-grained token for all repositories: Contents write. No Workflows. No Administration. Do not put this token in the gate file, the image, or the habitat. This folder does not hold it.
+- Model key, one per habitat. The image holds a placeholder so OpenCode will start.
+- One GitHub token, used for `git` and for `gh`. Its permissions on GitHub are the limit. The gate file also holds the `Basic` form of that same token. The image holds no real GitHub token. If `gh` will not send a request without one, set `GH_TOKEN` to a placeholder inside the habitat. The gate replaces `Authorization`. Leave git with no credential and no credential helper.
 
-Per GitHub's docs, a token without the Workflows permission cannot change files under `.github/workflows`.
+Per GitHub's docs, a token without the Workflows permission cannot change files under `.github/workflows`. The gate does not add that limit.
 
 ## From a fresh clone
 
@@ -74,7 +81,7 @@ go build -o inhabitants/opencode/porter ./porter
 docker build -t opencode inhabitants/opencode
 ```
 
-Copy the gate file and fill the five words. Edit the copy, not the file in git.
+Copy the gate file and fill the six words. Edit the copy, not the file in git.
 
 ```bash
 cp omakase/opencode-tui/squid.conf /tmp/opencode-tui.acl
@@ -141,14 +148,14 @@ The habitat's files live under `HERMETARIUM_ROOT`, else this checkout, else `$XD
 
 - The inhabitant is inside the microVM. Root there is not root on the host.
 - Nothing is published on the host. The bridge gateway is not allowed onto port 18081.
-- The model key and the GitHub API token are not in the image. The gate sets each on its own host. The API token is not attached to other hosts.
+- The model key and the GitHub token are not in the image. The gate sets the model key on the model host, the GitHub token on `api.github.com`, and the git form of that token on `github.com`. The token is not attached to other hosts.
 - A call leaves only through the gate. A DNS query to another server gets no answer. Names that do resolve go through the gate.
-- HTTPS is decrypted, except the pass-through list. The I/O log has the host and the path. Deletes and contents writes on `api.github.com` are denied.
+- HTTPS is decrypted, except the pass-through list. The I/O log has the host and the path. Cleartext to `github.com` and `api.github.com` is denied. A path containing `..` or `%` on those hosts is denied.
 
 ## What this does not protect
 
 - `destroy` does not keep the inhabitant's files. There is no data disk.
-- Git push is not checked. A push straight to a remote is ordinary HTTPS, and this gate file does not refuse it. The push token is not here. Until a Push Guard for this habitat exists, do not push from the habitat.
+- The gate does not review a push or a `gh` call. GitHub accepts whatever the token allows. A Push Guard for one repository is Habitat 2.
 - The open web is a way out. The inhabitant can send a page body to any decrypted host. The log does not store that body.
 - The terminal is not in the I/O log. Escape sequences from the habitat reach your terminal as they are.
 - A program that pins its own certificate list still refuses the gate certificate, unless you pass that host through.
@@ -161,8 +168,6 @@ The owner fills this in once, against a real model and real repositories. The bo
 - [ ] One turn in the terminal against a real model. The key was only in the gate file.
 - [ ] `hermetarium logs` shows that call's host and path, and not the key.
 - [ ] A web page loads over HTTPS, and the I/O log has its host and path.
-- [ ] `api.github.com` creates a repository with the gate token. The token is not in the habitat.
+- [ ] One push over HTTPS to `github.com`. The credential was only in the gate file.
+- [ ] `gh` creates a pull request or a Project. The token was only in the gate file.
 - [ ] No login to a service from inside the habitat.
-- [ ] A repository the owner added to the Push Guard accepts a clean push and refuses a push that breaks a rule.
-
-The last line waits on Git Warden. The others do not.
