@@ -1,5 +1,6 @@
-// Calls the OpenCode terminal gate the way the box does: a page, a repository
-// create, the open-web denials, and one pass-through connect.
+// Calls the OpenCode terminal gate the way the box does: a page, GitHub over
+// HTTPS for git and for the API, the path and cleartext denials, and one
+// pass-through connect.
 package main
 
 import (
@@ -26,16 +27,20 @@ func main() {
 	}
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 	call(client, http.MethodGet, "https://other.example/hello")
+	call(client, http.MethodGet, "https://github.com/octo/hello.git/info/refs?service=git-upload-pack")
+	call(client, http.MethodPost, "https://github.com/octo/hello.git/git-receive-pack")
 	call(client, http.MethodPost, "https://api.github.com/user/repos")
 	call(client, http.MethodDelete, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPost, "https://api.github.com/graphql")
 	call(client, http.MethodPatch, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/hello/git/refs")
+	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
 	// ".." is still ".." when Squid matches urlpath_regex. "%25" is still "%".
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/../pulls")
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/a%25b/pulls")
-	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
+	call(client, http.MethodPost, "https://github.com/octo/../hello.git/git-receive-pack")
 	call(client, http.MethodGet, "http://api.github.com/user")
+	call(client, http.MethodGet, "http://github.com/octo/hello.git/info/refs?service=git-upload-pack")
 	showUnverifiedCert("pinned.example")
 	fmt.Println("PAGE_DONE")
 }
