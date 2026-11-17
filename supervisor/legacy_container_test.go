@@ -67,13 +67,15 @@ func TestDestroyRemovesLegacyContainers(t *testing.T) {
 	}
 	joined := strings.Join(rms, "\n")
 	for _, name := range []string{
-		"htm-" + id + "-fc", "htm-fc-" + id,
-		"htm-" + id + "-gate", "htm-gate-" + id,
-		"htm-" + id + "-dns", "htm-dns-" + id,
+		"htm-fc-" + id, "htm-gate-" + id,
+		"htm-" + id + "-fc", "htm-" + id + "-gate", "htm-" + id + "-dns",
 	} {
 		if !strings.Contains(joined, name) {
 			t.Fatalf("destroy did not remove %s\n%s", name, joined)
 		}
+	}
+	if strings.Contains(joined, "htm-dns-"+id) {
+		t.Fatalf("destroy removed legacy dns without a stored name or this habitat's /log\n%s", joined)
 	}
 	if _, err := os.Stat(rootfs); !os.IsNotExist(err) {
 		t.Fatal("rootfs still present after the old Firecracker container was removed")
@@ -111,12 +113,101 @@ func TestDestroyRemovesLegacyWeakContainers(t *testing.T) {
 	}
 	joined := strings.Join(rms, "\n")
 	for _, name := range []string{
-		"htm-" + id + "-box", "htm-box-" + id,
-		"htm-" + id + "-gate", "htm-gate-" + id,
-		"htm-" + id + "-dns", "htm-dns-" + id,
+		"htm-box-" + id, "htm-gate-" + id,
+		"htm-" + id + "-box", "htm-" + id + "-gate", "htm-" + id + "-dns",
 	} {
 		if !strings.Contains(joined, name) {
 			t.Fatalf("destroy did not remove %s\n%s", name, joined)
+		}
+	}
+	if strings.Contains(joined, "htm-dns-"+id) {
+		t.Fatalf("destroy removed legacy dns without a stored name or this habitat's /log\n%s", joined)
+	}
+}
+
+func TestDestroyDoesNotRemoveCollidingHabitat(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HERMETARIUM_ROOT", root)
+	if legacyContainerName("y-fc", "gate") != ContainerName("gate-y", "fc") {
+		t.Fatalf("legacy gate of y-fc is %s, gate-y firecracker is %s",
+			legacyContainerName("y-fc", "gate"), ContainerName("gate-y", "fc"))
+	}
+	write := func(id string) string {
+		dir := filepath.Join(root, "var", id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		inst := &Instance{
+			ID: id, Wall: "strong", Dir: dir,
+			FirecrackerContainer: ContainerName(id, "fc"),
+			Gate:                 ContainerName(id, "gate"),
+		}
+		if err := writeInstance(inst); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	dirY := write("y-fc")
+	dirG := write("gate-y")
+	mounts := map[string]string{
+		ContainerName("y-fc", "fc"):     dirY,
+		ContainerName("y-fc", "gate"):   dirY,
+		ContainerName("y-fc", "dns"):    dirY,
+		ContainerName("gate-y", "fc"):   dirG,
+		ContainerName("gate-y", "gate"): dirG,
+		ContainerName("gate-y", "dns"):  dirG,
+	}
+	var rms []string
+	stubDocker(t, func(_ time.Duration, args ...string) (string, error) {
+		if len(args) == 0 {
+			return "", fmt.Errorf("empty docker args")
+		}
+		name := args[len(args)-1]
+		switch args[0] {
+		case "rm":
+			rms = append(rms, strings.Join(args, " "))
+			for _, n := range args[2:] {
+				delete(mounts, n)
+			}
+			return "", nil
+		case "inspect":
+			format := ""
+			for i, a := range args {
+				if a == "-f" && i+1 < len(args) {
+					format = args[i+1]
+				}
+			}
+			src, ok := mounts[name]
+			if !ok {
+				return "", fmt.Errorf("Error: No such object: %s", name)
+			}
+			if strings.Contains(format, "/log") {
+				return src + "\n", nil
+			}
+			return "id\n", nil
+		default:
+			return "", nil
+		}
+	})
+	if err := Destroy(root, "y-fc"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(rms, "\n")
+	for _, name := range []string{
+		ContainerName("y-fc", "fc"),
+		ContainerName("y-fc", "gate"),
+		ContainerName("y-fc", "dns"),
+	} {
+		if !strings.Contains(joined, name) {
+			t.Fatalf("destroy did not remove %s\n%s", name, joined)
+		}
+	}
+	if _, ok := mounts[ContainerName("gate-y", "fc")]; !ok {
+		t.Fatalf("destroy removed gate-y's firecracker container\n%s", joined)
+	}
+	for _, name := range []string{ContainerName("gate-y", "gate"), ContainerName("gate-y", "dns")} {
+		if _, ok := mounts[name]; !ok {
+			t.Fatalf("destroy removed %s\n%s", name, joined)
 		}
 	}
 }
