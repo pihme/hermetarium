@@ -52,7 +52,7 @@ Squid sends that value as `Basic` to `github.com`. A line wrap in the middle of 
 
 The box calls `http://model.hermetarium.test/v1`. Squid drops that call's `Authorization` and sets the model key. It also sets `Host` from this file. The rest of the web is HTTPS. Squid decrypts it. The I/O log then has the host and the path. The page body stays out of the log. Hosts on the pass-through list keep their own certificate. Squid speaks only HTTP/1.1 after it decrypts, so that list is for a program that pins a certificate or needs HTTP/2. The shipped list is `pinned.example`. Replace it with the hosts you need. A passed-through connection is in the log as the name, not the path.
 
-`github.com` and `api.github.com` are decrypted, not passed through. Squid drops any `Authorization` the box sends to those hosts and sets the gate credential. Git push and fetch use `https://github.com`. `gh` uses `api.github.com`, including pull requests and Projects. The gate does not choose which of those calls succeed. The token's own permissions are the limit. Cleartext to either host is denied, so the token is not sent on port 80. A path containing `..` or `%` on either host is denied.
+`github.com` and `api.github.com` are decrypted, not passed through. Squid drops any `Authorization` the box sends to those hosts and sets the gate credential. Git push and fetch use `https://github.com`. `gh` uses `api.github.com`, including pull requests and Projects. The gate does not choose which of those calls succeed. The token's own permissions are the limit. Cleartext to either host is denied, so the token is not sent on port 80. A path containing `..` or an encoded `..` (`%2e%2e`) is denied. A `%` in the query string is allowed, and so is `%2F` in a branch name.
 
 Names resolve through the gate. A query to another DNS server gets no answer.
 
@@ -150,7 +150,7 @@ The habitat's files live under `HERMETARIUM_ROOT`, else this checkout, else `$XD
 - Nothing is published on the host. The bridge gateway is not allowed onto port 18081.
 - The model key and the GitHub token are not in the image. The gate sets the model key on the model host, the GitHub token on `api.github.com`, and the git form of that token on `github.com`. The token is not attached to other hosts.
 - A call leaves only through the gate. A DNS query to another server gets no answer. Names that do resolve go through the gate.
-- HTTPS is decrypted, except the pass-through list. The I/O log has the host and the path. Cleartext to `github.com` and `api.github.com` is denied. A path containing `..` or `%` on those hosts is denied.
+- HTTPS is decrypted, except the pass-through list. The I/O log has the host and the path. Cleartext to `github.com` and `api.github.com` is denied. A path containing `..` or an encoded `..` is denied. A `%` in the query string is allowed.
 
 ## What this does not protect
 

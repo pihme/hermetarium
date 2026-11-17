@@ -35,8 +35,15 @@ func main() {
 	call(client, http.MethodPatch, "https://api.github.com/repos/octo/hello")
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/hello/git/refs")
 	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
-	// ".." is still ".." when Squid matches urlpath_regex. "%25" is still "%".
+	// gh percent-encodes query values and slashes inside a branch name.
+	call(client, http.MethodGet, "https://api.github.com/repos/octo/hello/actions/runs?branch=feature%2Fx")
+	call(client, http.MethodGet, "https://api.github.com/search/issues?q=repo%3Apihme%2Fhermetarium")
+	call(client, http.MethodGet, "https://api.github.com/repos/octo/hello/branches/feature%2Fx")
+	call(client, http.MethodGet, "https://api.github.com/search/issues?q=a..b")
+	// ".." in the path is traversal. "%25" is a percent, not "..".
+	// "%2e%2e" is an encoded "..".
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/../pulls")
+	call(client, http.MethodPost, "https://api.github.com/repos/octo/%2e%2e/pulls")
 	call(client, http.MethodPost, "https://api.github.com/repos/octo/a%25b/pulls")
 	call(client, http.MethodPost, "https://github.com/octo/../hello.git/git-receive-pack")
 	call(client, http.MethodGet, "http://api.github.com/user")

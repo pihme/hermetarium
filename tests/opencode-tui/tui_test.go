@@ -112,8 +112,11 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 	if !supervisor.ACLOpensWeb(conf) {
 		t.Fatal("gate file would not resolve outside names")
 	}
-	if !squidLine(gate, "ssl_bump splice passthrough") || !squidLine(gate, "request_header_access Authorization deny modelhost") || !squidLine(gate, "request_header_access Authorization deny githubhost") || !squidLine(gate, "request_header_access Authorization deny githost") || !squidLine(gate, `request_header_add Authorization "Basic __GITHUB_GIT_BASIC__" githost`) {
+	if !squidLine(gate, "ssl_bump splice passthrough") || !squidLine(gate, "request_header_access Authorization deny modelhost") || !squidLine(gate, "request_header_access Authorization deny githubhost") || !squidLine(gate, "request_header_access Authorization deny githost") || !squidLine(gate, `request_header_add Authorization "Basic __GITHUB_GIT_BASIC__" githost`) || !squidLine(gate, "acl gh_traverse urlpath_regex -i ^[^?]*\\.\\. ^[^?]*%2e%2e ^[^?]*%2e\\. ^[^?]*\\.%2e") {
 		t.Fatal("gate file lost the model or GitHub header rules")
+	}
+	if strings.Contains(gate, `urlpath_regex \.\. %`) {
+		t.Fatal("gate file still denies every percent")
 	}
 }
 
@@ -269,8 +272,13 @@ func TestOpenCodeTUI(t *testing.T) {
 				"HTTP PATCH https://api.github.com/repos/octo/hello 200",
 				"HTTP POST https://api.github.com/repos/octo/hello/git/refs 200",
 				"HTTP PUT https://api.github.com/repos/octo/hello/contents/README.md 200",
+				"HTTP GET https://api.github.com/repos/octo/hello/actions/runs?branch=feature%2Fx 200",
+				"HTTP GET https://api.github.com/search/issues?q=repo%3Apihme%2Fhermetarium 200",
+				"HTTP GET https://api.github.com/repos/octo/hello/branches/feature%2Fx 200",
+				"HTTP GET https://api.github.com/search/issues?q=a..b 200",
 				"HTTP POST https://api.github.com/repos/octo/../pulls 403",
-				"HTTP POST https://api.github.com/repos/octo/a%25b/pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/%2e%2e/pulls 403",
+				"HTTP POST https://api.github.com/repos/octo/a%25b/pulls 200",
 				"HTTP POST https://github.com/octo/../hello.git/git-receive-pack 403",
 				"HTTP GET http://api.github.com/user 403",
 				"HTTP GET http://github.com/octo/hello.git/info/refs?service=git-upload-pack 403",
@@ -326,7 +334,18 @@ func TestOpenCodeTUI(t *testing.T) {
 			if !ok || pageAuth != "Bearer "+boxToken || strings.Contains(pageAuth, githubToken) || strings.Contains(pageAuth, modelKey) {
 				t.Fatalf("page auth %q\n%s", pageAuth, ghText)
 			}
-			if strings.Contains(ghText, "..") || strings.Contains(ghText, "%") || strings.Contains(ghText, "path=/user host=") {
+			for _, sub := range []string{
+				"path=/repos/octo/a%25b/pulls",
+				"branch=feature%2Fx",
+				"q=repo%3Apihme%2Fhermetarium",
+				"path=/repos/octo/hello/branches/feature%2Fx",
+				"q=a..b",
+			} {
+				if !strings.Contains(ghText, sub) {
+					t.Fatalf("gh read missing %s\n%s", sub, ghText)
+				}
+			}
+			if strings.Contains(ghText, "path=/user host=") || pathHasTraversal(ghText) {
 				t.Fatalf("denied request reached the mock\n%s", ghText)
 			}
 			if err := supervisor.SyncInstanceLog(dir); err != nil {
@@ -355,6 +374,11 @@ func TestOpenCodeTUI(t *testing.T) {
 				{"DELETE", "/repos/octo/hello", "api.github.com"},
 				{"GET", "hello.git/info/refs", "github.com"},
 				{"POST", "git-receive-pack", "github.com"},
+				{"GET", "/actions/runs", "api.github.com"},
+				{"GET", "/search/issues", "api.github.com"},
+				// The log parser decodes %2F, so the branch segment is feature/x.
+				{"GET", "branches/feature/x", "api.github.com"},
+				{"POST", "/a%b/", "api.github.com"},
 			} {
 				rec, found := findGitHub(recs, allow.method, allow.path, allow.dest, "https")
 				if !found || !rec.Allowed || rec.TLS != "decrypted" || rec.Port != 443 {
@@ -363,7 +387,6 @@ func TestOpenCodeTUI(t *testing.T) {
 			}
 			for _, deny := range []struct{ method, path, dest, protocol string }{
 				{"POST", "..", "api.github.com", "https"},
-				{"POST", "%", "api.github.com", "https"},
 				{"POST", "..", "github.com", "https"},
 				{"GET", "/user", "api.github.com", "http"},
 				{"GET", "hello.git/info/refs", "github.com", "http"},
@@ -395,6 +418,22 @@ func repoRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func pathHasTraversal(report string) bool {
+	for _, line := range strings.Split(report, "\n") {
+		i := strings.Index(line, "path=")
+		if i < 0 {
+			continue
+		}
+		path, _, _ := strings.Cut(line[i+len("path="):], " host=")
+		path, _, _ = strings.Cut(path, "?")
+		low := strings.ToLower(path)
+		if strings.Contains(path, "..") || strings.Contains(low, "%2e%2e") || strings.Contains(low, "%2e.") || strings.Contains(low, ".%2e") {
+			return true
+		}
+	}
+	return false
 }
 
 func squidLine(conf, want string) bool {
