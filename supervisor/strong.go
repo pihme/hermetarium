@@ -436,8 +436,10 @@ func endStrong(id, dir string) {
 	_ = os.RemoveAll(attachKeyDir(filepath.Dir(filepath.Dir(dir)), id))
 }
 
-// firecrackerNames is the current name, the pre-rename name, and the name
-// stored in the instance file when that file is present.
+// firecrackerNames is this habitat's Firecracker container only.
+// A pre-rename name is included when the instance file stored it, or when
+// that container's /log is this habitat. htm-gate-y-fc is habitat gate-y's
+// container, not the legacy gate of y-fc.
 func firecrackerNames(id, dir string) []string {
 	stored := ""
 	if dir != "" {
@@ -445,17 +447,92 @@ func firecrackerNames(id, dir string) []string {
 			stored = inst.FirecrackerContainer
 		}
 	}
-	return []string{ContainerName(id, "fc"), legacyContainerName(id, "fc"), stored}
+	return habitatContainerNames(id, "fc", stored, dir)
 }
 
-// refuseLiveFirecracker fails create when any Firecracker container for this
-// id is still running. The instance file may still name htm-fc-<id>.
+// habitatContainerNames is the current name and the pre-rename name, each
+// kept only when it belongs to this habitat. The two schemes are each
+// collision-free; mixed, legacyContainerName("y-fc", "gate") is
+// ContainerName("gate-y", "fc").
+func habitatContainerNames(id, part, stored, dir string) []string {
+	var names []string
+	for _, name := range []string{ContainerName(id, part), legacyContainerName(id, part), stored} {
+		if name == "" || containsName(names, name) {
+			continue
+		}
+		if containerBelongs(name, stored, dir) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func containsName(names []string, name string) bool {
+	for _, have := range names {
+		if have == name {
+			return true
+		}
+	}
+	return false
+}
+
+// containerBelongs is true when this instance recorded the name, or the
+// container's /log mount is this habitat's directory.
+func containerBelongs(name, stored, dir string) bool {
+	if name == "" {
+		return false
+	}
+	if stored != "" && name == stored {
+		return true
+	}
+	return logDirIs(name, dir)
+}
+
+// logDirIs reports whether name's /log mount is dir. A missing container
+// is not a match. This is the same mount check as omakase/backup.sh.
+func logDirIs(name, dir string) bool {
+	if name == "" || dir == "" {
+		return false
+	}
+	out, err := Docker(5*time.Second, "inspect", "-f",
+		`{{range .Mounts}}{{if eq .Destination "/log"}}{{.Source}}{{end}}{{end}}`, name)
+	if err != nil {
+		return false
+	}
+	got := strings.TrimSpace(out)
+	if got == "" {
+		return false
+	}
+	return samePath(got, dir)
+}
+
+func samePath(a, b string) bool {
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	if x, err := filepath.EvalSymlinks(aa); err == nil {
+		aa = x
+	}
+	if x, err := filepath.EvalSymlinks(bb); err == nil {
+		bb = x
+	}
+	return aa == bb
+}
+
+// refuseLiveFirecracker fails create when this habitat's Firecracker
+// container is still running. The instance file may still name htm-fc-<id>.
 func refuseLiveFirecracker(root, id string) error {
+	dir := filepath.Join(VarDir(root), id)
 	stored := ""
 	if inst, err := loadInstance(root, id); err == nil {
 		stored = inst.FirecrackerContainer
+		if inst.Dir != "" {
+			dir = inst.Dir
+		}
 	}
-	return anyContainerExists(ContainerName(id, "fc"), legacyContainerName(id, "fc"), stored)
+	return anyContainerExists(habitatContainerNames(id, "fc", stored, dir)...)
 }
 
 // anyContainerExists is nil when every named container is absent. An empty
@@ -566,12 +643,14 @@ func DestroyStrong(id string) error {
 	DockerIgnore("rm", "-f", "htm-mock-"+id)
 	stopGateDNS(id)
 	removeGate(id)
-	names := []string{ContainerName(id, "fc"), legacyContainerName(id, "fc")}
+	stored, dir := "", ""
 	if root, err := Root(); err == nil {
 		if inst, err := loadInstance(root, id); err == nil {
-			names = append(names, inst.FirecrackerContainer)
+			stored = inst.FirecrackerContainer
+			dir = inst.Dir
 		}
 	}
+	names := habitatContainerNames(id, "fc", stored, dir)
 	dockerRemove("-f", names...)
 	if root, err := Root(); err == nil && anyContainerExists(names...) == nil {
 		_ = os.RemoveAll(attachKeyDir(root, id))

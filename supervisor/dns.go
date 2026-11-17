@@ -120,5 +120,11 @@ func gateResolvers(container string) ([]string, error) {
 }
 
 func stopGateDNS(id string) {
-	dockerRemove("-f", ContainerName(id, "dns"), legacyContainerName(id, "dns"))
+	dir := ""
+	if root, err := Root(); err == nil {
+		if inst, err := loadInstance(root, id); err == nil {
+			dir = inst.Dir
+		}
+	}
+	dockerRemove("-f", habitatContainerNames(id, "dns", "", dir)...)
 }
