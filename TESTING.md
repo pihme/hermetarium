@@ -232,7 +232,7 @@ Turn one is the same `id -u` prompt; the reply contains `0`. Turn two POSTs `Wha
 
 ## CI
 
-Job `test` (ubuntu-24.04, 40 minutes) opens `/dev/kvm`, caches `.cache`, runs `make build`, then `make test`.
+Job `test` (ubuntu-24.04, 40 minutes) opens `/dev/kvm`, restores a shared Actions cache of the Firecracker and kernel downloads (not guest images), runs `make build`, then `make test`.
 
 Job `test-live` (ubuntu-24.04, 30 minutes) exports `HERMETARIUM_ANTHROPIC_API_KEY`, and `HERMETARIUM_XAI_API_KEY` from repository secrets. If both are empty, the job exits 0 without calling `make test-live`.
 

@@ -68,10 +68,22 @@ jobs:
           sudo rm /etc/docker/daemon.json
           bash .github/scripts/restart-docker.sh
 
-      - uses: actions/cache@v6
+      # Shared across matrix groups: Firecracker tarball/binary and the pinned
+      # kernel only. Guest images (oci-<id>/, rootfs-*.ext4) are packed fresh
+      # each run and are not cached. Restore in every leg; save only from unit
+      # on a miss so concurrent saves of the same key do not race. A later
+      # save of an existing key would not fail, but the first finisher might
+      # not yet have the downloads.
+      - name: Restore Firecracker and kernel downloads
+        id: fc-assets
+        uses: actions/cache/restore@v6
         with:
-          path: .cache
-          key: ${{ runner.os }}-fc-${{ matrix.name }}-${{ hashFiles('supervisor/strong.go', 'supervisor/oci.go', 'firecracker-scripts/pack-oci.sh', 'examples/**') }}
+          path: |
+            .cache/vmlinux-*
+            .cache/firecracker
+            .cache/firecracker.stamp
+            .cache/firecracker-*.tgz
+          key: ${{ runner.os }}-fc-assets-${{ hashFiles('supervisor/strong.go') }}
 
       - name: Build
         run: make build
@@ -84,6 +96,17 @@ jobs:
         run: |
           rm -f supervisor/gatedns.bin
           python3 .github/scripts/release.py --check-build
+
+      - name: Save Firecracker and kernel downloads
+        if: always() && !cancelled() && steps.fc-assets.outputs.cache-hit != 'true' && matrix.name == 'unit'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            .cache/vmlinux-*
+            .cache/firecracker
+            .cache/firecracker.stamp
+            .cache/firecracker-*.tgz
+          key: ${{ steps.fc-assets.outputs.cache-primary-key }}
 
 
   test:
