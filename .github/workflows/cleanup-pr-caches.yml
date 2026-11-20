@@ -1,0 +1,51 @@
+# Delete Actions caches scoped to refs/pull/<n>/merge when that PR is closed
+# or merged. PR runs keep using the cache while the PR is open.
+# No checkout: only github.event.pull_request.number and the Actions cache API.
+# Fork PRs: the pull_request token is read-only, so this job cannot delete
+# caches there. This repo does not accept outside pull requests.
+name: Cleanup PR caches
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    name: delete-pr-caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete Actions caches for this PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          ref="refs/pull/${PR_NUMBER}/merge"
+          encoded=$(jq -nr --arg r "$ref" '$r | @uri')
+          ids=$(gh api --paginate \
+            "repos/${GH_REPO}/actions/caches?ref=${encoded}&per_page=100" \
+            --jq '.actions_caches[].id')
+          if [ -z "${ids}" ]; then
+            echo "No caches for ${ref}"
+            exit 0
+          fi
+          deleted=0
+          failed=0
+          for id in ${ids}; do
+            if gh cache delete "${id}"; then
+              deleted=$((deleted + 1))
+            else
+              echo "::warning::Failed to delete cache ${id}"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "Deleted ${deleted} cache(s) for ${ref}"
+          if [ "${failed}" -ne 0 ]; then
+            echo "::warning::${failed} cache(s) could not be deleted"
+          fi
