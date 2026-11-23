@@ -30,6 +30,7 @@ COPY bashrc /root/.bashrc
 COPY bash_profile /root/.bash_profile
 COPY daemon.json /etc/docker/daemon.json
 COPY start.sh /usr/local/bin/opencode-start
+COPY day-one.md /etc/hermetarium/day-one.md
 RUN chmod 755 /usr/local/bin/opencode-start /usr/local/bin/porter
 ENV HARNESS=opencode
 ENV HARNESS_WORKDIR=/work

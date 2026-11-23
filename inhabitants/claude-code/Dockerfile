@@ -8,6 +8,7 @@ ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
 WORKDIR /work
 COPY porter /usr/local/bin/porter
 COPY settings.json /root/.claude/settings.json
+COPY day-one.md /etc/hermetarium/day-one.md
 ENV HARNESS=claude
 ENV HARNESS_WORKDIR=/work
 ENV ANTHROPIC_BASE_URL=http://claude.hermetarium.test

@@ -84,6 +84,7 @@ git clone https://github.com/pihme/hermetarium.git
 cd hermetarium
 make build
 go build -o inhabitants/opencode/porter ./porter
+cp inhabitants/day-one.md inhabitants/opencode/day-one.md
 docker build -t opencode inhabitants/opencode
 ```
 
