@@ -185,6 +185,8 @@ Ordinary HTTPS is the block marked `OPEN-HTTPS` in those same files. Comment tho
 
 The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
 
+The CA, the shared leaf key inside one habitat, the roughly ten-year root, and the blast radius of a leak are in [SPEC §8a](SPEC.md#8a-wall-mitm).
+
 `examples/openweb/squid.conf` is an open-web gate file. It decrypts HTTPS, except hosts on its pass-through list, which keep their own certificate. `api.github.com` gets the bearer token from that file, and the box's `Authorization` on that host is dropped. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Deletes, contents writes, Git data writes, and repository settings are denied. The token is not in the image. Two fine-grained tokens are described in [examples/openweb/README.md](examples/openweb/README.md).
 
 The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate, including for a process that does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web (an `http_access allow` other than the inbound, vendor, and probe rules, which is what the `OPEN-IN` and `OPEN-HTTPS` blocks add). The habitat cannot resolve outside names through any resolver except the gate. On the strong wall the guest's `/etc/hosts` includes `127.0.0.1 localhost`.

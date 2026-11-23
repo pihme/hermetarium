@@ -117,6 +117,24 @@ How a credentialed destination is attached:
 
 Fail closed if `--acl` is missing or Squid cannot start. Claude and Grok gate files use `__VENDOR_KEY__` for the inject header; tests substitute a mock key or a live env var before `create`. OpenCode uses the `__MODEL_*` words, filled with the pretend-model key, and has no live case. The supervisor does not read vendor API keys from its environment.
 
+## 8a. Wall MITM
+
+The wall performs HTTPS interception (MITM) so the gate can attach credentials. The private key stays on the gate, as in §8 and §9. This section records that design as it is implemented, and the blast radius that follows. It does not change the design, shorten the root, or give each host its own key.
+
+Every `create` makes a fresh habitat with its own CA. `PrepareMITM` writes that CA into `var/<id>/mitm` and the public certificate alone into `var/<id>/mitm-pub`. A leaked leaf key affects only that one habitat.
+
+Within one habitat, Squid signs a leaf for every intercepted host (`generate-host-certificates=on`, `security_file_certgen`) under that habitat's self-signed root. The leaves differ only in their SANs. The public key is the same on every intercepted host in that habitat, so nothing downstream can tell two hosts apart by key.
+
+The root is self-signed, Common Name `Hermetarium`, with no intermediate. The chain is `leaf -> CN=Hermetarium`. It is valid for about ten years from `create` (`10 * 365` days).
+
+The private key stays on the host at `var/<id>/mitm/ca.key`. The gate container sees it as `/log/mitm/ca.key`. It never enters the inhabitant image or the guest. The habitat receives only the public CA: on the weak wall it is bind-mounted at `/etc/ssl/hermetarium-mitm.crt`; on the strong wall `gate-cert.sh` fetches it from `http://<gate>:3131/ca.pem` (`GateCAPort`) and installs it at the same path. `MITMTrustEnv` and `gate-cert.sh` also set `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, and `PIP_CERT`, and add the CA to the system trust store when `update-ca-certificates` is present.
+
+Blast radius:
+
+1. Within one habitat, a single leaked leaf key lets an attacker impersonate any intercepted, allowlisted host to the inhabitant.
+2. Over time, a leaked key stays valid for the whole root lifetime, including in every image that was built before a later rotation. The inhabitant keeps trusting that root and cannot notice the leak.
+3. The key never reaches the habitat, so the primary threat model (the inhabitant as attacker) cannot obtain it directly. Realistic leak paths are a Squid or host exploit, or a compromised Squid image.
+
 ## 9. Inhabitants
 
 Hermetarium does not care which program it holds. One or more inhabitants start already inside and may change the image. They talk to the outside only through the logged path. The outside talks in the same way: the inhabitant **is** an HTTP server on that path.
