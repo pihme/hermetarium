@@ -274,17 +274,22 @@ If the habitat is already stopped, edit the file, remove `squid.pid`, start the 
 
 ### Registry hosts
 
-On the files shipped with this repository, the passthrough ACL is only `pinned.example` (`examples/openweb/squid.conf` and `omakase/opencode-tui/squid.conf`). The official inhabitant gate files have the `OPEN-HTTPS` block commented out, so they do not intercept or pass through ordinary HTTPS until you turn that block on. To let an in-habitat Docker daemon pull through the wall and keep the registry's own certificate, add these names to `acl passthrough` and allow them:
+`omakase/opencode-tui/squid.conf` ships with these registry hosts on its passthrough list, next to `pinned.example`. Each one keeps its own certificate:
 
 ```
-registry-1.docker.io
-auth.docker.io
-production.cloudfront.docker.com
+registry-1.docker.io auth.docker.io production.cloudfront.docker.com production.cloudflare.docker.com
+registry.npmjs.org
+repo.maven.apache.org repo1.maven.org
+crates.io static.crates.io index.crates.io
+pypi.org files.pythonhosted.org
+deb.debian.org security.debian.org
 ```
 
-The blob CDN is `production.cloudfront.docker.com` (CloudFront). It is not `production.cloudflare.docker.com`. Keep the CloudFront name in the list; add the Cloudflare name only if you have seen that host used.
+Docker Hub sends layers from `production.cloudfront.docker.com`. The Cloudflare name is on the list in case Docker switches CDN. From some cloud machines Docker Hub sends layers from an Amazon S3 host instead. That host is not on the list, so the gate decrypts it. The [OpenCode terminal README](omakase/opencode-tui/README.md) has the same list by ecosystem.
 
-A `docker pull` inside the habitat already goes through the wall, because the in-habitat daemon runs with `--network host`. If the wall intercepts the registry, the daemon may still accept the wall-signed certificate when it inherits the habitat's CA environment variables. Passthrough is the cleaner choice: the daemon sees the real certificates, and you do not have to trust the wall CA for pulls. That default is not shipped in this repository yet.
+`examples/openweb/squid.conf` passes only `pinned.example` through. The official inhabitant gate files have the `OPEN-HTTPS` block commented out, so they neither decrypt nor pass through ordinary HTTPS until you turn that block on. To give one of those gates the same registry pass-through, copy the `acl passthrough` lines you need from the OpenCode terminal gate file and allow those hosts.
+
+A `docker pull` inside the habitat goes through the wall, because the in-habitat daemon runs with `--network host`. With the registry passed through, the daemon sees the registry's own certificate, so pulls do not need the wall CA. An image that `docker build` makes does not get the gate certificate. To add a host to a running habitat, use the cold change above.
 
 ### Moving a habitat
 
