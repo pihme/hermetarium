@@ -839,6 +839,152 @@ func TestInflightCapIs32(t *testing.T) {
 	}
 }
 
+func TestTCPConnCapIs128(t *testing.T) {
+	if maxTCPConns != 128 {
+		t.Fatalf("maxTCPConns %d", maxTCPConns)
+	}
+	if maxTCPConns <= maxInflight {
+		t.Fatalf("maxTCPConns %d not above the %d query slots", maxTCPConns, maxInflight)
+	}
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "dns.conf")
+	if err := os.WriteFile(conf, []byte("open 0\ngate 172.16.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := loadGateDNS(conf, filepath.Join(dir, "dns.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.log.Close()
+	if got := cap(g.conns); got != maxTCPConns {
+		t.Fatalf("loadGateDNS conns %d", got)
+	}
+	if got := cap(g.slots); got != maxInflight {
+		t.Fatalf("loadGateDNS slots %d", got)
+	}
+}
+
+func standInGate(t *testing.T, conns int, wait time.Duration) *gateDNS {
+	t.Helper()
+	return &gateDNS{
+		open:    false,
+		gate:    net.ParseIP("172.16.0.1").To4(),
+		names:   map[string]struct{}{"probe.hermetarium.test": {}},
+		slots:   make(chan struct{}, maxInflight),
+		conns:   make(chan struct{}, conns),
+		log:     newLog(t),
+		tcpWait: wait,
+	}
+}
+
+func waitConns(g *gateDNS, want int) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for len(g.conns) != want && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	return len(g.conns) == want
+}
+
+func TestTCPConnCap(t *testing.T) {
+	const conns = 2
+	g := standInGate(t, conns, 5*time.Second)
+	udp, ln := serveGate(t, g)
+	addr := ln.Addr().String()
+
+	// Idle connections send nothing, so they hold no query slot.
+	var idle []net.Conn
+	for i := 0; i < conns; i++ {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		idle = append(idle, c)
+	}
+	if !waitConns(g, conns) {
+		t.Fatalf("open conns %d, want %d", len(g.conns), conns)
+	}
+	if n := len(g.slots); n != 0 {
+		t.Fatalf("query slots %d held by idle connections", n)
+	}
+
+	// Past the cap the connection is closed on accept, not at the deadline.
+	extra, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer extra.Close()
+	_ = extra.SetDeadline(time.Now().Add(time.Second))
+	start := time.Now()
+	if _, err := extra.Read(make([]byte, 1)); err == nil {
+		t.Fatal("connection past the cap was answered")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatalf("connection past the cap stayed open: %v", err)
+	}
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("connection past the cap closed after %s", d)
+	}
+	if _, err := tryTCP(addr, dnsQuery("probe.hermetarium.test", 1)); err == nil {
+		t.Fatal("tcp query answered while the connection cap was full")
+	}
+	if n := len(g.conns); n != conns {
+		t.Fatalf("open conns %d after refusals, want %d", n, conns)
+	}
+
+	// The accepted connections stay open until their own deadline.
+	for i, c := range idle {
+		_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_, err := c.Read(make([]byte, 1))
+		if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
+			t.Fatalf("idle connection %d: %v", i, err)
+		}
+	}
+
+	// UDP has its own slots and is not held up by the TCP cap.
+	resp := queryUDP(t, udp.LocalAddr(), dnsQuery("probe.hermetarium.test", 1))
+	if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
+		t.Fatalf("udp answer len %d while the tcp cap was full", len(resp))
+	}
+
+	// A closed connection frees its place for the next one.
+	idle[0].Close()
+	if !waitConns(g, conns-1) {
+		t.Fatalf("open conns %d after a close, want %d", len(g.conns), conns-1)
+	}
+	resp = queryTCP(t, addr, dnsQuery("probe.hermetarium.test", 1))
+	if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
+		t.Fatalf("tcp answer len %d after a place was freed", len(resp))
+	}
+	if !waitConns(g, conns-1) {
+		t.Fatalf("open conns %d after the answer, want %d", len(g.conns), conns-1)
+	}
+	if !waitIdle(g.slots) {
+		t.Fatal("query slot still held after the tcp answer")
+	}
+}
+
+func TestTCPConnCapFreedByDeadline(t *testing.T) {
+	const conns = 2
+	g := standInGate(t, conns, 150*time.Millisecond)
+	_, ln := serveGate(t, g)
+	addr := ln.Addr().String()
+	for i := 0; i < conns; i++ {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+	}
+	// Each idle connection is closed at its deadline and frees its place.
+	if !waitConns(g, 0) {
+		t.Fatalf("open conns %d after the deadline", len(g.conns))
+	}
+	resp := queryTCP(t, addr, dnsQuery("probe.hermetarium.test", 1))
+	if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
+		t.Fatalf("tcp answer len %d after the deadline", len(resp))
+	}
+}
+
 func TestDNSLogCap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dns.jsonl")
