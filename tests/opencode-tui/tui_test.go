@@ -35,9 +35,15 @@ var gitBasic = "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-tok
 
 // passthroughHosts is every name the shipped gate file splices. Each keeps
 // its own certificate. The Docker Hub chain lets dockerd in the box pull.
+// The package registries install without the gate CA.
 var passthroughHosts = []string{
 	"pinned.example",
-	"registry-1.docker.io", "auth.docker.io", "production.cloudfront.docker.com",
+	"registry-1.docker.io", "auth.docker.io", "production.cloudfront.docker.com", "production.cloudflare.docker.com",
+	"registry.npmjs.org",
+	"repo.maven.apache.org", "repo1.maven.org",
+	"crates.io", "static.crates.io", "index.crates.io",
+	"pypi.org", "files.pythonhosted.org",
+	"deb.debian.org", "security.debian.org",
 }
 
 func TestOpenCodeTUIFiles(t *testing.T) {
