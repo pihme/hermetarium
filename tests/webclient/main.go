@@ -4,6 +4,7 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,7 @@ func main() {
 	call(client, http.MethodPut, "https://api.github.com/repos/octo/hello/contents/README.md")
 	call(client, http.MethodGet, "http://api.github.com/user")
 	call(client, http.MethodGet, "https://other.example/")
+	rejectGateCert("rejects.example")
 	fmt.Println("WEB_DONE")
 }
 
@@ -63,6 +65,24 @@ func showUnverifiedCert(host string) {
 		return
 	}
 	fmt.Println("CERT_FAIL", host, last)
+}
+
+// rejectGateCert calls host with a client that trusts no CA, so it rejects
+// the gate certificate. The I/O log names that refusal ca-untrusted.
+func rejectGateCert(host string) {
+	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: x509.NewCertPool()}}}
+	resp, err := client.Get("https://" + host + "/")
+	if err == nil {
+		_ = resp.Body.Close()
+		fmt.Println("REJECT_FAIL", host, resp.StatusCode)
+		return
+	}
+	var unknown x509.UnknownAuthorityError
+	if !errors.As(err, &unknown) {
+		fmt.Println("REJECT_FAIL", host, err)
+		return
+	}
+	fmt.Println("REJECT", host)
 }
 
 func call(client *http.Client, method, rawURL string) {

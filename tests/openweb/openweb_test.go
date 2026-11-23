@@ -75,7 +75,7 @@ func TestOpenWeb(t *testing.T) {
 			// Squid refuses an intercepted name whose address is not the
 			// destination the box connected to. The box uses the gate address.
 			gateIP := supervisor.PlanFor(wall, id).Gate
-			hosts := gateIP + " pinned.example api.github.com other.example\n"
+			hosts := gateIP + " pinned.example api.github.com other.example rejects.example\n"
 			if err := os.WriteFile(filepath.Join(instDir, "hosts"), []byte(hosts), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +111,7 @@ func TestOpenWeb(t *testing.T) {
 				dir = inst.Dir
 			}
 			logs := waitWeb(t, wall, id)
-			if strings.Contains(logs, "CERT_FAIL") || strings.Contains(logs, "HTTP_FAIL") || !strings.Contains(logs, "WEB_DONE") {
+			if strings.Contains(logs, "CERT_FAIL") || strings.Contains(logs, "HTTP_FAIL") || strings.Contains(logs, "REJECT_FAIL") || !strings.Contains(logs, "WEB_DONE") {
 				t.Fatalf("client\n%s\n%s", logs, diag(id, dir))
 			}
 			if !strings.Contains(betweenCert(logs, "api.github.com"), "issuer=Hermetarium") {
@@ -174,6 +174,20 @@ func TestOpenWeb(t *testing.T) {
 					t.Fatalf("cleartext %+v\n%s", rec, diag(id, dir))
 				}
 			}
+			// The client rejected the gate certificate. The wall logs why.
+			if !strings.Contains(logs, "REJECT rejects.example") || !hasReason(recs, "rejects.example", supervisor.ReasonCAUntrusted) {
+				t.Fatalf("gate certificate rejected %+v\n%s\n%s", recs, logs, diag(id, dir))
+			}
+			for _, r := range recs {
+				if r.Destination == "rejects.example" && r.Reason == supervisor.ReasonCAUntrusted && r.Allowed {
+					t.Fatalf("refused but allowed %+v", r)
+				}
+			}
+			for _, deny := range []struct{ method, path string }{{"DELETE", "/repos/octo/hello"}, {"GET", "/user"}} {
+				if rec, _ := findRec(recs, deny.method, deny.path); rec.Reason != supervisor.ReasonNotAllowlisted {
+					t.Fatalf("%s %s reason %+v", deny.method, deny.path, rec)
+				}
+			}
 			if !hasTLS(recs, "pinned.example", "passthrough") {
 				t.Fatalf("pass-through log %+v\n%s", recs, diag(id, dir))
 			}
@@ -231,7 +245,7 @@ func buildWebImage(t *testing.T, root string) string {
 	}
 	script := "#!/bin/sh\n" +
 		"gw=$(awk '/probe.hermetarium.test/ {print $1; exit}' /etc/hosts)\n" +
-		"echo \"$gw api.github.com other.example pinned.example\" >> /etc/hosts\n" +
+		"echo \"$gw api.github.com other.example pinned.example rejects.example\" >> /etc/hosts\n" +
 		"/webclient\n" +
 		"echo WEB_DONE\n" +
 		"exec sleep 3600\n"
@@ -298,7 +312,7 @@ func writeOriginCert(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "ca.pem"), caPEM, 0o644); err != nil {
 		return err
 	}
-	for i, name := range []string{"pinned.example", "api.github.com", "other.example"} {
+	for i, name := range []string{"pinned.example", "api.github.com", "other.example", "rejects.example"} {
 		leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return err
@@ -360,6 +374,15 @@ func findRec(recs []supervisor.Record, method, pathSub string) (supervisor.Recor
 func hasTLS(recs []supervisor.Record, host, mode string) bool {
 	for _, r := range recs {
 		if r.Destination == host && r.TLS == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func hasReason(recs []supervisor.Record, host, reason string) bool {
+	for _, r := range recs {
+		if r.Destination == host && r.Reason == reason {
 			return true
 		}
 	}

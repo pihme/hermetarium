@@ -3,6 +3,7 @@ package supervisor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +121,98 @@ func TestParseSquidLine(t *testing.T) {
 	rec, ok = ParseSquidLine(top)
 	if !ok || rec.Protocol != "https" || rec.Port != 65535 || rec.Destination != "pinned.example" || rec.Upstream != "10.1.0.2" {
 		t.Fatalf("top %+v ok=%v", rec, ok)
+	}
+}
+
+// Lines as Squid 6.14 in the gate image wrote them, with %err_code and
+// %err_detail after SNI as in the shipped gate files.
+func TestParseSquidLineReason(t *testing.T) {
+	for _, tc := range []struct {
+		name, line, reason, dest string
+		allowed                  bool
+	}{
+		{"http denied", "1795413076.261 0 10.20.0.3 TCP_DENIED/403 368 GET http://other.example/ - HIER_NONE/- text/html 3128 - - ERR_HTM_NOT_ALLOWLISTED -", ReasonNotAllowlisted, "other.example", false},
+		{"denied without deny_info", "1795413076.261 0 10.20.0.3 TCP_DENIED/403 3800 GET http://other.example/ - HIER_NONE/- text/html 3128 - - ERR_ACCESS_DENIED -", ReasonNotAllowlisted, "other.example", false},
+		{"denied, old logformat", "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 GET http://example.com/ - HIER_NONE/- text/html", ReasonNotAllowlisted, "example.com", false},
+		{"denied CONNECT", "1795413076.280 11 10.60.0.3 TCP_DENIED/200 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 3130 bump denied.example ERR_HTM_NOT_ALLOWLISTED -", ReasonNotAllowlisted, "denied.example", false},
+		// Squid decrypts a denied CONNECT to send the page. That request was not forwarded either.
+		{"denied page after bump", "1795413076.280 0 10.60.0.3 NONE_NONE/403 363 GET https://denied.example/ - HIER_NONE/- text/html 3130 - denied.example ERR_HTM_NOT_ALLOWLISTED -", ReasonNotAllowlisted, "denied.example", false},
+		// The policy denial is the reason even when the client then rejects the gate certificate.
+		{"denied and CA rejected", "1795413096.108 9 10.60.0.3 TCP_DENIED/200 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 3130 bump denied.example ERR_HTM_NOT_ALLOWLISTED SQUID_TLS_ERR_ACCEPT+TLS_LIB_ERR=A000418+TLS_IO_ERR=1", ReasonNotAllowlisted, "denied.example", false},
+		{"origin certificate untrusted", "1795412924.840 15 10.60.0.3 NONE_NONE_ABORTED/200 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 3130 bump bad.example ERR_SECURE_CONNECT_FAIL X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT+broken_cert", ReasonCAUntrusted, "bad.example", false},
+		{"origin certificate untrusted, page", "1795412924.841 0 10.60.0.3 NONE_NONE/503 3732 GET https://bad.example/ - HIER_NONE/- text/html 3130 - bad.example ERR_SECURE_CONNECT_FAIL X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT+broken_cert", ReasonCAUntrusted, "bad.example", false},
+		{"gate certificate rejected by Go", "1795413096.108 32 10.60.0.3 NONE_NONE/200 0 CONNECT 10.60.0.2:443 - HIER_DIRECT/10.60.0.2 - 3130 bump other.example ERR_SECURE_ACCEPT_FAIL SQUID_TLS_ERR_ACCEPT+TLS_LIB_ERR=A000412+TLS_IO_ERR=1", ReasonCAUntrusted, "other.example", false},
+		{"gate certificate rejected by OpenSSL", "1795412894.658 9 10.60.0.3 NONE_NONE/200 0 CONNECT 10.60.0.2:443 - HIER_DIRECT/10.60.0.2 - 3130 bump other.example ERR_SECURE_ACCEPT_FAIL SQUID_TLS_ERR_ACCEPT+TLS_LIB_ERR=A000418+TLS_IO_ERR=1", ReasonCAUntrusted, "other.example", false},
+		{"name not resolved", "1795413088.338 6003 10.20.0.3 TCP_MISS_ABORTED/503 3508 GET http://nx.example/ - HIER_NONE/- text/html 3128 - - ERR_DNS_FAIL WITH_SERVER", ReasonNoSuchHost, "nx.example", false},
+		{"SNI not resolved", "1795413082.323 6008 10.60.0.3 NONE_NONE_ABORTED/200 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 3130 bump nx.example ERR_DNS_FAIL WITH_SERVER", ReasonNoSuchHost, "nx.example", false},
+		{"no route", "1795413088.338 0 10.20.0.3 TCP_MISS/503 3400 GET http://probe.hermetarium.test/ - HIER_NONE/- text/html 3128 - - ERR_CANNOT_FORWARD -", ReasonNoSuchHost, ProbeHost, false},
+		// A reset during the handshake is not a certificate rejection.
+		{"client reset", "1795412744.000 1 10.60.0.3 NONE_NONE/200 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 3130 bump other.example ERR_SECURE_ACCEPT_FAIL SQUID_TLS_ERR_ACCEPT+TLS_IO_ERR=5+errno=104", "", "other.example", true},
+		// The origin refused or timed out. The wall did not refuse.
+		{"origin refused", "1795412936.891 0 10.20.0.3 TCP_MISS_ABORTED/503 3385 GET http://other.example:81/ - HIER_DIRECT/10.1.0.2 text/html 3128 - - ERR_CONNECT_FAIL WITH_SERVER", "", "other.example", true},
+		{"client gone", "1795412738.746 6002 10.20.0.3 TCP_MISS_ABORTED/000 0 GET http://other.example/ - HIER_NONE/- - 3128 - - ERR_CLIENT_GONE WITH_CLIENT", "", "other.example", true},
+		{"allowed", "1795413076.296 0 10.60.0.3 TCP_MISS/200 5333 GET https://other.example/hello - HIER_DIRECT/10.60.0.2 text/html 3130 bump other.example - -", "", "other.example", true},
+	} {
+		rec, ok := ParseSquidLine(tc.line)
+		if !ok || rec.Reason != tc.reason || rec.Allowed != tc.allowed || rec.Destination != tc.dest {
+			t.Errorf("%s: %+v ok=%v", tc.name, rec, ok)
+		}
+	}
+	// Bump mode and SNI keep their place when the reason fields follow.
+	rec, ok := ParseSquidLine("1795413076.296 0 10.60.0.3 NONE_NONE/200 0 CONNECT 10.60.0.2:443 - HIER_DIRECT/10.60.0.2 - 3130 splice pinned.example - -")
+	if !ok || rec.TLS != "passthrough" || rec.Destination != "pinned.example" || rec.Upstream != "10.60.0.2" || !rec.Allowed || rec.Reason != "" {
+		t.Fatalf("splice with reason fields %+v ok=%v", rec, ok)
+	}
+	dir := t.TempDir()
+	access := filepath.Join(dir, "access.log")
+	lines := "1795413076.261 0 10.20.0.3 TCP_DENIED/403 368 GET http://other.example/ - HIER_NONE/- text/html 3128 - - ERR_HTM_NOT_ALLOWLISTED -\n" +
+		"1795413076.296 0 10.60.0.3 TCP_MISS/200 5333 GET https://other.example/hello - HIER_DIRECT/10.60.0.2 text/html 3130 bump other.example - -\n"
+	if err := os.WriteFile(access, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := filepath.Join(dir, "io.jsonl")
+	if err := SyncAccessLog(access, jsonl); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(jsonl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(got) != 2 || !strings.Contains(got[0], `"allowed":false`) || !strings.Contains(got[0], `"reason":"not-allowlisted"`) || strings.Contains(got[1], `"reason"`) {
+		t.Fatalf("io.jsonl:\n%s", b)
+	}
+}
+
+// shippedGateFiles is every squid.conf the repo ships. var/ holds habitat copies.
+func shippedGateFiles(t *testing.T) []string {
+	t.Helper()
+	var files []string
+	for _, dir := range []string{"examples", "inhabitants", "omakase"} {
+		m, err := filepath.Glob(filepath.Join("..", dir, "*", "squid.conf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, m...)
+	}
+	return files
+}
+
+// Every shipped gate file logs the reason fields after SNI, in that order.
+func TestShippedGateFilesLogReason(t *testing.T) {
+	files := shippedGateFiles(t)
+	if len(files) < 8 {
+		t.Fatalf("gate files %v", files)
+	}
+	const format = "logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp %ssl::bump_mode %ssl::>sni %err_code %err_detail\n"
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), format) {
+			t.Errorf("%s does not log the refusal reason", f)
+		}
 	}
 }
 

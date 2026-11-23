@@ -31,6 +31,57 @@ type Record struct {
 	Bytes   int  `json:"bytes,omitempty"`
 	// TLS is set when the gate file logs bump mode: decrypted or passthrough.
 	TLS string `json:"tls,omitempty"`
+	// Reason is why the wall refused the request: ReasonNotAllowlisted,
+	// ReasonCAUntrusted or ReasonNoSuchHost. A record with a reason is not allowed.
+	Reason string `json:"reason,omitempty"`
+}
+
+// Refusal reasons in the I/O log. The denial page says the same words with spaces.
+const (
+	ReasonNotAllowlisted = "not-allowlisted"
+	ReasonCAUntrusted    = "ca-untrusted"
+	ReasonNoSuchHost     = "no-such-host"
+)
+
+// NotAllowlistedPage is the deny_info page in the gate image. Squid logs its
+// name as the error code of a request an http_access rule denied.
+const NotAllowlistedPage = "ERR_HTM_NOT_ALLOWLISTED"
+
+// refusalReason maps the Squid status and, when the gate file logs them after
+// SNI, %err_code and %err_detail to a coarse reason. Empty means not refused.
+// Release-Notes: `hermetarium logs` records why the wall refused a request in `reason`: `not-allowlisted`, `ca-untrusted` or `no-such-host`, and such a record has `allowed` false. `ca-untrusted` and `no-such-host` need `%err_code %err_detail` after the SNI field in the gate file's `logformat`, as in the shipped gate files.
+func refusalReason(status, code, detail string) string {
+	switch {
+	case strings.Contains(status, "DENIED"), code == "ERR_ACCESS_DENIED", code == NotAllowlistedPage:
+		return ReasonNotAllowlisted
+	case code == "ERR_DNS_FAIL", code == "ERR_CANNOT_FORWARD":
+		return ReasonNoSuchHost
+	case code == "ERR_SECURE_CONNECT_FAIL" && strings.Contains(detail, "X509_V_ERR_"):
+		// The gate did not trust the origin's certificate.
+		return ReasonCAUntrusted
+	case code == "ERR_SECURE_ACCEPT_FAIL" && certAlert(detail):
+		// The habitat did not trust the gate's certificate.
+		return ReasonCAUntrusted
+	}
+	return ""
+}
+
+// certAlert is a TLS alert from the client that rejects the certificate.
+// TLS_LIB_ERR is the OpenSSL code: library 20 (SSL) and the alert reason,
+// e.g. A000412 bad_certificate (Go), A000416 certificate_unknown (Java),
+// A000418 unknown_ca (OpenSSL).
+func certAlert(detail string) bool {
+	for _, part := range strings.Split(detail, "+") {
+		v, ok := strings.CutPrefix(part, "TLS_LIB_ERR=")
+		if !ok {
+			continue
+		}
+		switch strings.ToUpper(v) {
+		case "A000412", "A000413", "A000414", "A000415", "A000416", "A000418":
+			return true
+		}
+	}
+	return false
 }
 
 func ParseSquidLine(line string) (Record, bool) {
@@ -119,6 +170,13 @@ func ParseSquidLine(line string) (Record, bool) {
 	if len(f) >= 13 && f[12] != "-" && !parsedHost {
 		dest = f[12]
 	}
+	// %err_code and %err_detail follow SNI when the gate file logs them.
+	errCode, errDetail := "", ""
+	if len(f) >= 15 {
+		errCode = f[13]
+		errDetail = strings.Join(f[14:], " ")
+	}
+	reason := refusalReason(status, errCode, errDetail)
 	upstream := ""
 	if f[5] == "CONNECT" {
 		protocol = "https"
@@ -141,10 +199,11 @@ func ParseSquidLine(line string) (Record, bool) {
 		Port:        port,
 		Method:      f[5],
 		Path:        path,
-		Allowed:     !strings.Contains(status, "DENIED"),
+		Allowed:     !strings.Contains(status, "DENIED") && reason == "",
 		Aborted:     handshakeAbort(status, f[5]),
 		Bytes:       bytes,
 		TLS:         tlsMode,
+		Reason:      reason,
 	}, true
 }
 
