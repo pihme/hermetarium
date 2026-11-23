@@ -33,6 +33,19 @@ const (
 
 var gitBasic = "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+githubToken))
 
+// passthroughHosts is every name the shipped gate file splices. Each keeps
+// its own certificate. The Docker Hub chain lets dockerd in the box pull.
+// The package registries install without the gate CA.
+var passthroughHosts = []string{
+	"pinned.example",
+	"registry-1.docker.io", "auth.docker.io", "production.cloudfront.docker.com", "production.cloudflare.docker.com",
+	"registry.npmjs.org",
+	"repo.maven.apache.org", "repo1.maven.org",
+	"crates.io", "static.crates.io", "index.crates.io",
+	"pypi.org", "files.pythonhosted.org",
+	"deb.debian.org", "security.debian.org",
+}
+
 func TestOpenCodeTUIFiles(t *testing.T) {
 	root := repoRoot(t)
 	readme, err := os.ReadFile(filepath.Join(root, "omakase", "opencode-tui", "README.md"))
@@ -175,6 +188,24 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 	if strings.Contains(gate, `urlpath_regex \.\. %`) {
 		t.Fatal("gate file still denies every percent")
 	}
+	// A spliced host keeps its own certificate, so the gate cannot set a
+	// token there. The list is exact: nothing else is passed through.
+	got := aclValues(gate, "passthrough", "ssl::server_name")
+	if strings.Join(got, " ") != strings.Join(passthroughHosts, " ") {
+		t.Fatalf("pass-through list\n got %q\nwant %q", got, passthroughHosts)
+	}
+}
+
+// aclValues joins the values of every active "acl NAME TYPE ..." line.
+func aclValues(conf, name, typ string) []string {
+	var out []string
+	for _, line := range strings.Split(conf, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 3 && f[0] == "acl" && f[1] == name && f[2] == typ {
+			out = append(out, f[3:]...)
+		}
+	}
+	return out
 }
 
 func TestOpenCodeTUI(t *testing.T) {
@@ -238,7 +269,7 @@ func TestOpenCodeTUI(t *testing.T) {
 			// Squid refuses an intercepted name whose address is not the
 			// destination the box connected to. The box uses the gate address.
 			gateIP := supervisor.PlanFor(wall, id).Gate
-			hosts := gateIP + " pinned.example api.github.com github.com other.example\n"
+			hosts := gateIP + " " + strings.Join(append([]string{"api.github.com", "github.com", "other.example"}, passthroughHosts...), " ") + "\n"
 			if err := os.WriteFile(filepath.Join(instDir, "hosts"), []byte(hosts), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -313,11 +344,13 @@ func TestOpenCodeTUI(t *testing.T) {
 			if strings.Contains(logs, "UPSTREAM_OK") || !strings.Contains(logs, "UPSTREAM_FAIL") {
 				t.Fatalf("model peer was reachable directly\n%s", logs)
 			}
-			if !strings.Contains(logs, "CERT pinned.example subject=pinned.example issuer=Mock Origin") {
-				t.Fatalf("pass-through certificate\n%s", logs)
-			}
-			if strings.Contains(betweenCert(logs, "pinned.example"), "Hermetarium") {
-				t.Fatalf("pass-through saw the gate certificate\n%s", logs)
+			for _, host := range passthroughHosts {
+				if !strings.Contains(logs, "CERT "+host+" subject="+host+" issuer=Mock Origin") {
+					t.Fatalf("pass-through certificate %s\n%s", host, logs)
+				}
+				if strings.Contains(betweenCert(logs, host), "Hermetarium") {
+					t.Fatalf("pass-through %s saw the gate certificate\n%s", host, logs)
+				}
 			}
 			for _, want := range []string{
 				"HTTP GET https://other.example/hello 200",
@@ -460,8 +493,10 @@ func TestOpenCodeTUI(t *testing.T) {
 					t.Fatalf("cleartext %+v\n%s", rec, diag(id, dir))
 				}
 			}
-			if !hasTLS(recs, "pinned.example", "passthrough") {
-				t.Fatalf("pass-through log %+v\n%s", recs, diag(id, dir))
+			for _, host := range passthroughHosts {
+				if !hasTLS(recs, host, "passthrough") || hasTLS(recs, host, "decrypted") {
+					t.Fatalf("pass-through log %s %+v\n%s", host, recs, diag(id, dir))
+				}
 			}
 			if wall == "weak" {
 				assertBoxHasNoSecret(t, id)
@@ -538,7 +573,7 @@ if timeout 3 nslookup example.com 1.1.1.1 >/dev/null 2>&1; then echo DNS_DIRECT=
 if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then echo LEAK=OK; else echo LEAK=FAIL; fi
 gw=$(awk '/probe.hermetarium.test/ {print $1; exit}' /etc/hosts)
 echo GATE "$gw"
-echo "$gw api.github.com github.com other.example pinned.example" >> /etc/hosts
+echo "$gw api.github.com github.com other.example ` + strings.Join(passthroughHosts, " ") + `" >> /etc/hosts
 /modelclient
 reached() {
   out=$(wget -T 3 -S -O /dev/null "$1" 2>&1) || true
@@ -549,7 +584,7 @@ if [ -z "$gw" ] || reached "http://$gw:` + peerPort + `/"; then
 else
   echo UPSTREAM_FAIL
 fi
-/page
+/page ` + strings.Join(passthroughHosts, " ") + `
 echo TUI_DONE
 exec sleep 3600
 `
@@ -814,7 +849,7 @@ func writeOriginCert(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "ca.pem"), caPEM, 0o644); err != nil {
 		return err
 	}
-	for i, name := range []string{"pinned.example", "api.github.com", "github.com", "other.example"} {
+	for i, name := range append([]string{"api.github.com", "github.com", "other.example"}, passthroughHosts...) {
 		leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return err
