@@ -37,7 +37,7 @@ The image is the same on either wall. The wall is outside the image.
 
 On the Docker wall, root in the container reaches the host if the kernel is exploited. On the strong wall the Firecracker container holds a microVM with its own kernel, and root stays inside that microVM.
 
-On the strong wall, two containers sit outside the microVM. The Firecracker container (`htm-<id>-fc`) holds the TAP device, the firewall, and the microVM. The gate (`htm-<id>-gate`) is Squid. It is a second container and joins the Firecracker container's network namespace. A habitat created before this naming still uses `htm-fc-<id>`, `htm-gate-<id>`, and `htm-dns-<id>`. `destroy` removes those containers too. On the Docker wall the old inhabitant name is `htm-box-<id>`.
+On the strong wall, three containers sit outside the microVM. The Firecracker container (`htm-<id>-fc`) holds the TAP device, the firewall, and the microVM, and owns the network namespace. The gate (`htm-<id>-gate`) is Squid. Gate DNS is `htm-<id>-dns`. Both join the Firecracker container's network namespace. A habitat created before this naming still uses `htm-fc-<id>`, `htm-gate-<id>`, and `htm-dns-<id>`. `destroy` removes those containers too. On the Docker wall the old inhabitant name is `htm-box-<id>`.
 
 Both walls let only the gate reach the Internet. The Docker wall puts the container on an internal network with no NAT, and gives only the gate a second path out. [How that works](inhabitants/README.md#how-the-gate-reaches-the-internet).
 
@@ -191,6 +191,8 @@ The CA, the shared leaf key inside one habitat, the roughly ten-year root, and t
 
 The gate also resolves names. `probe.hermetarium.test`, `claude.hermetarium.test`, and `grok.hermetarium.test` always resolve to the gate, including for a process that does not see `/etc/hosts`. Any other name resolves only when the gate file opens the web (an `http_access allow` other than the inbound, vendor, and probe rules, which is what the `OPEN-IN` and `OPEN-HTTPS` blocks add). The habitat cannot resolve outside names through any resolver except the gate. On the strong wall the guest's `/etc/hosts` includes `127.0.0.1 localhost`.
 
+To change the allowlist or the passthrough list of a habitat that is already running, see [Changing wall rules](#changing-wall-rules).
+
 ## Logs
 
 ```bash
@@ -212,6 +214,73 @@ instance.json  the id, the wall, and the address
 serial.log     the strong wall only, the guest console
 fc.log         the strong wall only, Firecracker
 ```
+
+
+## Changing wall rules
+
+The CLI has no `acl`, `reload`, or `restart` command. `create` is the only start, and `destroy` is the only stop. To change the allowlist or passthrough list of a running strong-wall habitat, or to move it onto a newer gate file, use the host's Docker and the files under `var/<id>/`. This is the manual path, distilled from a cold change on a live habitat.
+
+The habitat directory is `var/<id>/` under `HERMETARIUM_ROOT`, this checkout, or `~/.local/share/hermetarium/var/`. A habitat created before the current naming still uses `htm-fc-<id>`, `htm-gate-<id>`, and `htm-dns-<id>`. The Docker wall is a different set (`htm-<id>-box`, plus gate and DNS) and is not this recipe.
+
+### Containers
+
+A strong-wall habitat is three Docker containers that share state in `var/<id>`:
+
+- `htm-<id>-fc` — the Firecracker container. It owns the network namespace and the TAP device. Its entrypoint (`/entrypoint.sh`) sets iptables (`gate-rules.sh`, then `rules.ready`), serves the CA when HTTPS interception is on (`ca.ready`), then blocks waiting for `squid.pid` and `dns.ready` before it boots the virtual machine. Each wait is about 20 seconds.
+- `htm-<id>-gate` — Squid, `squid -N -f /log/squid.conf`, in the Firecracker container's network namespace. It reads `var/<id>/squid.conf`, which is mounted at `/log`.
+- `htm-<id>-dns` — gate DNS, also in that network namespace. It writes `dns.ready`.
+
+The allowlist and the passthrough list live in `var/<id>/squid.conf`. A rule change does not touch the root disk (`var/<id>/rootfs.ext4`). That file is the strong wall's snapshot; a cold change boots the same disk unchanged.
+
+### Order
+
+Start the Firecracker container first (it owns the namespace), then the gate (it writes `squid.pid`), then DNS (it writes `dns.ready`). The entrypoint will not boot the virtual machine until both markers exist, and it gives up after about 20 seconds, so the sequence must be quick. Stop in the reverse order: the dependent containers before the namespace owner.
+
+Before you start the gate again, remove a stale `var/<id>/squid.pid`. Squid refuses to start if that file is still there. `create` already removes it; a manual restart does not.
+
+### Cold change
+
+If the gate is still running, edit `var/<id>/squid.conf` and check it first:
+
+```
+docker exec htm-<id>-gate squid -k parse -f /log/squid.conf
+```
+
+That command must exit 0. It only parses the file. It does not apply a passthrough (`splice`) change; for that, use the restart below. Then:
+
+```
+docker stop htm-<id>-gate htm-<id>-dns
+docker stop htm-<id>-fc
+# edit var/<id>/squid.conf (add hosts to acl passthrough for splice)
+rm -f var/<id>/squid.pid
+docker start htm-<id>-fc          # entrypoint: iptables, httpd, waits on squid.pid
+docker start htm-<id>-gate        # writes squid.pid
+docker start htm-<id>-dns         # writes dns.ready -> VM boots
+```
+
+If the habitat is already stopped, edit the file, remove `squid.pid`, start the three containers in that order, and run the parse command once the gate is up.
+
+### Pass-through versus reconfigure
+
+`squid -k reconfigure` (SIGHUP) is unreliable for `splice`. It can load the new file and still leave every passthrough host returning `TLS: wrong version number`, while the MITM (`bump`) path keeps working. A clean restart fixed that. For a passthrough change, prefer this cold change over `-k reconfigure`.
+
+### Registry hosts
+
+On the files shipped with this repository, the passthrough ACL is only `pinned.example` (`examples/openweb/squid.conf` and `omakase/opencode-tui/squid.conf`). The official inhabitant gate files have the `OPEN-HTTPS` block commented out, so they do not intercept or pass through ordinary HTTPS until you turn that block on. To let an in-habitat Docker daemon pull through the wall and keep the registry's own certificate, add these names to `acl passthrough` and allow them:
+
+```
+registry-1.docker.io
+auth.docker.io
+production.cloudfront.docker.com
+```
+
+The blob CDN is `production.cloudfront.docker.com` (CloudFront). It is not `production.cloudflare.docker.com`. Keep the CloudFront name in the list; add the Cloudflare name only if you have seen that host used.
+
+A `docker pull` inside the habitat already goes through the wall, because the in-habitat daemon runs with `--network host`. If the wall intercepts the registry, the daemon may still accept the wall-signed certificate when it inherits the habitat's CA environment variables. Passthrough is the cleaner choice: the daemon sees the real certificates, and you do not have to trust the wall CA for pulls. That default is not shipped in this repository yet.
+
+### Moving a habitat
+
+A rule-only change keeps the same containers and the same `rootfs.ext4`. To move the guest disk onto a newer Hermetarium or a new gate file, copy `var/<id>/rootfs.ext4` first. `destroy` deletes the instance copy and leaves your copy alone. Check the copy, then boot it with `create --wall strong --rootfs` and the new `--acl`. `--image` is still required. In-flight guest writes may be missing from the snapshot, and the restored ext4 may need journal replay; see `--rootfs` under [Two walls](#two-walls).
 
 ## Inside the container
 
