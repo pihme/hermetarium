@@ -56,7 +56,9 @@ printf 'x-access-token:%s' "$TOKEN" | base64 -w 0
 
 Squid sends that value as `Basic` to `github.com`. A line wrap in the middle of the value breaks the gate file.
 
-The box calls `http://model.hermetarium.test/v1`. Squid drops that call's `Authorization` and sets the model key. It also sets `Host` from this file. Plain HTTP to other hosts is allowed, so a package download works. Cleartext to `github.com` and `api.github.com` stays denied, so the token is not sent on port 80. The rest of the web over HTTPS is decrypted. The I/O log then has the host and the path. The page body stays out of the log. Hosts on the pass-through list keep their own certificate. Squid speaks only HTTP/1.1 after it decrypts, so that list is for a program that pins a certificate or needs HTTP/2. The shipped list is `pinned.example`. Replace it with the hosts you need. A passed-through connection is in the log as the name, not the path.
+The box calls `http://model.hermetarium.test/v1`. Squid drops that call's `Authorization` and sets the model key. It also sets `Host` from this file. Plain HTTP to other hosts is allowed, so a package download works. Cleartext to `github.com` and `api.github.com` stays denied, so the token is not sent on port 80. The rest of the web over HTTPS is decrypted. The I/O log then has the host and the path. The page body stays out of the log. Hosts on the pass-through list keep their own certificate. Squid speaks only HTTP/1.1 after it decrypts, so that list is for a program that pins a certificate or needs HTTP/2. The shipped list is `pinned.example` plus the Docker Hub chain: `registry-1.docker.io`, `auth.docker.io`, and the layer CDN `production.cloudfront.docker.com`. Replace `pinned.example` with the hosts you need. A passed-through connection is in the log as the name, not the path.
+
+`dockerd` in the habitat pulls through the gate. `docker pull` and `FROM` in a `docker build` reach Docker Hub with its own certificate, so the daemon needs no gate certificate for them. The log has those hosts as `passthrough`. An image that `docker build` makes does not get the gate certificate.
 
 `github.com` and `api.github.com` are decrypted, not passed through. Squid drops any `Authorization` the box sends to those hosts and sets the gate credential. Git push and fetch use `https://github.com`. `gh` uses `api.github.com`, including pull requests and Projects. The gate does not choose which of those calls succeed. The token's own permissions are the limit. Cleartext to either host is denied, so the token is not sent on port 80. A path containing `..` or an encoded `..` (`%2e%2e`) is denied. A `%` in the query string is allowed, and so is `%2F` in a branch name.
 
@@ -167,6 +169,7 @@ The habitat's files live under `HERMETARIUM_ROOT`, else this checkout, else `$XD
 - The open web is a way out. The inhabitant can send a page body to any decrypted host. The log does not store that body.
 - The terminal is not in the I/O log. Escape sequences from the habitat reach your terminal as they are. OSC 52 is one of those sequences. A terminal that does not implement it drops the copy.
 - A program that pins its own certificate list still refuses the gate certificate, unless you pass that host through.
+- A passed-through host is not decrypted. The log has its name, not the path. The box can send data there with its own login, for example `docker push` to Docker Hub.
 - `omakase/backup.sh` will not read this root file without a Git Warden journal.
 
 ## Checklist

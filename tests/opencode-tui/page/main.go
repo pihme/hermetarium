@@ -1,6 +1,6 @@
 // Calls the OpenCode terminal gate the way the box does: a page, GitHub over
 // HTTPS for git and for the API, the path and cleartext denials, and one
-// pass-through connect.
+// pass-through connect per argument.
 package main
 
 import (
@@ -53,7 +53,10 @@ func main() {
 	call(client, http.MethodPost, "https://github.com/octo/%2E%2E/hello.git/git-receive-pack")
 	call(client, http.MethodGet, "http://api.github.com/user")
 	call(client, http.MethodGet, "http://github.com/octo/hello.git/info/refs?service=git-upload-pack")
-	showUnverifiedCert("pinned.example")
+	// Each argument is a pass-through host. Its own certificate should arrive.
+	for _, host := range os.Args[1:] {
+		showUnverifiedCert(host)
+	}
 	fmt.Println("PAGE_DONE")
 }
 
