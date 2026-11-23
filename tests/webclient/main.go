@@ -40,6 +40,8 @@ func main() {
 	call(client, http.MethodGet, "http://api.github.com/user")
 	call(client, http.MethodGet, "https://other.example/")
 	rejectGateCert("rejects.example")
+	deniedPage(client, "http://other.example/")
+	deniedPage(client, "http://api.github.com/user")
 	fmt.Println("WEB_DONE")
 }
 
@@ -65,6 +67,18 @@ func showUnverifiedCert(host string) {
 		return
 	}
 	fmt.Println("CERT_FAIL", host, last)
+}
+
+// deniedPage prints the status and the body the wall answers a denied request with.
+func deniedPage(client *http.Client, rawURL string) {
+	resp, err := client.Get(rawURL)
+	if err != nil {
+		fmt.Println("PAGE_FAIL", rawURL, err)
+		return
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	fmt.Printf("PAGE %s %d %q\n", rawURL, resp.StatusCode, body)
 }
 
 // rejectGateCert calls host with a client that trusts no CA, so it rejects

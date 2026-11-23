@@ -23,6 +23,37 @@ func TestSquidDockerfile(t *testing.T) {
 	if !strings.Contains(squidDockerfile, "/usr/lib/squid/security_file_certgen") {
 		t.Fatal("dockerfile does not require the certificate helper")
 	}
+	// Squid finds a deny_info page by name in its templates directory.
+	page := "/usr/share/squid/errors/templates/" + NotAllowlistedPage
+	if !strings.Contains(squidDockerfile, "> "+page+"\n") || !strings.Contains(squidDockerfile, "printf 'hermetarium wall: not allowlisted\\n") {
+		t.Fatalf("dockerfile does not write the deny page %s:\n%s", page, squidDockerfile)
+	}
+}
+
+// Every shipped gate file answers its final deny with the deny page.
+func TestShippedGateFilesDenyPage(t *testing.T) {
+	files := shippedGateFiles(t)
+	if len(files) < 8 {
+		t.Fatalf("gate files %v", files)
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, line := range strings.Split(string(b), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 && fields[0] == "deny_info" && fields[1] == NotAllowlistedPage {
+				for _, acl := range fields[2:] {
+					found = found || acl == "all"
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s has no deny_info %s all", f, NotAllowlistedPage)
+		}
+	}
 }
 
 func TestInstallACL(t *testing.T) {

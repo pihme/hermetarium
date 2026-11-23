@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"os"
 	"os/exec"
@@ -17,6 +18,9 @@ import (
 
 	"github.com/pihme/hermetarium/supervisor"
 )
+
+// deniedBody is the deny_info page in supervisor/squid/Dockerfile.
+const deniedBody = "hermetarium wall: not allowlisted\nThis request is not on the allowlist of this habitat.\n"
 
 const (
 	gateToken = "htm-github-token"
@@ -111,7 +115,7 @@ func TestOpenWeb(t *testing.T) {
 				dir = inst.Dir
 			}
 			logs := waitWeb(t, wall, id)
-			if strings.Contains(logs, "CERT_FAIL") || strings.Contains(logs, "HTTP_FAIL") || strings.Contains(logs, "REJECT_FAIL") || !strings.Contains(logs, "WEB_DONE") {
+			if strings.Contains(logs, "CERT_FAIL") || strings.Contains(logs, "HTTP_FAIL") || strings.Contains(logs, "REJECT_FAIL") || strings.Contains(logs, "PAGE_FAIL") || !strings.Contains(logs, "WEB_DONE") {
 				t.Fatalf("client\n%s\n%s", logs, diag(id, dir))
 			}
 			if !strings.Contains(betweenCert(logs, "api.github.com"), "issuer=Hermetarium") {
@@ -173,6 +177,21 @@ func TestOpenWeb(t *testing.T) {
 				if deny.path == "/user" && (rec.Path != "/user" || rec.Protocol != "http" || rec.Port != 80) {
 					t.Fatalf("cleartext %+v\n%s", rec, diag(id, dir))
 				}
+			}
+			// A denied request is answered with the reason, and nothing about the allowlist or the gate.
+			for _, u := range []string{"http://other.example/", "http://api.github.com/user"} {
+				want := fmt.Sprintf("PAGE %s 403 %q", u, deniedBody)
+				if !strings.Contains(logs, want) {
+					t.Fatalf("denied page, want %s\n%s\n%s", want, logs, diag(id, dir))
+				}
+			}
+			for _, inner := range []string{"api.github.com", "pinned.example", "githubhost", "tlsin", "squid", "Squid", gateIP} {
+				if strings.Contains(deniedBody, inner) {
+					t.Fatalf("denied page shows %q", inner)
+				}
+			}
+			if !hasReason(recs, "other.example", supervisor.ReasonNotAllowlisted) {
+				t.Fatalf("denied page reason %+v\n%s", recs, diag(id, dir))
 			}
 			// The client rejected the gate certificate. The wall logs why.
 			if !strings.Contains(logs, "REJECT rejects.example") || !hasReason(recs, "rejects.example", supervisor.ReasonCAUntrusted) {

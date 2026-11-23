@@ -177,6 +177,14 @@ http_access allow inbound
 http_access deny all
 ```
 
+A denied request gets `403` and a short body that says why: `hermetarium wall: not allowlisted`. It does not name the allowlist or the gate. The page is in the gate image. Name it after the deny, with the last ACL of each deny line you want it on:
+
+```
+deny_info ERR_HTM_NOT_ALLOWLISTED all
+```
+
+Without that line, Squid answers with its own error page. The I/O log calls the refusal `not-allowlisted` either way. Only traffic that reaches Squid gets an answer: port 80, and port 443 when the gate file decrypts HTTPS. Other ports, and HTTPS through a gate that does not decrypt, still get no answer and time out.
+
 A vendor allowlist, and the lines that add your key, are yours to write. `examples/agentd/squid.conf` and the files under `inhabitants/` are the examples. A request that arrives on the inbound port (18081) with the vendor Host must be denied. If you omit that deny, or add the key on `vendorhost` without `!inbound`, the key can leak on that port. The shared snippet is in the [inhabitants README](inhabitants/README.md#what-every-squidconf-shares).
 
 The wall sends the container's port 80 to Squid. Other ports from the container stay closed. Each assistant README says which lines to comment in, and which to comment out, to allow plain HTTP.
