@@ -29,6 +29,10 @@ const (
 	udpAnswerMax = 512
 	// One habitat TCP read. Past this the connection is closed.
 	tcpDeadline = 5 * time.Second
+	// Open TCP connections, apart from the query slots. Each one holds a
+	// goroutine and, once its query is read, up to a 4 KiB buffer until
+	// tcpDeadline. Past this, a new connection is closed on accept.
+	maxTCPConns = 128
 )
 
 // reopenLog is the open of a fresh dns.jsonl after rotation. Tests fail it.
@@ -55,6 +59,7 @@ type gateDNS struct {
 	upPort  string        // set by tests; production uses 53
 	tcpWait time.Duration // set by tests; production uses tcpDeadline
 	slots   chan struct{}
+	conns   chan struct{} // open TCP connections; nil means maxTCPConns
 	logCap  int64
 	mu      sync.Mutex
 	log     *os.File
@@ -163,6 +168,7 @@ func loadGateDNS(confPath, logPath string) (*gateDNS, error) {
 	}
 	g.up = up
 	g.slots = make(chan struct{}, maxInflight)
+	g.conns = make(chan struct{}, maxTCPConns)
 	if err := g.openLog(logPath); err != nil {
 		return nil, err
 	}
@@ -197,6 +203,10 @@ func (g *gateDNS) openLog(path string) error {
 }
 
 func (g *gateDNS) serveTCP(ln net.Listener) {
+	conns := g.conns
+	if conns == nil {
+		conns = make(chan struct{}, maxTCPConns)
+	}
 	for {
 		c, err := ln.Accept()
 		if err != nil {
@@ -205,7 +215,16 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 			}
 			continue
 		}
+		// Taken before the goroutine starts, so a flood of connections
+		// cannot grow goroutines or buffers past the cap.
+		select {
+		case conns <- struct{}{}:
+		default:
+			_ = c.Close()
+			continue
+		}
 		go func(c net.Conn) {
+			defer func() { <-conns }()
 			defer c.Close()
 			wait := g.tcpWait
 			if wait == 0 {
