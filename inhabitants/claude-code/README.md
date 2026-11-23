@@ -84,6 +84,7 @@ go build -o inhabitants/claude-code/porter ./porter
 ```
 
 ```bash
+cp inhabitants/day-one.md inhabitants/claude-code/day-one.md
 docker build -t claude inhabitants/claude-code
 ```
 

@@ -83,6 +83,7 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 		"nano",
 		"bash-completion",
 		"opencode-start",
+		"COPY day-one.md /etc/hermetarium/day-one.md",
 	} {
 		if !strings.Contains(image, want) {
 			t.Fatalf("OpenCode image missing %q", want)

@@ -85,6 +85,13 @@ func EnsureOfficialImage(root, name, image string) error {
 		return err
 	}
 	srcDir := filepath.Join(root, "inhabitants", name)
+	guide, err := os.ReadFile(filepath.Join(root, "inhabitants", "day-one.md"))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "day-one.md"), guide, 0o644); err != nil {
+		return err
+	}
 	ents, err := os.ReadDir(srcDir)
 	if err != nil {
 		return err

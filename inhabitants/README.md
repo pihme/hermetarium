@@ -10,6 +10,8 @@ An inhabitant lives in its own container. [Squid](https://www.squid-cache.org/) 
 
 Claude Code and Grok Build have been run on both walls by hand, with a real key: a question, then a second question that continues the conversation. The automated tests use a stand-in model and do not cover that. OpenCode is optional. Its smoke is the Docker wall and a pretend model, with no paid key. Echo and agentd stay the images for the wall, egress, and log tests. The terminal setup that boots the OpenCode image on the strong wall is `omakase/opencode-tui/`.
 
+Each official image includes a static day-one guide at `/etc/hermetarium/day-one.md`, copied at build time from [day-one.md](day-one.md). It covers the wall CA, fail-closed egress, nested Docker, and running tests as a non-root user. It does not list a habitat's allowlist.
+
 ## Who is who
 
 **Habitat** is what `create` starts: the image on a wall, with the gate in front of it. In `squid.conf` the image is the peer named `inhabitant`. The inhabitant listens on port 8080. Hermetarium is the product, not that container.

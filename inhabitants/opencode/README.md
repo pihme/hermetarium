@@ -106,6 +106,7 @@ go build -o inhabitants/opencode/porter ./porter
 ```
 
 ```bash
+cp inhabitants/day-one.md inhabitants/opencode/day-one.md
 docker build -t opencode inhabitants/opencode
 ```
 

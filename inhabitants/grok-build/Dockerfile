@@ -8,6 +8,7 @@ ENV PATH="/root/.grok/bin:/usr/local/bin:${PATH}"
 WORKDIR /work
 COPY porter /usr/local/bin/porter
 COPY config.toml /root/.grok/config.toml
+COPY day-one.md /etc/hermetarium/day-one.md
 ENV HARNESS=grok
 ENV HARNESS_WORKDIR=/work
 # Grok 1.0.77 keeps the sampler on https://api.x.ai/v1 unless the second

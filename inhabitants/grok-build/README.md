@@ -86,6 +86,7 @@ go build -o inhabitants/grok-build/porter ./porter
 ```
 
 ```bash
+cp inhabitants/day-one.md inhabitants/grok-build/day-one.md
 docker build -t grok inhabitants/grok-build
 ```
 

@@ -217,6 +217,8 @@ fc.log         the strong wall only, Firecracker
 
 Every stock image runs as root. On the strong wall that is root inside the virtual machine. On the Docker wall, a kernel exploit reaches the host. On the strong wall, root stays inside the machine.
 
+The official inhabitant images include a short day-one guide at `/etc/hermetarium/day-one.md`. It is copied at image build time from [inhabitants/day-one.md](inhabitants/day-one.md) and is the same in every habitat from that image.
+
 Inside the box, the assistant may run commands and edit files without stopping to ask. The wall is outside the image.
 
 Claude Code refuses `--dangerously-skip-permissions` when it is root, unless it thinks it is sandboxed. The stock image sets `IS_SANDBOX=1`, `CLAUDE_CODE_BUBBLEWRAP=1`, and `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`. `settings.json` sets `skipDangerousModePermissionPrompt` and `permissions.defaultMode` to `bypassPermissions`.
@@ -275,9 +277,10 @@ Build porter for the image:
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o inhabitants/claude-code/porter ./porter
 ```
 
-Build the image. The folder you name holds `settings.json` and `porter`.
+Build the image. The folder you name holds `settings.json`, `porter`, and `day-one.md` (copied from `inhabitants/day-one.md`).
 
 ```bash
+cp inhabitants/day-one.md inhabitants/claude-code/day-one.md
 docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code
 ```
 
