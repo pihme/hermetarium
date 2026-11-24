@@ -25,6 +25,10 @@ const (
 
 	// DayOnePath is where every inhabitant image reads its static guide.
 	DayOnePath = "/etc/hermetarium/day-one.md"
+
+	// CaProfilePath is where every inhabitant image installs the CA-trust vars
+	// for login shells (the day-one guide's "the gate sets these variables").
+	CaProfilePath = "/etc/profile.d/hermetarium-ca.sh"
 )
 
 // ImageFor is the tag the suite builds for one official inhabitant.
@@ -111,6 +115,14 @@ func EnsureOfficialImage(root, name, image string) error {
 	if err := os.WriteFile(filepath.Join(ctx, "day-one.md"), guide, 0o644); err != nil {
 		return err
 	}
+	// The CA trust profile, copied the same way as the guide above.
+	ca, err := os.ReadFile(filepath.Join(root, "inhabitants", "profile.d-ca.sh"))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "profile.d-ca.sh"), ca, 0o644); err != nil {
+		return err
+	}
 	srcDir := filepath.Join(root, "inhabitants", name)
 	ents, err := os.ReadDir(srcDir)
 	if err != nil {
@@ -135,10 +147,10 @@ func EnsureOfficialImage(root, name, image string) error {
 	return err
 }
 
-// AssertDayOneInImage reads the static guide out of a built image. No habitat
-// and no Docker daemon started this container: `docker create` only takes the
-// image, and `docker export` writes its filesystem, so an image mounts or
-// copies nothing per habitat to be seen here.
+// AssertDayOneInImage reads the static guide and the CA-trust profile out of a
+// built image. No habitat and no Docker daemon started this container:
+// `docker create` only takes the image, and `docker export` writes its
+// filesystem, so an image mounts or copies nothing per habitat to be seen here.
 func AssertDayOneInImage(t *testing.T, image string) {
 	t.Helper()
 	cid, err := supervisor.Docker(time.Minute, "create", image)
@@ -154,20 +166,36 @@ func AssertDayOneInImage(t *testing.T, image string) {
 	}
 	defer os.RemoveAll(dir)
 
-	src := strings.TrimPrefix(DayOnePath, "/")
 	tarPath := filepath.Join(dir, "rootfs.tar")
 	if _, err := supervisor.Docker(3*time.Minute, "export", "-o", tarPath, cid); err != nil {
 		t.Fatalf("%s: docker export: %v", image, err)
 	}
-	text, err := exec.Command("tar", "-xOf", tarPath, src).Output()
-	if err != nil {
-		t.Fatalf("%s: %s is not in the image (%v)", image, DayOnePath, err)
+	read := func(path string) []byte {
+		t.Helper()
+		text, err := exec.Command("tar", "-xOf", tarPath, strings.TrimPrefix(path, "/")).Output()
+		if err != nil {
+			t.Fatalf("%s: %s is not in the image (%v)", image, path, err)
+		}
+		return text
 	}
-	if len(text) == 0 {
+	guide := read(DayOnePath)
+	if len(guide) == 0 {
 		t.Fatalf("%s: %s is empty", image, DayOnePath)
 	}
-	if !strings.Contains(string(text), "Fail-by-design") {
+	if !strings.Contains(string(guide), "Fail-by-design") {
 		t.Fatalf("%s: %s is not the day-one guide", image, DayOnePath)
+	}
+	// The guide promises the gate sets these CA-trust vars. The image must
+	// install them in a login profile, or an interactive attach shell would
+	// not have them (only PID 1 gets the guest-init exports).
+	for _, v := range []string{
+		"SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+		"CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "PIP_CERT",
+	} {
+		want := "export " + v + "=/etc/ssl/hermetarium-mitm.crt"
+		if !strings.Contains(string(read(CaProfilePath)), want) {
+			t.Fatalf("%s: %s does not set %s", image, CaProfilePath, want)
+		}
 	}
 }
 

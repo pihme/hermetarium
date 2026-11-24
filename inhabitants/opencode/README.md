@@ -109,10 +109,11 @@ go build -o inhabitants/opencode/porter ./porter
 docker build -t opencode inhabitants/opencode
 ```
 
-The image carries the static guide `inhabitants/day-one.md` at `/etc/hermetarium/day-one.md`. The Dockerfile `COPY`s it from the build context, so copy it next to the Dockerfile for a hand build:
+The image carries the static guide `inhabitants/day-one.md` at `/etc/hermetarium/day-one.md`, and the CA-trust profile `inhabitants/profile.d-ca.sh` at `/etc/profile.d/hermetarium-ca.sh`. The Dockerfile `COPY`s them from the build context, so copy them next to the Dockerfile for a hand build:
 
 ```bash
 cp inhabitants/day-one.md inhabitants/opencode/
+cp inhabitants/profile.d-ca.sh inhabitants/opencode/
 ```
 
 Copy the gate file and fill the four words. The model id is the `model` field in `opencode.json`, written as `provider/model`. The pretend model is `hermetarium/mock`. A real catalog has no model with that id, so selecting `hermetarium/mock` for a turn fails and OpenCode reports the model is not found or inactive. The [terminal setup](../../omakase/opencode-tui/README.md) says how to point one habitat at a real catalog. The `models` key under that provider is only the part after the slash (`mock`, not `hermetarium/mock`). Porter does not pass `-m`, so that file is what OpenCode requests. Change the field and that key together when the upstream uses another id.

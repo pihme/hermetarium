@@ -87,10 +87,11 @@ go build -o inhabitants/claude-code/porter ./porter
 docker build -t claude inhabitants/claude-code
 ```
 
-The image carries the static guide `inhabitants/day-one.md` at `/etc/hermetarium/day-one.md`. The Dockerfile `COPY`s it from the build context, so copy it next to the Dockerfile for a hand build:
+The image carries the static guide `inhabitants/day-one.md` at `/etc/hermetarium/day-one.md`, and the CA-trust profile `inhabitants/profile.d-ca.sh` at `/etc/profile.d/hermetarium-ca.sh`. The Dockerfile `COPY`s them from the build context, so copy them next to the Dockerfile for a hand build:
 
 ```bash
 cp inhabitants/day-one.md inhabitants/claude-code/
+cp inhabitants/profile.d-ca.sh inhabitants/claude-code/
 ```
 
 Copy the gate file and replace `__VENDOR_KEY__` with your long-lived Anthropic API key:
