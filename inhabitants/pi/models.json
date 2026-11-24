@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "hermetarium": {
+      "baseUrl": "http://model.hermetarium.test/v1",
+      "api": "openai-completions",
+      "apiKey": "not-the-supervisor-key",
+      "models": [
+        { "id": "mock" }
+      ]
+    }
+  }
+}

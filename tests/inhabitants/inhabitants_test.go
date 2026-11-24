@@ -14,7 +14,7 @@ func TestDayOneGuide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{harness.InhabitantClaude, harness.InhabitantGrok, harness.InhabitantOpenCode} {
+	for _, name := range []string{harness.InhabitantClaude, harness.InhabitantGrok, harness.InhabitantOpenCode, harness.InhabitantPi} {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			if err := harness.EnsureOfficialImage(root, name, harness.ImageFor(name)); err != nil {
@@ -38,6 +38,9 @@ func TestOfficialCLIs(t *testing.T) {
 	})
 	t.Run("opencode", func(t *testing.T) {
 		probeOfficial(t, root, harness.InhabitantOpenCode, []string{"/usr/local/bin/opencode", "--version"}, supervisor.ModelHost)
+	})
+	t.Run("pi", func(t *testing.T) {
+		probeOfficial(t, root, harness.InhabitantPi, []string{"/usr/local/bin/pi", "--version"}, supervisor.ModelHost)
 	})
 }
 

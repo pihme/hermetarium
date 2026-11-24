@@ -14,6 +14,7 @@ func TestCmdFirstTurn(t *testing.T) {
 		{"claude", []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
 		{"grok", []string{"--always-approve", "-p", "hi"}},
 		{"opencode", []string{"run", "--auto", "--", "hi"}},
+		{"pi", []string{"-p", "--model", "hermetarium/mock", "hi"}},
 	}
 	for _, c := range cases {
 		s := &server{harness: c.harness}
@@ -36,6 +37,11 @@ func TestCmdFirstTurn(t *testing.T) {
 				t.Fatalf("opencode env missing fetch lock: %v", cmd.Env)
 			}
 		}
+		if c.harness == "pi" {
+			if !strings.Contains(strings.Join(cmd.Env, "\n"), "PI_TELEMETRY=0") {
+				t.Fatalf("pi env missing telemetry off: %v", cmd.Env)
+			}
+		}
 	}
 }
 
@@ -49,6 +55,7 @@ func TestCmdContinuesSession(t *testing.T) {
 		{"claude", []string{"--continue", "-p", "--output-format", "text", "--dangerously-skip-permissions", "hi"}},
 		{"grok", []string{"--always-approve", "-p", "hi", "--continue"}},
 		{"opencode", []string{"run", "--auto", "--continue", "--", "hi"}},
+		{"pi", []string{"-p", "--model", "hermetarium/mock", "--continue", "hi"}},
 	}
 	for _, c := range cases {
 		s := &server{harness: c.harness, started: true}

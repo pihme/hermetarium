@@ -130,6 +130,23 @@ func (s *server) cmd(prompt string) (*exec.Cmd, error) {
 			"OPENCODE_DISABLE_MODELS_FETCH=1",
 		)
 		return c, nil
+	case "pi":
+		// -p is print (non-interactive) mode and takes the next argument as
+		// the prompt. --continue keeps the same session for a later POST, and
+		// must stay in front of the prompt argument. The model is passed
+		// explicitly because Pi's built-in default (OpenAI) would otherwise win
+		// over the gate model in models.json; the gate model is hermetarium/mock.
+		args := []string{"-p", "--model", "hermetarium/mock"}
+		if s.started {
+			args = append(args, "--continue")
+		}
+		args = append(args, prompt)
+		c := exec.Command("pi", args...)
+		// No startup telemetry or model-catalog fetch needed behind the gate.
+		c.Env = append(env,
+			"PI_TELEMETRY=0",
+		)
+		return c, nil
 	default:
 		return nil, fmt.Errorf("unknown HARNESS %q", s.harness)
 	}

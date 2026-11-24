@@ -18,10 +18,12 @@ const (
 	InClaudeImage   = "hermetarium-in-claude:local"
 	InGrokImage     = "hermetarium-in-grok:local"
 	InOpenCodeImage = "hermetarium-in-opencode:local"
+	InPiImage       = "hermetarium-in-pi:local"
 
 	InhabitantClaude   = "claude-code"
 	InhabitantGrok     = "grok-build"
 	InhabitantOpenCode = "opencode"
+	InhabitantPi       = "pi"
 
 	// DayOnePath is where every inhabitant image reads its static guide.
 	DayOnePath = "/etc/hermetarium/day-one.md"
@@ -40,6 +42,8 @@ func ImageFor(name string) string {
 		return InGrokImage
 	case InhabitantOpenCode:
 		return InOpenCodeImage
+	case InhabitantPi:
+		return InPiImage
 	}
 	return ""
 }

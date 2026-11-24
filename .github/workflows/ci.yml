@@ -37,7 +37,7 @@ jobs:
           - name: backup
             pkgs: ./tests/backup
           - name: unit
-            pkgs: ./supervisor ./supervisor/gatedns ./firecracker-scripts ./examples/... ./porter ./tests/echo ./tests/harness ./tests/vendormock
+            pkgs: ./supervisor ./supervisor/gatedns ./firecracker-scripts ./examples/... ./porter ./tests/echo ./tests/harness ./tests/vendormock ./tests/pi-tui
     # x86_64: Firecracker binary and kernel in the strong-wall test are x86_64.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
