@@ -15,10 +15,13 @@ RUN apt-get update \
 # page Squid may look for; a directory with only our page starts, but writes a
 # "loading file ... No such file or directory" ERROR per missing template on
 # every start and leaves the other answers to a fallback nobody chose. So the
-# stock English set is copied in first and our page layered on top.
+# stock English set is copied in first and our page layered on top. Only the
+# error-details.txt copy is allowed to miss: it sits outside en/ and some
+# builds do not ship it. A failed copy of the set itself fails this step, so a
+# broken image cannot be built silently.
 RUN mkdir -p /usr/local/share/hermetarium/errors \
  && cp -a /usr/share/squid/errors/en/. /usr/local/share/hermetarium/errors/ \
- && cp /usr/share/squid/errors/error-details.txt /usr/local/share/hermetarium/errors/ 2>/dev/null || true
+ && { cp /usr/share/squid/errors/error-details.txt /usr/local/share/hermetarium/errors/ 2>/dev/null || true; }
 COPY errors/ /usr/local/share/hermetarium/errors/
 # Squid's remaining templates and the startup probe report visible_hostname,
 # which this image does not set. A defaults file in conf.d ends the warning.
