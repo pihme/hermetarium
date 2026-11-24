@@ -201,7 +201,8 @@ func assertPassthrough(t *testing.T, gate string) {
 	}
 	// The Docker chain is registry-1.docker.io and auth.docker.io, and the
 	// layer blobs redirect to production.cloudfront.docker.com. The Debian
-	// hosts are the bookworm base image's sources. pinned.example is the
+	// hosts are the bookworm base image's sources, and dl-cdn.alpinelinux.org
+	// is Alpine's package CDN (the alpine base image). pinned.example is the
 	// file's placeholder and stays.
 	want := []string{
 		"pinned.example",
@@ -219,6 +220,7 @@ func assertPassthrough(t *testing.T, gate string) {
 		"files.pythonhosted.org",
 		"deb.debian.org",
 		"security.debian.org",
+		"dl-cdn.alpinelinux.org",
 	}
 	if strings.Join(have, " ") != strings.Join(want, " ") {
 		t.Fatalf("passthrough hosts\n got %q\nwant %q", have, want)
