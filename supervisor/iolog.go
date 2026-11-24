@@ -102,11 +102,22 @@ func ParseSquidLine(line string) (Record, bool) {
 		}
 	}
 	status := f[3]
-	// A gate file that logs %err_code %err_detail puts them in the last two
-	// fields. One that does not has neither, so nothing is lost.
+	// A gate file that logs %err_code %err_detail puts them at the end of the
+	// line. `%6tr` (relative response time) is space-padded to ten characters,
+	// so a slow request splits it into two fields and every later index shifts
+	// by one; never index from the front or assume a fixed field count. Scan
+	// the tail for the Squid error code and take the next field as the detail.
+	// An `http_access deny` logs "-" for both, and a gate file that does not
+	// log them has neither, so no code is found and the reason falls back.
 	errCode, errDetail := "", ""
-	if len(f) >= 2 && strings.HasPrefix(f[len(f)-2], "ERR_") {
-		errCode, errDetail = errCodeOf(f[len(f)-2]), f[len(f)-1]
+	for i := len(f) - 1; i >= 0 && i >= len(f)-4; i-- {
+		if strings.HasPrefix(f[i], "ERR_") {
+			errCode = errCodeOf(f[i])
+			if i+1 < len(f) {
+				errDetail = f[i+1]
+			}
+			break
+		}
 	}
 	dir := "out"
 	if len(f) >= 11 {

@@ -208,6 +208,14 @@ func TestRefusalReason(t *testing.T) {
 			want: ReasonNoSuchHost,
 		},
 		{
+			// %6tr is space-padded to ten characters, so a response that takes
+			// ten seconds or more splits into two fields and shifts the rest.
+			// The reason must still be found.
+			name: "slow request shifts the fields",
+			line: "1757162698.000        12 10.20.0.3 TCP_DENIED/403 12 CONNECT nowhere.invalid:443 - HIER_NONE/- text/html 3130 bump nowhere.invalid ERR_DNS_FAIL/503 -",
+			want: ReasonNoSuchHost,
+		},
+		{
 			name: "allowed request carries no reason",
 			line: "1757162698.123 12 10.20.0.3 TCP_MISS/200 45 GET http://example.com/ - HIER_DIRECT/1.2.3.4 text/plain 3130 bump example.com - -",
 			want: "",
