@@ -80,15 +80,15 @@ On the strong wall the gate (`htm-<id>-gate`) runs *in* the Firecracker containe
 
 The change is the same cold change, but the scope is just the gate:
 
-1. Stop only the gate. Leave `htm-<id>-fc` and `htm-<id>-dns` running.
+1. Edit `$ROOT/var/<id>/squid.conf`.
+
+2. Validate the gate file (see below) while the gate is still running — `docker exec` it. If the gate is already down, use the one-off `docker run` with the same image. A stopped gate cannot be `exec`'d.
+
+3. Stop only the gate. Leave `htm-<id>-fc` and `htm-<id>-dns` running.
 
    ```bash
    docker stop htm-<id>-gate
    ```
-
-2. Edit `$ROOT/var/<id>/squid.conf`.
-
-3. Validate the gate file (see below) — before you remove the gate, `docker exec` it; after it is gone, use the one-off `docker run` with the same image.
 
 4. Remove the stale pid file, then remove the old gate container.
 
@@ -119,7 +119,7 @@ The change is the same cold change, but the scope is just the gate:
    docker ps --format '{{.Names}} {{.Status}}' | grep htm-<id>
    ```
 
-The only impact is a few seconds of no traffic through the gate while it is down. The microVM, the agent, and any in-habitat work are unaffected. This works on the Docker wall too, where the gate does not join a netns: the recipe below already restarts just the gate.
+The only impact is a few seconds of no traffic through the gate while it is down. The microVM, the agent, and any in-habitat work are unaffected. On the Docker wall the gate does not join a netns, and DNS runs in the gate's namespace, so do not recreate the gate this way; the recipe below already restarts just the gate with `docker start`.
 
 A `docker start` on the stopped gate is enough when the image did not change (the bind-mounted `squid.conf` is re-read at start). Recreate the container, as above, when the `hermetarium-squid:local` image changed or you want a clean slate.
 
