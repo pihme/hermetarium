@@ -72,6 +72,57 @@ A name made before the current naming uses `htm-fc-<id>`, `htm-gate-<id>`, and `
 
 The I/O log and `hermetarium url` keep working; nothing in `instance.json` changes.
 
+## Restart only the gate (leave the habitat running)
+
+The recipe above stops the Firecracker container, which shuts down the microVM and the work inside it. When the change is a **pure gate-file edit** — an allowlist entry, a pass-through host, a header rule — you do not need to touch the habitat at all. Only the gate needs a restart, and it can rejoin the running network namespace.
+
+On the strong wall the gate (`htm-<id>-gate`) runs *in* the Firecracker container's network namespace, but it is a **separate Docker container**. The `htm-<id>-fc` container owns that namespace and holds the microVM; as long as it stays up, the gate can be stopped and replaced on its own, and the habitat keeps running.
+
+The change is the same cold change, but the scope is just the gate:
+
+1. Edit `$ROOT/var/<id>/squid.conf`.
+
+2. Validate the gate file (see below) while the gate is still running — `docker exec` it. If the gate is already down, use the one-off `docker run` with the same image. A stopped gate cannot be `exec`'d.
+
+3. Stop only the gate. Leave `htm-<id>-fc` and `htm-<id>-dns` running.
+
+   ```bash
+   docker stop htm-<id>-gate
+   ```
+
+4. Remove the stale pid file, then remove the old gate container.
+
+   ```bash
+   rm -f $ROOT/var/<id>/squid.pid
+   docker rm htm-<id>-gate
+   ```
+
+5. Create a new gate that joins the running Firecracker container's network namespace, the same way `create` does:
+
+   ```bash
+   docker run -d --name htm-<id>-gate \
+     --network container:htm-<id>-fc \
+     --tmpfs /var/log/squid \
+     --tmpfs /var/spool/squid \
+     -v "$ROOT/var/<id>:/log" \
+     --entrypoint /usr/sbin/squid \
+     hermetarium-squid:local \
+     -N -f /log/squid.conf
+   ```
+
+   The netns owner must be running for this to work; if `docker run` reports it cannot join a non-running container, the Firecracker container has stopped and you are doing the full recipe instead.
+
+6. Confirm the gate is alive and the habitat is still up:
+
+   ```bash
+   cat $ROOT/var/<id>/squid.pid
+   docker ps --format '{{.Names}} {{.Status}}' | grep htm-<id>
+   ```
+
+The only impact is a few seconds of no traffic through the gate while it is down. The microVM, the agent, and any in-habitat work are unaffected. On the Docker wall the gate does not join a netns, and DNS runs in the gate's namespace, so do not recreate the gate this way; the recipe below already restarts just the gate with `docker start`.
+
+A `docker start` on the stopped gate is enough when the image did not change (the bind-mounted `squid.conf` is re-read at start). Recreate the container, as above, when the `hermetarium-squid:local` image changed or you want a clean slate.
+
 ## Validate the gate file first
 
 Squid can check a gate file without a running habitat. Do this on the same image with the same mount, and do it **before** you stop the gate — a stopped container cannot be `exec`'d, and a gate that will not start on a bad file cannot either.
