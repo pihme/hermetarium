@@ -183,3 +183,46 @@ func TestSyncReadsRotatedDNS(t *testing.T) {
 		t.Fatalf("%+v", recs)
 	}
 }
+
+// TestRefusalReason: a refused record says why; an allowed one says nothing.
+func TestRefusalReason(t *testing.T) {
+	cases := []struct{ name, line, want string }{
+		{
+			name: "acl denial, gate file without error fields",
+			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 GET http://example.com/ - HIER_NONE/- text/html",
+			want: ReasonNotAllowlisted,
+		},
+		{
+			name: "access denied",
+			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 CONNECT example.com:443 - HIER_NONE/- text/html 3130 bump example.com ERR_ACCESS_DENIED/403 -",
+			want: ReasonNotAllowlisted,
+		},
+		{
+			name: "client refused the certificate",
+			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 CONNECT example.com:443 - HIER_NONE/- text/html 3130 bump example.com ERR_SECURE_CONNECT_FAIL/400 -",
+			want: ReasonCATrusted,
+		},
+		{
+			name: "name does not resolve",
+			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 CONNECT nowhere.invalid:443 - HIER_NONE/- text/html 3130 bump nowhere.invalid ERR_DNS_FAIL/503 -",
+			want: ReasonNoSuchHost,
+		},
+		{
+			name: "allowed request carries no reason",
+			line: "1757162698.123 12 10.20.0.3 TCP_MISS/200 45 GET http://example.com/ - HIER_DIRECT/1.2.3.4 text/plain 3130 bump example.com - -",
+			want: "",
+		},
+	}
+	for _, c := range cases {
+		rec, ok := ParseSquidLine(c.line)
+		if !ok {
+			t.Fatalf("%s: parse failed", c.name)
+		}
+		if rec.Reason != c.want {
+			t.Errorf("%s: reason = %q, want %q", c.name, rec.Reason, c.want)
+		}
+		if c.want != "" && rec.Allowed {
+			t.Errorf("%s: refused record marked allowed", c.name)
+		}
+	}
+}

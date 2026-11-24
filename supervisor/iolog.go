@@ -24,6 +24,8 @@ type Record struct {
 	Path     string `json:"path,omitempty"`
 	Result   string `json:"result,omitempty"`
 	Allowed  bool   `json:"allowed"`
+	// Reason says why a request was refused; it is empty when it was allowed.
+	Reason string `json:"reason,omitempty"`
 	// Aborted is a CONNECT closed before a tunnel existed (NONE_*_ABORTED).
 	// The destination is the SNI host name when the gate file logged it.
 	// TCP_TUNNEL_ABORTED is a tunnel that later closed, and is not this.
@@ -100,6 +102,12 @@ func ParseSquidLine(line string) (Record, bool) {
 		}
 	}
 	status := f[3]
+	// A gate file that logs %err_code %err_detail puts them in the last two
+	// fields. One that does not has neither, so nothing is lost.
+	errCode, errDetail := "", ""
+	if len(f) >= 2 && strings.HasPrefix(f[len(f)-2], "ERR_") {
+		errCode, errDetail = errCodeOf(f[len(f)-2]), f[len(f)-1]
+	}
 	dir := "out"
 	if len(f) >= 11 {
 		if lp, err := strconv.Atoi(f[10]); err == nil && lp == InboundPort {
@@ -145,6 +153,7 @@ func ParseSquidLine(line string) (Record, bool) {
 		Aborted:     handshakeAbort(status, f[5]),
 		Bytes:       bytes,
 		TLS:         tlsMode,
+		Reason:      refusalReason(status, errCode, errDetail),
 	}, true
 }
 
@@ -310,4 +319,37 @@ func LogHasDirection(path, dir string) bool {
 		}
 	}
 	return false
+}
+
+// The refusal reasons an I/O log record can carry.
+const (
+	ReasonNotAllowlisted = "not-allowlisted"
+	ReasonCATrusted      = "ca-untrusted"
+	ReasonNoSuchHost     = "no-such-host"
+)
+
+// errCodeOf strips the HTTP status Squid appends to %err_code, so
+// "ERR_ACCESS_DENIED/403" becomes "ERR_ACCESS_DENIED".
+func errCodeOf(tok string) string {
+	name, _, _ := strings.Cut(tok, "/")
+	return name
+}
+
+// refusalReason names why a request was refused, or "" when it was allowed.
+// A refused line whose gate file does not log %err_code has no detail and
+// counts as not-allowlisted.
+func refusalReason(status, errCode, errDetail string) string {
+	if !strings.Contains(status, "DENIED") {
+		return ""
+	}
+	switch errCode {
+	case "ERR_DNS_FAIL", "ERR_CANNOT_FORWARD":
+		return ReasonNoSuchHost
+	case "ERR_SECURE_CONNECT_FAIL":
+		return ReasonCATrusted
+	}
+	if strings.Contains(errDetail, "certificate") {
+		return ReasonCATrusted
+	}
+	return ReasonNotAllowlisted
 }
