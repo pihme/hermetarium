@@ -329,13 +329,17 @@ RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
 	&& apt-get update -qq
 ```
 
-`SSL_CERT_FILE` is enough for `apt-get` itself; `ca-certificates` has to be installed before `update-ca-certificates` exists, so the sequence runs it twice. An image that only shells out to a tool honouring `SSL_CERT_FILE` needs nothing beyond the mount:
+`SSL_CERT_FILE` is enough for `apt-get` itself; `ca-certificates` has to be installed before `update-ca-certificates` exists, so the sequence runs it twice.
+
+That last `apt-get update` proves less than it appears to. `deb.debian.org` is on the passthrough list, so it succeeds whether or not the CA arrived. A step that must show the CA works has to reach a host that is **not** passed through. For a single command that honours the CA variable, the mount alone is enough, and nothing is installed:
 
 ```dockerfile
+FROM debian:bookworm-slim
 RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
-	env SSL_CERT_FILE=/tmp/ca.crt curl -fsSL https://example.internal/install.sh
+	env SSL_CERT_FILE=/tmp/ca.crt apt-get update -qq
 ```
 
+Point it at a decrypted host — or any command that really does contact one — to see the difference: without the mount it fails with a certificate error, with it the command succeeds.
 The first example installs the CA, so that image trusts this habitat's gate for good. That is wrong for a released image: every `create` makes a fresh CA. Use it for a throwaway build only. For a released image, stop at the `SSL_CERT_FILE` form above, which trusts the CA for that one command and leaves no trace.
 
 CI is not affected: GitHub's runners are not behind the gate, and the same builds pass there.
