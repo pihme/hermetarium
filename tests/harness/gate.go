@@ -134,6 +134,32 @@ func inhabitantOpts(root, name, label string, mock bool) (supervisor.CreateOpts,
 			break
 		}
 		acl, err = writeTempACL(s)
+	case InhabitantPi:
+		// Same optional smoke as opencode: the generic model stand-in with the
+		// mock endpoint, no paid key.
+		image = InPiImage
+		if !mock {
+			err = fmt.Errorf("pi smoke uses the mock endpoint")
+			break
+		}
+		var rawPi []byte
+		rawPi, err = os.ReadFile(filepath.Join(root, "inhabitants", name, "squid.conf"))
+		if err != nil {
+			break
+		}
+		s := string(rawPi)
+		s = strings.ReplaceAll(s, "url_rewrite_program /log/model-rewrite __MODEL_PREFIX__", "url_rewrite_program /log/model-rewrite")
+		s = strings.ReplaceAll(s, "__MODEL_PEER__", "127.0.0.1 parent 18082 0 no-query no-digest originserver name=model")
+		s = strings.ReplaceAll(s, "__MODEL_HOST__", "upstream.example")
+		s = strings.ReplaceAll(s, "__MODEL_PREFIX__", "")
+		s = strings.ReplaceAll(s, "__MODEL_KEY__", TestVendorKey)
+		s = strings.ReplaceAll(s, "__GITHUB_TOKEN__", "ghp_mock")
+		s = strings.ReplaceAll(s, "__GITHUB_GIT_BASIC__", "bW9jaw==")
+		if strings.Contains(s, "__MODEL_") || strings.Contains(s, "__GITHUB_") {
+			err = fmt.Errorf("unfilled pi gate file")
+			break
+		}
+		acl, err = writeTempACL(s)
 	default:
 		return supervisor.CreateOpts{}, fmt.Errorf("unknown inhabitant %q", name)
 	}

@@ -31,7 +31,7 @@ Not a per-command sandbox. Do not implement this as DeepSeek-style `ctx.sandbox`
 - **Changes on main:** keep them small; `make test` should pass on linux-amd64 with Docker and KVM.
 - Outside pull requests are not accepted (see `CONTRIBUTING.md`); issues are.
 - Inhabitant images carry a static guide at `/etc/hermetarium/day-one.md` (`inhabitants/day-one.md`, `COPY`-ed by each Dockerfile). When a change alters what happens inside an image (build contract, nested Docker, the gate certificate), amend that file too. `tests/inhabitants` `TestDayOneGuide` reads it back out of each built image.
-- `examples/` = stand-in inhabitant images (echo, agentd). `inhabitants/` = official `claude` / `grok`, plus optional `opencode`. `tests/` holds integration tests, vendor-mock, and probe. Do not add Universal APP / TypeScript host / scanners until asked.
+- `examples/` = stand-in inhabitant images (echo, agentd). `inhabitants/` = official `claude` / `grok`, plus optional `opencode` and `pi`. `tests/` holds integration tests, vendor-mock, and probe. Do not add Universal APP / TypeScript host / scanners until asked.
 - Prefer small, reversible files. Hello-world is both walls, fail-closed egress, probe, I/O log, inbound echo (`examples/echo/`). Coding-agent stand-in is one `examples/agentd/` image, not three vendor-named copies.
 - License: **PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not OSI Open Source. Do not relicense to Apache/MIT/GPL.
 

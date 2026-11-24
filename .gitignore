@@ -11,6 +11,7 @@ squid/vendor-mock
 inhabitants/claude-code/porter
 inhabitants/grok-build/porter
 inhabitants/opencode/porter
+inhabitants/pi/porter
 
 # Nix dev shells
 /result

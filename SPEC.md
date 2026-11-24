@@ -157,13 +157,13 @@ TLS and auth on this hop (operator → supervisor URL) are not decided.
 
 ### 9c. Coding-agent example
 
-`examples/agentd/`. Same inhabitant shape as echo: HTTP on 8080, one open session, a bash tool, Anthropic-shaped origin on the logged path (`claude.hermetarium.test`). It is a stand-in loop, not Claude Code, Grok Build, or OpenCode. Those CLIs are `inhabitants/` (porter + the real binary). OpenCode is optional. Echo and agentd stay the images for the wall, egress, and log tests.
+`examples/agentd/`. Same inhabitant shape as echo: HTTP on 8080, one open session, a bash tool, Anthropic-shaped origin on the logged path (`claude.hermetarium.test`). It is a stand-in loop, not Claude Code, Grok Build, OpenCode, or Pi. Those CLIs are `inhabitants/` (porter + the real binary). OpenCode and Pi are optional. Echo and agentd stay the images for the wall, egress, and log tests.
 
 Shared with those inhabitants:
 
 - Same OCI image on **both** walls. Runs as **root** inside the image (guest root on the strong wall).
 - HTTP server that **stays up** and holds **one open session** for the life of the habitat.
-- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. For Claude Code, Grok Build, and OpenCode, a later POST is the next turn in the **same** session (not a new process per message). Porter, inside the image, runs the CLI.
+- Operator chat is HTTP turns on `hermetarium url`: POST a message, wait until that turn finishes, read the reply. For Claude Code, Grok Build, OpenCode, and Pi, a later POST is the next turn in the **same** session (not a new process per message). Porter, inside the image, runs the CLI.
 - Model “home” uses §8. Direct vendor API from the box is denied.
 - No SSE/WebSocket. A turn is still call-and-wait.
 - Operator chat for this harness is this HTTP server. A terminal program inside the image is reached with `hermetarium attach`. What passes over the terminal is not in the I/O log.
@@ -187,7 +187,7 @@ Both walls, fail-closed egress, probe, I/O log, inbound echo. Command: `make tes
 
 ### Coding-agent mock suite (required, CI default)
 
-Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls. One §9c image (`examples/agentd/`). Official-CLI smoke (`inhabitants/`) only checks that `claude`, `grok`, and `opencode` are on PATH and porter answers. The OpenCode case uses the pretend model on `model.hermetarium.test` and does not need a paid key. It does not replace the agentd wall tests.
+Command: `make test`. GitHub Actions job `test` on push and pull_request. No live vendor key. Both walls. One §9c image (`examples/agentd/`). Official-CLI smoke (`inhabitants/`) only checks that `claude`, `grok`, `opencode`, and `pi` are on PATH and porter answers. The OpenCode and Pi cases use the pretend model on `model.hermetarium.test` and do not need a paid key. They do not replace the agentd wall tests.
 
 **Mock the vendor HTTP API.** The agentd image runs a small tool loop, not an official CLI. A mock origin on the gate (like the probe) speaks enough of the Anthropic Messages API to:
 

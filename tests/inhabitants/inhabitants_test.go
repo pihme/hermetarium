@@ -39,6 +39,9 @@ func TestOfficialCLIs(t *testing.T) {
 	t.Run("opencode", func(t *testing.T) {
 		probeOfficial(t, root, harness.InhabitantOpenCode, []string{"/usr/local/bin/opencode", "--version"}, supervisor.ModelHost)
 	})
+	t.Run("pi", func(t *testing.T) {
+		probeOfficial(t, root, harness.InhabitantPi, []string{"/usr/local/bin/pi", "--version"}, supervisor.ModelHost)
+	})
 }
 
 func probeOfficial(t *testing.T, root, name string, versionCmd []string, vendorHost string) {
