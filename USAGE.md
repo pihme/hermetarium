@@ -117,6 +117,8 @@ The window size follows the operator's terminal. Closing the terminal leaves a `
 
 The folders `examples/` and `inhabitants/` are images you build. They are not command names.
 
+To change the gate rules of a habitat that already runs, use [docs/wall-rules.md](docs/wall-rules.md). There is no CLI command for it; that page has the container order, the pid file, and the `splice` warning.
+
 ## The gate file
 
 `create` needs `--acl FILE`. Hermetarium copies that file as you wrote it and starts Squid with `-f /log/squid.conf`. The habitat's directory is mounted at `/log` inside the Squid container. The habitat starts only when that file can be read and Squid starts.
@@ -184,6 +186,8 @@ The wall sends the container's port 80 to Squid. Other ports from the container 
 Ordinary HTTPS is the block marked `OPEN-HTTPS` in those same files. Comment those lines in, and comment out the two `OPEN-OUT` lines. `create` then sends the container's port 443 to Squid. Squid decrypts the call, so the log can name the site and the path. The page body stays out of the log. The assistant sets no proxy. `create` mounts the gate certificate into the container and adds it to the trust store. The private key stays in the instance directory, on the gate. The model call is unchanged: the container still speaks plain HTTP to its stand-in host, and Squid opens HTTPS to the model company.
 
 The gate is an OpenSSL Squid. A program that carries its own certificate list and ignores the container trust store still refuses the gate certificate.
+
+When decryption is on, the gate signs a certificate for every intercepted host under one CA that belongs to that habitat. The private key stays on the host and never enters the container. A key that leaks through the gate or the host therefore impersonates every intercepted host to that one habitat until its ten-year root stops being trusted. [SPEC §8](SPEC.md#8-secrets) has the detail.
 
 `examples/openweb/squid.conf` is an open-web gate file. It decrypts HTTPS, except hosts on its pass-through list, which keep their own certificate. `api.github.com` gets the bearer token from that file, and the box's `Authorization` on that host is dropped. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Deletes, contents writes, Git data writes, and repository settings are denied. The token is not in the image. Two fine-grained tokens are described in [examples/openweb/README.md](examples/openweb/README.md).
 
@@ -294,6 +298,8 @@ Start it. The command prints an id: `YOUR_ID`.
 Take the Claude install from one folder and Grok's model address from another, or skip porter and put your own program on port 8080. The wall cares that something listens.
 
 The stock bases are `debian:bookworm-slim` and `node:26-bookworm-slim`. Another base is fine when it keeps the contract above: root, port 8080, `ip`, the stand-in model address, and a stand-in key. A strong-wall terminal needs an SSH server at `/usr/sbin/sshd` (see above). A backup does not: it pauses the Firecracker container and does not freeze the guest. An image that only uses the weak wall does not need that server.
+
+The inhabitant images carry a static guide for the agent at `/etc/hermetarium/day-one.md` ([inhabitants/day-one.md](inhabitants/day-one.md)). It is copied at build time and is the same for every habitat from that image: the gate certificate and how to trust it outside the set of TLS libraries the variables cover, fail-by-design, nested Docker, and running tests as a non-root user. A `Dockerfile` adds it with `COPY day-one.md /etc/hermetarium/day-one.md`. It holds no per-habitat allowlist; that is the gate file.
 
 **Docker in Docker.** Start from an image that can run Docker, such as `docker:29-dind`, or Debian plus Docker Engine. Install the assistant and porter on top. The engine inside the box wants cgroup access: `--privileged` on the box, or the right cgroup mounts. The Docker wall adds `NET_ADMIN` to the box. It leaves out `--privileged`, and it leaves the host Docker socket outside. Mounting that socket opens the wall. On the strong wall the guest init mounts cgroup2 at `/sys/fs/cgroup`, plus `/dev/pts`, `/dev/shm`, and `/run`. This kernel rejects at least one cgroup controller, so the stock `docker:29-dind` entrypoint loops. Enable controllers one at a time, as `tests/guest-docker/start.sh` does, or start `dockerd` directly. This kernel has no `CONFIG_IP_NF_RAW`, so set `DOCKER_INSECURE_NO_IPTABLES_RAW=1` in the image. Give the machine room with `--mem` and `--disk`. The OpenCode image installs Debian's `docker.io` and starts `dockerd` with iptables off. A container that should reach the gate uses `--network host`.
 

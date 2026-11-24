@@ -102,6 +102,21 @@ Ordinary HTTPS from the container is closed unless the gate file's `OPEN-HTTPS` 
 
 `examples/openweb/squid.conf` decrypts HTTPS except a short pass-through list, which keeps the site's certificate. For `api.github.com` it drops the box `Authorization` and sets the gate token from that file. Reads are allowed. Creating a repository, a pull request, an issue, or a comment is allowed. Other writes on that host are denied, including contents, Git data, deletes, and repository settings. `tls` in the I/O log is `decrypted` or `passthrough`.
 
+Before an operator turns decryption on, the state of the keys behind it, and what a leak of one costs:
+
+- **One CA per habitat.** `create` makes a fresh self-signed CA (`PrepareMITM`, under the instance directory). Two habitats never share a CA.
+- **One leaf key per habitat.** When Squid decrypts, it signs a certificate for every intercepted host (`github.com`, `api.github.com`, a package registry, a CDN, the model endpoint, …) under that one root. The certificates differ in their names only. The key inside them is the same key for every host in that habitat.
+- **One root, about ten years, no intermediate.** The root is self-signed (`CN=Hermetarium`) and valid for ten years. The chain the inhabitant sees is `leaf -> CN=Hermetarium`.
+- **The private key never enters the habitat.** It stays on the host, in the instance directory (`mitm/ca.key`). The wall containers — the gate, and on the strong wall the Firecracker and DNS containers, which mount the instance directory at `/log` — can read it; no container inside the habitat can. The habitat receives the public certificate alone (`/etc/ssl/hermetarium-mitm.crt`, served at `GateCAPort` `/ca.pem`, installed by `gate-cert.sh`), and `MITMTrustEnv` points the usual TLS libraries at it. The primary threat model, the inhabitant as attacker, therefore cannot read the key out of its world.
+
+What a leak of that key buys, and the limits of it:
+
+1. **Inside one habitat, every host.** Anyone who holds the key can impersonate any host the gate connects to the inhabitant for, and the inhabitant cannot tell two of those hosts apart by key. There is no per-host attribution.
+2. **For the life of the root.** The ten-year root, with no rotation, keeps the key usable in every image built while it is trusted. The inhabitant cannot notice, because it keeps trusting the root.
+3. **How the key can leak at all.** Not through the habitat. The realistic paths are an exploit of Squid or of the host, or a compromised Squid image.
+
+This is the accepted risk of "key on the gate". Per-host keys and root rotation are tracked separately and are not part of this build.
+
 How a credentialed destination is attached:
 
 - The operator’s Squid config allowlists the path and contains the credential headers.

@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/pihme/hermetarium/supervisor"
@@ -20,7 +22,23 @@ const (
 	InhabitantClaude   = "claude-code"
 	InhabitantGrok     = "grok-build"
 	InhabitantOpenCode = "opencode"
+
+	// DayOnePath is where every inhabitant image reads its static guide.
+	DayOnePath = "/etc/hermetarium/day-one.md"
 )
+
+// ImageFor is the tag the suite builds for one official inhabitant.
+func ImageFor(name string) string {
+	switch name {
+	case InhabitantClaude:
+		return InClaudeImage
+	case InhabitantGrok:
+		return InGrokImage
+	case InhabitantOpenCode:
+		return InOpenCodeImage
+	}
+	return ""
+}
 
 func EnsureEchoImage(root string) error {
 	bin, err := goBuild(root, filepath.Join(supervisor.CacheDir(root), "echo-service"), "./examples/echo")
@@ -84,6 +102,15 @@ func EnsureOfficialImage(root, name, image string) error {
 	if err := os.WriteFile(filepath.Join(ctx, "porter"), b, 0o755); err != nil {
 		return err
 	}
+	// Every inhabitant Dockerfile in this checkout COPYs this one file. It sits
+	// beside each Dockerfile for a hand build; here it rides in the context.
+	guide, err := os.ReadFile(filepath.Join(root, "inhabitants", "day-one.md"))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "day-one.md"), guide, 0o644); err != nil {
+		return err
+	}
 	srcDir := filepath.Join(root, "inhabitants", name)
 	ents, err := os.ReadDir(srcDir)
 	if err != nil {
@@ -106,6 +133,42 @@ func EnsureOfficialImage(root, name, image string) error {
 		ctx,
 	)
 	return err
+}
+
+// AssertDayOneInImage reads the static guide out of a built image. No habitat
+// and no Docker daemon started this container: `docker create` only takes the
+// image, and `docker export` writes its filesystem, so an image mounts or
+// copies nothing per habitat to be seen here.
+func AssertDayOneInImage(t *testing.T, image string) {
+	t.Helper()
+	cid, err := supervisor.Docker(time.Minute, "create", image)
+	if err != nil {
+		t.Fatalf("%s: docker create: %v", image, err)
+	}
+	cid = strings.TrimSpace(cid)
+	defer supervisor.DockerIgnore("rm", "-fv", cid)
+
+	dir, err := os.MkdirTemp("", "htm-day-one-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	src := strings.TrimPrefix(DayOnePath, "/")
+	tarPath := filepath.Join(dir, "rootfs.tar")
+	if _, err := supervisor.Docker(3*time.Minute, "export", "-o", tarPath, cid); err != nil {
+		t.Fatalf("%s: docker export: %v", image, err)
+	}
+	text, err := exec.Command("tar", "-xOf", tarPath, src).Output()
+	if err != nil {
+		t.Fatalf("%s: %s is not in the image (%v)", image, DayOnePath, err)
+	}
+	if len(text) == 0 {
+		t.Fatalf("%s: %s is empty", image, DayOnePath)
+	}
+	if !strings.Contains(string(text), "Fail-by-design") {
+		t.Fatalf("%s: %s is not the day-one guide", image, DayOnePath)
+	}
 }
 
 func goBuild(root, dest, pkg string) (string, error) {
