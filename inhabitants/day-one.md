@@ -46,7 +46,7 @@ A program that does not read them needs the file itself. The fingerprint, if you
 openssl x509 -in /etc/ssl/hermetarium-mitm.crt -noout -fingerprint -sha256
 ```
 
-- **JVM.** Import it into the JDK trust store: `keytool -importcert -noprompt -alias hermetarium -file /etc/ssl/hermetarium-mitm.crt -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit`. Or pass `-Djavax.net.ssl.trustStore=/etc/ssl/hermetarium-mitm.crt -Djavax.net.ssl.trustStorePassword=changeit` to that program.
+- **JVM.** Import it into the JDK trust store: `keytool -importcert -noprompt -alias hermetarium -file /etc/ssl/hermetarium-mitm.crt -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit`. A PEM file cannot be passed as `-Djavax.net.ssl.trustStore`: the JVM reads that setting as a JKS/PKCS12 store, not PEM. Import it first, or point `trustStore` at a store you built with `keytool` from it.
 - **Rust / cargo.** `cargo` honours `CARGO_HTTP_CAINFO`. Set it to `/etc/ssl/hermetarium-mitm.crt`. A Rust program that builds its own TLS client must load that file, for example with `rustls-pemfile`, or pass `--cacert` to the `curl` it shells out to.
 - **.NET.** .NET reads its own bundle, not the system one. Set `SSL_CERT_FILE` (it is honoured on Linux), or set `X509Chain` trust for the file in code.
 
@@ -58,7 +58,7 @@ The image may run its own Docker daemon.
 
 - The daemon runs. Start it if the image does not start it for you (`dockerd` or the image's start script).
 - A container that should reach the gate uses `--network host`. The habitat's own container has no Docker bridge that leads out.
-- Image pulls from a registry go through the gate. The registry and its blob host are normally on the gate file's pass-through list, so the daemon sees their real certificates. The gate file decides this, not the image: if an operator does not pass them through, `dockerd` falls back to the wall CA it inherits (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`), which works but is the weaker arrangement — see `docs/wall-rules.md`.
+- Image pulls from a registry go through the gate. Whether the registry and its blob host are passed through is decided by the gate file, not by this image. If they are, the daemon sees the registry's real certificates. If they are not, `dockerd` falls back to the wall CA it inherits (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`), which works but is the weaker arrangement.
 
 ## Root and tests
 

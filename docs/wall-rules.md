@@ -11,7 +11,11 @@ The example is a real cold change on a strong-wall OpenCode habitat. The Docker 
 A habitat keeps its state in its instance directory, `var/<id>`, under the data root that `hermetarium` resolves: `HERMETARIUM_ROOT` if set, else a checkout found from the current directory, else `$XDG_DATA_HOME/hermetarium` (`~/.local/share/hermetarium`). Every `var/<id>/...` path below is relative to that root, so resolve it once first:
 
 ```sh
-ROOT=${HERMETARIUM_ROOT:-$HOME/.local/share/hermetarium}   # adjust if you set it elsewhere
+# Same order the tool uses: explicit root, then a checkout from here, then XDG.
+if [ -n "${HERMETARIUM_ROOT:-}" ]; then ROOT=$HERMETARIUM_ROOT
+elif [ -d ./var ] && [ -f ./go.mod ]; then ROOT=$PWD
+else ROOT=${XDG_DATA_HOME:-$HOME/.local/share}/hermetarium
+fi
 ls "$ROOT/var/<id>/squid.conf"
 ```
 
@@ -70,13 +74,21 @@ The I/O log and `hermetarium url` keep working; nothing in `instance.json` chang
 
 ## Validate the gate file first
 
-Squid can check a gate file without starting. Run it on the same image, with the same mount, wherever the habitat will run it:
+Squid can check a gate file without a running habitat. Do this on the same image with the same mount, and do it **before** you stop the gate — a stopped container cannot be `exec`'d, and a gate that will not start on a bad file cannot either.
+
+While the habitat is still up:
 
 ```bash
 docker exec htm-<id>-gate squid -k parse -f /log/squid.conf
 ```
 
-It must exit 0. A file that fails here will not start, and on the strong wall the fc container then gives up after its 20-second wait and the habitat does not boot.
+With the containers down, run the same image directly and mount the instance directory where the gate expects it:
+
+```bash
+docker run --rm -v "$ROOT/var/<id>:/log:ro" hermetarium-squid:local squid -k parse -f /log/squid.conf
+```
+
+Either must exit 0. A file that fails here will not start, and on the strong wall the fc container then gives up after its 20-second wait and the habitat does not boot.
 
 ## Do not hot-reconfigure when the change touches `splice`
 
@@ -114,6 +126,7 @@ docker start htm-<id>-gate
 ```
 
 The rest of this page applies unchanged.
+
 ## Migrating a habitat to newer rules
 
 A habitat is a stopped set of containers plus the files in `$ROOT/var/<id>/`; nothing else ties it to the version that created it. To move it onto a newer Hermetarium configuration, keep the instance and replace only what changed:
