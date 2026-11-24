@@ -1,0 +1,111 @@
+# Cookbook: changing a habitat's wall rules
+
+This page is how you change a gate file (the allowlist, or what is passed through) of a habitat that already exists, and how you move a habitat onto a newer Hermetarium, using ordinary host tooling.
+
+There is no command for this. The CLI has `create` to start and `destroy` to stop; it has no `acl`, `reload`, or `restart`. The path below is done by hand, on the host, against the habitat's containers.
+
+The example is a real cold change on a strong-wall OpenCode habitat. The Docker wall has one container fewer; the rest is the same idea.
+
+## The containers
+
+A habitat keeps its state in its instance directory, `var/<id>` under the data root (`HERMETARIUM_ROOT`, else the checkout, else `~/.local/share/hermetarium`).
+
+| Container | Wall | Role |
+| --- | --- | --- |
+| `htm-<id>-fc` | strong | Firecracker container. Owns the network namespace (the TAP device). Its entrypoint `/entrypoint.sh` sets iptables (`gate-rules.sh`, then `rules.ready`), serves the CA when HTTPS is on (`ca.ready`), then **waits for `squid.pid` and `dns.ready` before it boots the microVM**. |
+| `htm-<id>-gate` | both | Squid, started as `/usr/sbin/squid -N -f /log/squid.conf`. On the strong wall it runs in the fc container's network namespace. Reads `var/<id>/squid.conf`, mounted at `/log`. |
+| `htm-<id>-dns` | both | Gate DNS, in the same network namespace. Writes `dns.ready`. |
+
+The allowlist lives in `var/<id>/squid.conf`; that is the one file you edit. The strong wall's root disk (`var/<id>/rootfs.ext4`) is untouched by a rule change. A cold change boots the same root disk, so the work you did inside the habitat is still there.
+
+A name made before the current naming uses `htm-fc-<id>`, `htm-gate-<id>`, and `htm-dns-<id>`.
+
+## Order
+
+**Start: fc, then gate, then dns.** The fc container is the network namespace owner, and it holds the boot until the gate has written `squid.pid` and DNS has written `dns.ready`. Each wait allows about 20 seconds (`200 × 0.1`), so start the three quickly and in this order.
+
+**Stop: the reverse.** Stop the dependent containers before the network namespace owner, so nothing is left pointing at a namespace that is gone.
+
+## The recipe
+
+1. Stop the gate and DNS, then the Firecracker container.
+
+   ```bash
+   docker stop htm-<id>-gate htm-<id>-dns
+   docker stop htm-<id>-fc
+   ```
+
+2. Edit `var/<id>/squid.conf`. A host that should be passed through (spliced) instead of decrypted is added to the `acl passthrough ssl::server_name ...` list. The registry and blob hosts are in the list below.
+
+3. Remove the stale pid file. Squid refuses to start while `squid.pid` is present, and the file outlives the stopped container.
+
+   ```bash
+   rm -f var/<id>/squid.pid
+   ```
+
+4. Start the Firecracker container. Its entrypoint sets the firewall, starts the certificate server, and then waits.
+
+   ```bash
+   docker start htm-<id>-fc
+   ```
+
+5. Start the gate. It writes `squid.pid`.
+
+   ```bash
+   docker start htm-<id>-gate
+   ```
+
+6. Start DNS. It writes `dns.ready`, and the microVM boots.
+
+   ```bash
+   docker start htm-<id>-dns
+   ```
+
+The I/O log and `hermetarium url` keep working; nothing in `instance.json` changes.
+
+## Validate the gate file first
+
+Squid can check a gate file without starting. Run it on the same image, with the same mount, wherever the habitat will run it:
+
+```bash
+docker exec htm-<id>-gate squid -k parse -f /log/squid.conf
+```
+
+It must exit 0. A file that fails here will not start, and on the strong wall the fc container then gives up after its 20-second wait and the habitat does not boot.
+
+## Do not hot-reconfigure when the change touches `splice`
+
+`squid -k reconfigure` (SIGHUP) is not the way to change a pass-through list.
+
+On a real habitat it loaded the new config, and then **every** passed-through host failed with `TLS: wrong version number`. The decrypted (bumped) path kept working. A clean restart, as in the recipe, fixed it.
+
+For any change to `ssl_bump splice`, use the cold change. Treat `squid -k reconfigure` as unsupported for wall changes until it has been shown to work for the change you are making.
+
+## Registry hosts for nested Docker
+
+A container inside the habitat that pulls from Docker Hub goes through the wall. The registry and the blob CDN must be on the pass-through list:
+
+```
+registry-1.docker.io
+auth.docker.io
+production.cloudfront.docker.com
+```
+
+The blob CDN is `production.cloudfront.docker.com` (CloudFront). It is **not** `production.cloudflare.docker.com`; that name is a common first guess and pulling fails with it.
+
+Two things to know:
+
+- **The guest `dockerd` trusts the gate CA anyway.** It inherits the wall CA variables (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`, …), so it accepts even a decrypted registry certificate. Passing the registry through is still the cleaner choice: it keeps the real certificates and a smaller surface.
+- **The root disk is a snapshot.** A rule change does not touch it. A cold change boots the same `rootfs.ext4`, unchanged.
+
+## Docker wall
+
+The Docker wall has no `htm-<id>-fc`. The gate writes `squid.pid` and the box does not wait on it. Stop and start the gate, and the box if you restarted the network:
+
+```bash
+docker stop htm-<id>-gate
+rm -f var/<id>/squid.pid
+docker start htm-<id>-gate
+```
+
+The rest of this page applies unchanged.
