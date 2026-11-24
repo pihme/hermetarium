@@ -217,6 +217,12 @@ func TestSquidStartupQuiet(t *testing.T) {
 	if strings.Contains(log, "dns_v4_first") {
 		t.Fatalf("dns_v4_first warning:\n%s", log)
 	}
+	// error_directory must hold every page Squid looks for. With only our page
+	// in it, Squid still starts but logs one ERROR per missing template on
+	// every start and answers the other failures from a fallback nobody chose.
+	if strings.Contains(log, "ERROR: loading file") {
+		t.Fatalf("error_directory is missing pages:\n%s", log)
+	}
 }
 
 func TestUntrustedVendorGetsNoKey(t *testing.T) {

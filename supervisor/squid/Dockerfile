@@ -11,8 +11,14 @@ RUN apt-get update \
 # The gate files answer every denial with this page, through deny_info, and
 # point error_directory here. Squid only reads an unknown deny_info name from
 # error_directory: a file under its own errors/ tree still leaves the answer as
-# "Internal Error: Missing Template", and error_directory must hold every page,
-# because errorInitialize asserts on any name it cannot index.
+# "Internal Error: Missing Template". error_directory must also hold every
+# page Squid may look for; a directory with only our page starts, but writes a
+# "loading file ... No such file or directory" ERROR per missing template on
+# every start and leaves the other answers to a fallback nobody chose. So the
+# stock English set is copied in first and our page layered on top.
+RUN mkdir -p /usr/local/share/hermetarium/errors \
+ && cp -a /usr/share/squid/errors/en/. /usr/local/share/hermetarium/errors/ \
+ && cp /usr/share/squid/errors/error-details.txt /usr/local/share/hermetarium/errors/ 2>/dev/null || true
 COPY errors/ /usr/local/share/hermetarium/errors/
 # Squid's remaining templates and the startup probe report visible_hostname,
 # which this image does not set. A defaults file in conf.d ends the warning.
