@@ -190,7 +190,7 @@ The denied-request mail digest moved to Git Warden. Its tests, with `digest.sh` 
 
 ### Official CLI smoke
 
-`tests/inhabitants` `TestDayOneGuide`. Needs Docker, no habitat. Builds `hermetarium-in-claude:local`, `hermetarium-in-grok:local`, `hermetarium-in-opencode:local`, and `hermetarium-in-pi:local`, exports each image, and reads `/etc/hermetarium/day-one.md` out of it. The file must be there, non-empty, and the guide.
+`tests/inhabitants` `TestDayOneGuide`. Needs Docker, no habitat. Builds `hermetarium-in-claude:local`, `hermetarium-in-grok:local`, `hermetarium-in-opencode:local`, and `hermetarium-in-pi:local`, exports each image, and reads `/etc/hermetarium/day-one.md` and `/etc/profile.d/hermetarium-ca.sh` out of it. The guide must be there, non-empty, and the guide. The profile must export `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, and `PIP_CERT` to `/etc/ssl/hermetarium-mitm.crt`.
 
 `tests/inhabitants` `TestOfficialCLIs`. Weak wall only. One subtest per inhabitant.
 
