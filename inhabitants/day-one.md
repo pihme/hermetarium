@@ -58,7 +58,7 @@ The image may run its own Docker daemon.
 
 - The daemon runs. Start it if the image does not start it for you (`dockerd` or the image's start script).
 - A container that should reach the gate uses `--network host`. The habitat's own container has no Docker bridge that leads out.
-- Image pulls from a registry go through the gate undecrypted. The registry and its blob host are on the gate file's pass-through list, and the daemon trusts the gate certificate through the same variables above.
+- Image pulls from a registry go through the gate. The registry and its blob host are normally on the gate file's pass-through list, so the daemon sees their real certificates. The gate file decides this, not the image: if an operator does not pass them through, `dockerd` falls back to the wall CA it inherits (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`), which works but is the weaker arrangement — see `docs/wall-rules.md`.
 
 ## Root and tests
 

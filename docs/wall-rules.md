@@ -8,7 +8,12 @@ The example is a real cold change on a strong-wall OpenCode habitat. The Docker 
 
 ## The containers
 
-A habitat keeps its state in its instance directory, `var/<id>` under the data root (`HERMETARIUM_ROOT`, else the checkout, else `~/.local/share/hermetarium`).
+A habitat keeps its state in its instance directory, `var/<id>`, under the data root that `hermetarium` resolves: `HERMETARIUM_ROOT` if set, else a checkout found from the current directory, else `$XDG_DATA_HOME/hermetarium` (`~/.local/share/hermetarium`). Every `var/<id>/...` path below is relative to that root, so resolve it once first:
+
+```sh
+ROOT=${HERMETARIUM_ROOT:-$HOME/.local/share/hermetarium}   # adjust if you set it elsewhere
+ls "$ROOT/var/<id>/squid.conf"
+```
 
 | Container | Wall | Role |
 | --- | --- | --- |
@@ -16,7 +21,7 @@ A habitat keeps its state in its instance directory, `var/<id>` under the data r
 | `htm-<id>-gate` | both | Squid, started as `/usr/sbin/squid -N -f /log/squid.conf`. On the strong wall it runs in the fc container's network namespace. Reads `var/<id>/squid.conf`, mounted at `/log`. |
 | `htm-<id>-dns` | both | Gate DNS, in the same network namespace. Writes `dns.ready`. |
 
-The allowlist lives in `var/<id>/squid.conf`; that is the one file you edit. The strong wall's root disk (`var/<id>/rootfs.ext4`) is untouched by a rule change. A cold change boots the same root disk, so the work you did inside the habitat is still there.
+The allowlist lives in `$ROOT/var/<id>/squid.conf`; that is the one file you edit. The strong wall's root disk (`var/<id>/rootfs.ext4`) is untouched by a rule change. A cold change boots the same root disk, so the work you did inside the habitat is still there.
 
 A name made before the current naming uses `htm-fc-<id>`, `htm-gate-<id>`, and `htm-dns-<id>`.
 
@@ -35,12 +40,12 @@ A name made before the current naming uses `htm-fc-<id>`, `htm-gate-<id>`, and `
    docker stop htm-<id>-fc
    ```
 
-2. Edit `var/<id>/squid.conf`. A host that should be passed through (spliced) instead of decrypted is added to the `acl passthrough ssl::server_name ...` list. The registry and blob hosts are in the list below.
+2. Edit `$ROOT/var/<id>/squid.conf`. A host that should be passed through (spliced) instead of decrypted is added to the `acl passthrough ssl::server_name ...` list. The registry and blob hosts are in the list below.
 
 3. Remove the stale pid file. Squid refuses to start while `squid.pid` is present, and the file outlives the stopped container.
 
    ```bash
-   rm -f var/<id>/squid.pid
+   rm -f $ROOT/var/<id>/squid.pid
    ```
 
 4. Start the Firecracker container. Its entrypoint sets the firewall, starts the certificate server, and then waits.
@@ -104,8 +109,18 @@ The Docker wall has no `htm-<id>-fc`. The gate writes `squid.pid` and the box do
 
 ```bash
 docker stop htm-<id>-gate
-rm -f var/<id>/squid.pid
+rm -f $ROOT/var/<id>/squid.pid
 docker start htm-<id>-gate
 ```
 
 The rest of this page applies unchanged.
+## Migrating a habitat to newer rules
+
+A habitat is a stopped set of containers plus the files in `$ROOT/var/<id>/`; nothing else ties it to the version that created it. To move it onto a newer Hermetarium configuration, keep the instance and replace only what changed:
+
+1. Stop the containers in the reverse order above, so the VM shuts down cleanly.
+2. Take the new gate file — from the newer example, inhabitant or omakase setup — and re-apply the operator-specific lines you had added (passthrough hosts, extra allowlist entries). Do not copy it over blind: the shipped file is a starting point, not your habitat's history.
+3. Validate with `squid -k parse` as above.
+4. Start in the order above. `rootfs.ext4` is untouched, so the work inside the habitat survives the migration; only the wall changed.
+
+What this does **not** cover: moving a habitat to a **newer inhabitant image**. That replaces the root disk, so it is a new `create` plus whatever you copy across yourself. There is no in-place image upgrade, and this page does not pretend there is.
