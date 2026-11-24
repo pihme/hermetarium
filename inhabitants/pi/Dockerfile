@@ -36,6 +36,7 @@ COPY models.json /root/.pi/agent/models.json
 COPY bashrc /root/.bashrc
 COPY bash_profile /root/.bash_profile
 COPY daemon.json /etc/docker/daemon.json
+COPY day-one.md /etc/hermetarium/day-one.md
 COPY start.sh /usr/local/bin/pi-start
 RUN chmod 755 /usr/local/bin/pi-start /usr/local/bin/porter
 ENV HARNESS=pi

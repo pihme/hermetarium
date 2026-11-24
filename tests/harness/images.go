@@ -38,6 +38,8 @@ func ImageFor(name string) string {
 		return InGrokImage
 	case InhabitantOpenCode:
 		return InOpenCodeImage
+	case InhabitantPi:
+		return InPiImage
 	}
 	return ""
 }
