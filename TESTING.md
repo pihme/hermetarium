@@ -172,7 +172,13 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 ### Denied-request mail
 
-The denied-request mail digest and its tests moved to Git Warden (github.com/pihme/git-warden), under `omakase/`. This tree no longer runs or ships `omakase/digest.sh`, `omakase/mail.sh`, the digest systemd units, or `tests/digest`. The digest's tests run there now. Its behaviour is unchanged: one mail per run with new denials, nothing when nothing is new. `hermetarium logs` and the gate DNS files it reads (`dns.jsonl`, `dns.jsonl.1`) stay here.
+`tests/digest` `TestDigestDeniedThenQuiet`. No Docker daemon and no KVM. `omakase/digest.sh` runs a stand-in `hermetarium logs` and a stand-in mail program. One denied request is one mail that names that destination. An allowed request and a denied inbound request are not in it. The next run, with nothing new, does not send mail.
+
+`tests/digest` `TestDigestManyAreOneMail`. No Docker daemon and no KVM. A first run with nothing denied sends nothing. Many denied requests, and one TLS handshake the client closed, then produce one mail. That mail names each destination and its count, including the pass-through host. It does not contain the request path, a key planted in that path, or a request body.
+
+`tests/digest` `TestDigestFailedMailDoesNotAdvance`. No Docker daemon and no KVM. When the mail program fails, the script exits non-zero and does not remember the denial as sent. The next run sends that one mail.
+
+`tests/digest` `TestDigestSpanOrdersFractionalSeconds`. No Docker daemon and no KVM. Three denials in one second use the `RFC3339Nano` forms of .000, .100, and .120 (`...01Z`, `...01.1Z`, `...01.12Z`). The span runs from the .000 instant to the .120 instant. A denied DNS lookup is counted by name. Its answer is not in the mail.
 
 ### Guest Docker
 
