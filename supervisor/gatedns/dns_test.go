@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -493,6 +494,116 @@ func tryTCP(addr string, q []byte) ([]byte, error) {
 	return buf, nil
 }
 
+func TestTCPAcceptCap(t *testing.T) {
+	if maxTCPConns < 1 || maxTCPConns > maxInflight*8 {
+		t.Fatalf("maxTCPConns %d is not a small accept cap", maxTCPConns)
+	}
+	const excess = 64
+
+	g := &gateDNS{
+		open:    false,
+		gate:    net.ParseIP("172.16.0.1").To4(),
+		names:   map[string]struct{}{"probe.hermetarium.test": {}},
+		slots:   make(chan struct{}, maxInflight),
+		conns:   make(chan struct{}, maxTCPConns),
+		log:     newLog(t),
+		tcpWait: 5 * time.Second,
+	}
+	raw, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// reads counts the connections a handler reached, so an over-cap
+	// connection, closed on accept, never counts.
+	var reads, past atomic.Int32
+	go g.serveTCP(&countListener{Listener: raw, reads: &reads, past: &past})
+	t.Cleanup(func() { raw.Close() })
+
+	before := runtime.NumGoroutine()
+	total := maxTCPConns + excess
+	conns := make([]net.Conn, 0, total)
+	t.Cleanup(func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+	for i := 0; i < total; i++ {
+		c, err := net.Dial("tcp", raw.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		conns = append(conns, c)
+	}
+	// The server has read every dial once the cap is full and the excess
+	// is closed. Excess sockets come last: the accept queue is FIFO.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		n := 0
+		for _, c := range conns[maxTCPConns:] {
+			if _, err := c.Read(make([]byte, 1)); err != nil {
+				if ne, ok := err.(net.Error); ok && ne.Timeout() {
+					continue
+				}
+				n++
+			}
+		}
+		if n == excess && len(g.conns) == maxTCPConns && reads.Load() == maxTCPConns {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	closed := 0
+	for _, c := range conns[maxTCPConns:] {
+		if _, err := c.Read(make([]byte, 1)); err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			closed++
+		}
+	}
+	if closed != excess {
+		t.Fatalf("excess closed %d, want %d", closed, excess)
+	}
+	// The kept connections read, but have not sent. A handler holds
+	// its 5s deadline without a query and without a query slot.
+	if n := reads.Load(); n != maxTCPConns {
+		t.Fatalf("handlers reached %d connections, want %d", n, maxTCPConns)
+	}
+	if n := past.Load(); n != 0 {
+		t.Fatalf("%d over-cap connections reached a handler", n)
+	}
+	if n := len(g.slots); n != 0 {
+		t.Fatalf("query slots taken by idle connections: %d", n)
+	}
+	// One handler goroutine per kept connection plus the accept loop. A
+	// handler for an over-cap connection would show up here.
+	limit := before + maxTCPConns + 8
+	if n := runtime.NumGoroutine(); n > limit {
+		t.Fatalf("goroutines %d, want at most %d", n, limit)
+	}
+
+	// A freed connection frees an accept slot: the cap, not the query
+	// slots, is what the next client meets.
+	conns[0].Close()
+	if !waitBelow(g.conns, maxTCPConns) {
+		t.Fatal("a closed connection did not free its accept slot")
+	}
+	resp := queryTCP(t, raw.Addr().String(), dnsQuery("probe.hermetarium.test", 1))
+	if len(resp) < 16 || net.IP(resp[len(resp)-4:]).String() != "172.16.0.1" {
+		t.Fatalf("tcp answer after a slot was freed: len %d", len(resp))
+	}
+}
+
+func waitBelow(ch chan struct{}, n int) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for len(ch) >= n && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	return len(ch) < n
+}
+
 func TestTCPConnDeadline(t *testing.T) {
 	if tcpDeadline != 5*time.Second {
 		t.Fatalf("tcp deadline %s", tcpDeadline)
@@ -569,6 +680,7 @@ func TestIdleTCPDoesNotStallUDP(t *testing.T) {
 				gate:    net.ParseIP("172.16.0.1").To4(),
 				names:   map[string]struct{}{"probe.hermetarium.test": {}},
 				slots:   make(chan struct{}, maxInflight),
+				conns:   make(chan struct{}, maxTCPConns),
 				log:     newLog(t),
 				tcpWait: 5 * time.Second,
 			}
@@ -687,6 +799,7 @@ func TestTCPSlotHeldUntilResponse(t *testing.T) {
 		gate:    net.ParseIP("172.16.0.1").To4(),
 		names:   map[string]struct{}{"probe.hermetarium.test": {}},
 		slots:   make(chan struct{}, maxInflight),
+		conns:   make(chan struct{}, maxTCPConns),
 		log:     newLog(t),
 		tcpWait: 5 * time.Second,
 	}
@@ -837,6 +950,9 @@ func TestInflightCapIs32(t *testing.T) {
 	if got := cap(g.slots); got != 32 {
 		t.Fatalf("loadGateDNS slots %d", got)
 	}
+	if got := cap(g.conns); got != maxTCPConns {
+		t.Fatalf("loadGateDNS accept cap %d", got)
+	}
 }
 
 func TestDNSLogCap(t *testing.T) {
@@ -950,6 +1066,7 @@ func forwardGate(t *testing.T, port string) *gateDNS {
 		up:     []string{"127.0.0.1"},
 		upPort: port,
 		slots:  make(chan struct{}, maxInflight),
+		conns:  make(chan struct{}, maxTCPConns),
 		log:    newLog(t),
 	}
 }
