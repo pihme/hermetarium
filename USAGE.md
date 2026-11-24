@@ -140,8 +140,10 @@ access_log stdio:/log/access.log htm
 
 `hermetarium logs` splits the access log on spaces. Keep this field order. The local port is the field after the mime type. Port 18081 means the line came in from you. A gate file may append the bump mode and the SNI after that port.
 
+Every shipped gate file also appends `%err_code %err_detail` at the very end. They are only read for a refused line: they become the record's `reason` (`not-allowlisted`, `ca-untrusted` or `no-such-host`). A refused line from a gate file without them still parses, and its reason is `not-allowlisted`. A gate file of your own should copy the whole line below; `%6tr` is space-padded to ten characters, so the reader never counts fields from the front.
+
 ```
-logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp
+logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp %err_code %err_detail
 access_log stdio:/log/access.log htm
 ```
 
