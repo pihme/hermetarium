@@ -22,6 +22,18 @@ const (
 	// queries are dropped. A TCP query takes a slot only after the query
 	// has arrived, so a half-sent query cannot fill the cap.
 	maxInflight = 32
+	// TCP connections kept open at once. Unlike maxInflight this bounds the
+	// goroutine a client holds before it sends a query, and with it the
+	// 4 KiB read buffer that query then allocates, for up to tcpDeadline
+	// each. Past this the connection is closed on accept, before a
+	// goroutine starts. One habitat can open thousands of sockets; 28k
+	// parallel connections took RSS from 17 MB to 141 MB with no cap. 64 is
+	// well above what a resolver (glibc, Go, or a container) opens at once,
+	// a handful of parallel lookups, and keeps the worst case to about 64
+	// goroutines and 256 KiB of buffers. It is not tied to maxInflight: a
+	// TCP client may send its query after other clients hold every query
+	// slot.
+	maxTCPConns = 64
 	// io.jsonl is rewritten from Squid's access log and has no cap. This
 	// file only grows, so keep it and one previous generation bounded.
 	dnsLogCap = 1 << 20
@@ -55,6 +67,7 @@ type gateDNS struct {
 	upPort  string        // set by tests; production uses 53
 	tcpWait time.Duration // set by tests; production uses tcpDeadline
 	slots   chan struct{}
+	conns   chan struct{}
 	logCap  int64
 	mu      sync.Mutex
 	log     *os.File
@@ -126,6 +139,19 @@ func (g *gateDNS) release() {
 	<-g.slots
 }
 
+func (g *gateDNS) accept() bool {
+	select {
+	case g.conns <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *gateDNS) drop() {
+	<-g.conns
+}
+
 func loadGateDNS(confPath, logPath string) (*gateDNS, error) {
 	b, err := os.ReadFile(confPath)
 	if err != nil {
@@ -163,6 +189,7 @@ func loadGateDNS(confPath, logPath string) (*gateDNS, error) {
 	}
 	g.up = up
 	g.slots = make(chan struct{}, maxInflight)
+	g.conns = make(chan struct{}, maxTCPConns)
 	if err := g.openLog(logPath); err != nil {
 		return nil, err
 	}
@@ -205,7 +232,14 @@ func (g *gateDNS) serveTCP(ln net.Listener) {
 			}
 			continue
 		}
+		// Close on accept, before the goroutine, so an over-cap connection
+		// costs no goroutine and no buffer. The client retries.
+		if !g.accept() {
+			_ = c.Close()
+			continue
+		}
 		go func(c net.Conn) {
+			defer g.drop()
 			defer c.Close()
 			wait := g.tcpWait
 			if wait == 0 {
