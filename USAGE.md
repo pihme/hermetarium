@@ -287,12 +287,16 @@ docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code
 
 ### Building an image inside a habitat
 
-**A build can fail to reach the network.** A `RUN` step runs in a container layer with the base image's certificate list, not the habitat's. The gate decrypts TLS and re-signs it, so the step sees `CN=Hermetarium` and refuses it, while `curl` and `git` on the habitat's own shell work:
+**A build can fail to reach the network.** A `RUN` step runs in a container layer with the base image's certificate list, not the habitat's. The gate decrypts TLS and re-signs it, so the step sees `CN=Hermetarium` and refuses it, while `curl` and `git` on the habitat's own shell work.
+
+It only happens for a host that is **not** on the gate file's passthrough list. Take `github.com`, which the omakase setup does not pass through:
 
 ```
-$ docker run --rm alpine:3.24 apk add --no-cache curl
-TLS: server certificate not trusted
+$ docker run --rm alpine:3.24 sh -c 'apk add --no-cache curl >/dev/null && curl -fsS https://github.com -o /dev/null'
+curl: (60) SSL certificate OpenSSL verify result: self-signed certificate in certificate chain (19)
 ```
+
+The message depends on the tool. `apk` itself says `TLS: server certificate not trusted` when its own repository is decrypted; `curl` on Debian says `SSL certificate problem: self-signed certificate in certificate chain`; `curl` on Alpine says the `OpenSSL verify result` line above. All three mean the same thing.
 
 `COPY` and `ADD` are unaffected. Only steps that use the network fail.
 
