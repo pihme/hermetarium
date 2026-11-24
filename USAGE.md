@@ -285,6 +285,70 @@ Build the image. The folder you name holds `settings.json` and `porter`.
 docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code
 ```
 
+### Building an image inside a habitat
+
+**A build can fail to reach the network.** A `RUN` step runs in a container layer with the base image's certificate list, not the habitat's. The gate decrypts TLS and re-signs it, so the step sees `CN=Hermetarium` and refuses it, while `curl` and `git` on the habitat's own shell work.
+
+It only happens for a host that is **not** on the gate file's passthrough list. Take `github.com`, which the omakase setup does not pass through:
+
+```
+$ docker run --rm alpine:3.24 sh -c 'apk add --no-cache curl >/dev/null && curl -fsS https://github.com -o /dev/null'
+curl: (60) SSL certificate OpenSSL verify result: self-signed certificate in certificate chain (19)
+```
+
+The message depends on the tool. `apk` itself says `TLS: server certificate not trusted` when its own repository is decrypted; `curl` on Debian says `SSL certificate problem: self-signed certificate in certificate chain`; `curl` on Alpine says the `OpenSSL verify result` line above. All three mean the same thing.
+
+`COPY` and `ADD` are unaffected. Only steps that use the network fail.
+
+Two ways out, cheapest first.
+
+**Pass the host through at the gate.** A host on the gate file's `passthrough` list keeps its real certificate, so a container validates it with nothing mounted. Every package host the omakase setup needs is on that list today, including Debian's `deb.debian.org` and Alpine's `dl-cdn.alpinelinux.org`, so a base-image install works in a habitat with no further arrangement:
+
+```sh
+$ docker run --rm debian:bookworm-slim apt-get update -qq
+OK
+$ docker run --rm alpine:3.24 apk add --no-cache curl
+OK
+```
+
+A host **not** on the list is decrypted, and a step that reaches it fails a certificate check. `apk` says `TLS: server certificate not trusted`; `curl` says `SSL certificate problem: self-signed certificate in certificate chain`. Adding one is a cold change to the gate file, not `squid -k reconfigure` ([the cookbook](docs/wall-rules.md)).
+
+**Give the build step the habitat CA.** For a host that cannot be passed through — one that pins a certificate, or one the operator will not open — put the CA in the build context and mount it for the one step. A `docker build` step cannot take `-v`, and `--mount`'s `source` resolves in the **build context**, not on the host, so copy the file in first:
+
+```sh
+cp /etc/ssl/hermetarium-mitm.crt ca.crt
+DOCKER_BUILDKIT=1 docker build -t myimage:dev .
+```
+
+Then, in the Dockerfile, give the step that needs it the CA. The mount disappears with the step, so the CA is not in a layer unless the step copies it in:
+
+```dockerfile
+# syntax=docker/dockerfile:1.7
+FROM debian:bookworm-slim
+RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
+	env SSL_CERT_FILE=/tmp/ca.crt apt-get update -qq \
+	&& env SSL_CERT_FILE=/tmp/ca.crt apt-get install -y --no-install-recommends ca-certificates \
+	&& cp /tmp/ca.crt /usr/local/share/ca-certificates/hermetarium.crt \
+	&& update-ca-certificates \
+	&& apt-get update -qq
+```
+
+`SSL_CERT_FILE` is enough for `apt-get` itself; `ca-certificates` has to be installed before `update-ca-certificates` exists, so the sequence runs it twice.
+
+That last `apt-get update` proves less than it appears to. `deb.debian.org` is on the passthrough list, so it succeeds whether or not the CA arrived. A step that must show the CA works has to reach a host that is **not** passed through. For a single command that honours the CA variable, the mount alone is enough, and nothing is installed:
+
+```dockerfile
+FROM debian:bookworm-slim
+RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
+	env SSL_CERT_FILE=/tmp/ca.crt apt-get update -qq
+```
+
+Point it at a decrypted host — or any command that really does contact one — to see the difference: without the mount it fails with a certificate error, with it the command succeeds.
+
+The first example installs the CA, so that image trusts this habitat's gate for good. That is wrong for a released image: every `create` makes a fresh CA. Use it for a throwaway build only. For a released image, stop at the `SSL_CERT_FILE` form above, which trusts the CA for that one command and leaves no trace.
+
+CI is not affected: GitHub's runners are not behind the gate, and the same builds pass there.
+
 Copy the gate file and replace `__VENDOR_KEY__` with your key:
 
 ```bash
