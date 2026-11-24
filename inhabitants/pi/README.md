@@ -6,7 +6,7 @@ You send a question to an address on your own machine. Porter, inside the image,
 
 The picture of the gate is in the [inhabitants README](../README.md). In that picture the model is whatever OpenAI-compatible endpoint you name. The box calls `http://model.hermetarium.test/v1`.
 
-This image is also what [omakase/pi-tui](../../omakase/pi-tui/README.md) boots on the strong wall. That setup does not publish Porter's port. You attach, and Pi runs in `tmux`. The image has `tmux`, an SSH server at `/usr/sbin/sshd`, `git`, `gh`, `rg`, `nano`, Docker, and the usual build tools for that. `tini` is PID 1 (a subreaper), so finished background processes are reaped instead of staying as `<defunct>` zombies. An interactive login shell from `attach` reads `/root/.bash_profile`. The terminal setup's gate file is the one that allows ordinary HTTP; this file stays closed.
+This image is also what [omakase/pi-tui](../../omakase/pi-tui/README.md) boots on the strong wall. That setup does not publish Porter's port. You attach, and Pi runs in `tmux`. The image installs Pi 1.6.0 (pinned) and has `tmux`, an SSH server at `/usr/sbin/sshd`, `git`, `gh`, `rg`, `nano`, Docker, and the usual build tools for that. `tini` is PID 1 (a subreaper), so finished background processes are reaped instead of staying as `<defunct>` zombies. An interactive login shell from `attach` reads `/root/.bash_profile`. The terminal setup's gate file is the one that allows ordinary HTTP; this file stays closed.
 
 What Pi adds over OpenCode is a **wake**: a separate process can inject an external event into the running session and trigger follow-up work, without the operator prompting. OpenCode 2 has no wake scheduler and a detached `opencode run` cannot reach a live TUI. Pi's `file-trigger` extension delivers into the live coordinator session. The smoke path with no paid key is a pretend model on the gate.
 
@@ -40,7 +40,7 @@ The image installs `file-trigger.ts` into `~/.pi/agent/extensions/`. It watches 
 echo "PR#74 was labeled ready-for-qa - investigate and comment" > /tmp/agent-trigger.txt
 ```
 
-The injected message renders in the live TUI as `[file-trigger]` and starts a model turn (follow-up work). The file is cleared after reading, so the event does not re-fire. This is the mechanism a PR-label or CI watcher uses to wake the coordinator session without a human prompt. See [omakase/pi-tui](../../omakase/pi-tui/README.md) for the terminal setup.
+The injected message renders in the live TUI as `[file-trigger]` and starts a model turn (follow-up work). The file is cleared after reading, so the event does not re-fire. The watcher debounces the burst of `fs.watch` events for one write (so one write wakes once), remembers the last content (so a re-delivered event does not re-fire), and falls back to a short poll if `fs.watch` stops after the file is replaced or renamed. This is the mechanism a PR-label or CI watcher uses to wake the coordinator session without a human prompt. See [omakase/pi-tui](../../omakase/pi-tui/README.md) for the terminal setup.
 
 ## From a fresh clone
 
