@@ -2,6 +2,7 @@ package pitui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,8 +88,8 @@ func TestPiTUIFiles(t *testing.T) {
 	image := string(df)
 	for _, want := range []string{
 		"node:22-bookworm-slim",
-		"@earendil-works/pi-coding-agent",
-		"@earendil-works/pi-durable",
+		"@earendil-works/pi-coding-agent@1.6.0",
+		"@earendil-works/pi-durable@1.6.0",
 		"tini",
 		"tmux",
 		"openssh-server",
@@ -146,5 +147,35 @@ func TestPiTUIFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(daemon), `"iptables": false`) {
 		t.Fatal("dockerd would take over iptables")
+	}
+}
+
+// TestFileTriggerWake drives the file-trigger extension under Node and asserts
+// that dropping a trigger file wakes exactly once per distinct event: one write
+// fires one sendMessage, a duplicate write is deduped, a replaced file is still
+// caught by the polling fallback, and session_shutdown stops further wakes.
+//
+// It needs Node (for --experimental-strip-types). GitHub runners and the
+// reference environment carry Node on PATH; where it is missing the test skips.
+func TestFileTriggerWake(t *testing.T) {
+	root := repoRoot(t)
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not on PATH; skipping the file-trigger wake test")
+	}
+	ext := filepath.Join(root, "inhabitants", "pi", "file-trigger.ts")
+	harness := filepath.Join(root, "tests", "pi-tui", "wake-test.mjs")
+	trigger := filepath.Join(t.TempDir(), "agent-trigger.txt")
+
+	cmd := exec.Command(node, "--experimental-strip-types", harness, ext, trigger)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wake harness failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "WAKE_ONCE_OK") {
+		t.Fatalf("wake harness did not confirm a single wake:\n%s", out)
+	}
+	if strings.Contains(string(out), "WAKE_TEST_FAIL") {
+		t.Fatalf("wake harness reported a failure:\n%s", out)
 	}
 }

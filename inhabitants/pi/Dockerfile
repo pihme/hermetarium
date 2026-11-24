@@ -9,9 +9,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 	ca-certificates curl bash iproute2 iptables procps git ripgrep \
 	tmux openssh-server build-essential docker.io tini \
 	&& rm -rf /var/lib/apt/lists/*
-# Pi 1.6, not pinned to a patch. The npm install is the documented path and
-# needs no lifecycle scripts. Node 22 is the base image.
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent @earendil-works/pi-durable \
+# Pi 1.6.0, pinned to an exact version. The npm install is the documented
+# path and needs no lifecycle scripts. Node 22 is the base image.
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.6.0 @earendil-works/pi-durable@1.6.0 \
 	&& pi --version
 # gh 2.104.0. The hash is that GitHub release asset.
 RUN curl -fsSL -o /tmp/gh.tar.gz \

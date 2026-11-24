@@ -20,7 +20,7 @@ Git Warden is not in this folder. There is no Push Guard configuration and no sc
 
 ## Image
 
-From this repository, the image is `inhabitants/pi`. That Dockerfile installs Pi 1.6 and pins `gh`, and it installs `git`, `rg`, `tmux`, an SSH server at `/usr/sbin/sshd`, Docker, and the usual build tools. `tini` is PID 1 (a subreaper), so finished background processes are reaped instead of staying as `<defunct>` zombies — that is what keeps the wake honest. The image command starts `dockerd` in the background, then Porter. Porter is optional; the terminal is the primary path. The strong wall also starts `sshd` when that binary is there, and Hermetarium keeps the habitat's private key on the host.
+From this repository, the image is `inhabitants/pi`. That Dockerfile installs Pi 1.6.0 (pinned) and pins `gh`, and it installs `git`, `rg`, `tmux`, an SSH server at `/usr/sbin/sshd`, Docker, and the usual build tools. `tini` is PID 1 (a subreaper), so finished background processes are reaped instead of staying as `<defunct>` zombies — that is what keeps the wake honest. The image command starts `dockerd` in the background, then Porter. Porter is optional; the terminal is the primary path. The strong wall also starts `sshd` when that binary is there, and Hermetarium keeps the habitat's private key on the host.
 
 Inside the image, Pi's key is the placeholder `not-the-supervisor-key`. Leave it. The real key stays in the gate file. Pi is pointed at `http://model.hermetarium.test/v1` and the model id `hermetarium/mock`. That stand-in host is the gate, not the upstream.
 
