@@ -335,7 +335,7 @@ func LogHasDirection(path, dir string) bool {
 // The refusal reasons an I/O log record can carry.
 const (
 	ReasonNotAllowlisted = "not-allowlisted"
-	ReasonCAUntrusted      = "ca-untrusted"
+	ReasonCAUntrusted    = "ca-untrusted"
 	ReasonNoSuchHost     = "no-such-host"
 )
 

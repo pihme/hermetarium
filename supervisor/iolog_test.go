@@ -200,7 +200,7 @@ func TestRefusalReason(t *testing.T) {
 		{
 			name: "client refused the certificate",
 			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 CONNECT example.com:443 - HIER_NONE/- text/html 3130 bump example.com ERR_SECURE_CONNECT_FAIL/400 -",
-			want: ReasonCATrusted,
+			want: ReasonCAUntrusted,
 		},
 		{
 			name: "name does not resolve",
