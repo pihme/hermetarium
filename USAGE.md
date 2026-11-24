@@ -285,6 +285,40 @@ Build the image. The folder you name holds `settings.json` and `porter`.
 docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code
 ```
 
+**A build inside a habitat cannot reach the network.** A `RUN` step runs in a container layer with the base image's certificate list, not the habitat's. The gate decrypts TLS and re-signs it, so the step sees `CN=Hermetarium` and refuses it, while `curl` and `git` on the habitat's own shell work:
+
+```
+$ docker run --rm alpine:3.24 apk add --no-cache curl
+TLS: server certificate not trusted
+```
+
+`COPY` and `ADD` are unaffected. Only steps that use the network fail.
+
+Two ways out, cheapest first.
+
+**Pass the host through at the gate.** A host on the gate file's `passthrough` list keeps its real certificate, so a container validates it with nothing mounted. `deb.debian.org` is on that list and works; Alpine's `dl-cdn.alpinelinux.org` is not and does not:
+
+```sh
+$ docker run --rm debian:bookworm-slim apt-get update -qq      # passed through
+OK
+$ docker run --rm alpine:3.24 apk add --no-cache curl          # decrypted
+TLS: server certificate not trusted
+```
+
+Adding a host is a cold change to the gate file, not `squid -k reconfigure` ([the cookbook](docs/wall-rules.md)). hermetarium#226 tracks the missing entries in the omakase setup.
+
+**Give the one build step the habitat CA.** For a host that cannot be passed through, mount it for the build:
+
+```sh
+docker run --rm -v /etc/ssl/hermetarium-mitm.crt:/etc/ssl/certs/ca-certificates.crt:ro \
+  alpine:3.24 apk add --no-cache curl
+OK
+```
+
+Do not `COPY` the CA into a Dockerfile. Every `create` makes a fresh CA, so a released image would trust one habitat's gate for good.
+
+CI is not affected: GitHub's runners are not behind the gate, and the same builds pass there.
+
 Copy the gate file and replace `__VENDOR_KEY__` with your key:
 
 ```bash
