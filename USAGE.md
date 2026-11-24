@@ -336,7 +336,7 @@ RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
 	env SSL_CERT_FILE=/tmp/ca.crt curl -fsSL https://example.internal/install.sh
 ```
 
-Never `COPY` the CA on a path that persists: every `create` makes a fresh CA, so a released image would trust one habitat's gate for good. Copying it into a step, as above, keeps it to that step's scratch space only if you stop before `update-ca-certificates`.
+The first example installs the CA, so that image trusts this habitat's gate for good. That is wrong for a released image: every `create` makes a fresh CA. Use it for a throwaway build only. For a released image, stop at the `SSL_CERT_FILE` form above, which trusts the CA for that one command and leaves no trace.
 
 CI is not affected: GitHub's runners are not behind the gate, and the same builds pass there.
 
