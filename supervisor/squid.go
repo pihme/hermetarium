@@ -1,7 +1,7 @@
 package supervisor
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,10 +9,13 @@ import (
 	"time"
 )
 
+//go:embed squid
+var squidContext embed.FS
+
 //go:embed squid/Dockerfile
 var squidDockerfile string
 
-// SquidImage is the gate. EnsureSquid builds it from squid/Dockerfile.
+// SquidImage is the gate. EnsureSquid builds it from the embedded squid dir.
 const SquidImage = "hermetarium-squid:local"
 
 func InstallACL(dir, src string) error {
@@ -71,13 +74,31 @@ func EnsureSquid(root string) error {
 	if have && string(old) == squidDockerfile {
 		return nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// The Dockerfile copies the denial page, so the build context needs it as
+	// well. An image built without it starts fine and then answers every denial
+	// with "Internal Error: Missing Template".
+	if err := os.MkdirAll(filepath.Join(dir, "errors"), 0o755); err != nil {
 		return err
 	}
+	pages, err := squidContext.ReadDir("squid/errors")
+	if err != nil {
+		return err
+	}
+	for _, p := range pages {
+		b, err := squidContext.ReadFile("squid/errors/" + p.Name())
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, "errors", p.Name()), b, 0o644); err != nil {
+			return err
+		}
+	}
+	// The stamp goes down only once the context is complete, so a failed copy
+	// does not let the next create skip the build.
 	if err := os.WriteFile(stamp, []byte(squidDockerfile), 0o644); err != nil {
 		return err
 	}
-	_, err := Docker(5*time.Minute, "build", "-t", SquidImage, dir)
+	_, err = Docker(5*time.Minute, "build", "-t", SquidImage, dir)
 	if err != nil {
 		return fmt.Errorf("build squid image: %w", err)
 	}

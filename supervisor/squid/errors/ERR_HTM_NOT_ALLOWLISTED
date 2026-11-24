@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>Hermetarium: request denied</title>
+</head><body>
+<h1>Request denied</h1>
+<hr>
+<p>The Hermetarium wall refused: %U</p>
+<p><b>Reason: not allowlisted.</b></p>
+<p>This habitat reaches only the hosts its wall allows, and this request is not
+one of them. Retrying this host will not help. The wall does not list the
+allowed hosts here.</p>
+<hr>
+<p id="footer">Generated %T by %h</p>
+</body></html>

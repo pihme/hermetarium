@@ -278,6 +278,37 @@ func TestEnsureNetToolsStamp(t *testing.T) {
 	})
 }
 
+func TestEnsureSquidBuildContext(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(CacheDir(root), "squid-build")
+	var built []string
+	stubDocker(t, func(timeout time.Duration, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "inspect" {
+			return "", fmt.Errorf("no such image")
+		}
+		if len(args) > 0 && args[0] == "build" {
+			built = args
+			return "ok", nil
+		}
+		return "", fmt.Errorf("unexpected docker %v", args)
+	})
+	if err := EnsureSquid(root); err != nil {
+		t.Fatal(err)
+	}
+	if len(built) == 0 || built[len(built)-1] != dir {
+		t.Fatalf("build context = %v, want %s", built, dir)
+	}
+	// The Dockerfile copies errors/, and a build context without it fails, so
+	// the page has to be there before Docker is asked.
+	b, err := os.ReadFile(filepath.Join(dir, "errors", denialPageErr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "not allowlisted") {
+		t.Fatalf("build context page:\n%s", b)
+	}
+}
+
 func TestModelRewrite(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "model-rewrite")
 	if err := os.WriteFile(script, []byte(modelRewrite), 0o755); err != nil {

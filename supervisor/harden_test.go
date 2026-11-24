@@ -55,6 +55,118 @@ func TestGateFilesHardened(t *testing.T) {
 	}
 }
 
+// The directory the gate files read their denial page from, and the page they
+// name there. The image copies it from squid/errors, so a config and the image
+// must agree on both, or every denial shows "Internal Error: Missing Template".
+const (
+	denialPageDir = "/usr/local/share/hermetarium/errors"
+	denialPageErr = "ERR_HTM_NOT_ALLOWLISTED"
+)
+
+// TestGateFilesDenyInfo finds gate files by glob rather than a fixed list, so a
+// new example or inhabitant that ships a wall without the explanatory denial
+// page fails here instead of silently giving the inhabitant Squid's generic
+// error page.
+func TestGateFilesDenyInfo(t *testing.T) {
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, pattern := range []string{
+		filepath.Join("examples", "*", "squid.conf"),
+		filepath.Join("inhabitants", "*", "squid.conf"),
+		filepath.Join("omakase", "*", "squid.conf"),
+	} {
+		m, err := filepath.Glob(filepath.Join(root, pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, m...)
+	}
+	if len(files) < 8 {
+		t.Fatalf("found %d gate files, expected at least 8\n%v", len(files), files)
+	}
+	wantDir := "error_directory " + denialPageDir
+	wantPage := "deny_info " + denialPageErr + " all"
+	for _, path := range files {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, _ := filepath.Rel(root, path)
+		// Only active lines count: a commented rule reads like coverage while
+		// Squid never sees it.
+		var active []string
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			active = append(active, line)
+		}
+		lastDeny := -1
+		for i, line := range active {
+			if line == "http_access deny all" {
+				lastDeny = i
+			}
+		}
+		if lastDeny < 0 {
+			t.Fatalf("%s has no http_access deny all", rel)
+		}
+		// error_directory is read once for the process, so its place in the
+		// file does not matter; the deny_info line does, after the last deny.
+		hasDir := false
+		for _, line := range active {
+			hasDir = hasDir || line == wantDir
+		}
+		if !hasDir {
+			t.Fatalf("%s does not set %q", rel, wantDir)
+		}
+		if lastDeny+1 >= len(active) || active[lastDeny+1] != wantPage {
+			t.Fatalf("%s does not name the denial page after its final deny\nwant %q\n%s", rel, wantPage, strings.Join(active, "\n"))
+		}
+	}
+}
+
+// TestSquidDenialPage proves the image carries the files the gate files name.
+// Squid only loads a deny_info name that is not a built-in error from
+// error_directory, and asserts at startup on a name it cannot index there, so
+// the directory must hold every template, not just the new page.
+func TestSquidDenialPage(t *testing.T) {
+	root, err := Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "supervisor", "squid", "errors")
+	b, err := os.ReadFile(filepath.Join(dir, denialPageErr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	// The page says why, coarsely, in the word the I/O log uses. It must not
+	// hand the inhabitant the allowlist or the wall's configuration.
+	if !strings.Contains(text, "not allowlisted") {
+		t.Fatalf("%s does not name the reason", denialPageErr)
+	}
+	for _, leak := range []string{"dstdomain", "cache_peer", "http_access", "acl ", "__", "squid.conf", "allowlisted hosts"} {
+		if strings.Contains(text, leak) {
+			t.Fatalf("%s reveals wall internals with %q", denialPageErr, leak)
+		}
+	}
+	// A template that prints %h would show the hostname Squid does not know in
+	// this image, so the image's visible_hostname keeps that placeholder filled
+	// in for Squid's own error pages as well.
+	if !strings.Contains(squidDockerfile, "printf 'visible_hostname hermetarium") {
+		t.Fatal("squid/Dockerfile does not set visible_hostname for the image's own error pages")
+	}
+	// The page sits in the directory the gate files point Squid at. A copy in
+	// Squid's own errors/ tree would not be read for an unknown name.
+	if !strings.Contains(squidDockerfile, "errors/ "+denialPageDir+"/") {
+		t.Fatal("squid/Dockerfile does not copy the error pages into " + denialPageDir)
+	}
+}
+
 func TestSquidStartupQuiet(t *testing.T) {
 	if _, err := Docker(15*time.Second, "info"); err != nil {
 		t.Fatal(err)
@@ -85,6 +197,13 @@ func TestSquidStartupQuiet(t *testing.T) {
 	}
 	if err := WaitSquid(dir, name, 20*time.Second); err != nil {
 		t.Fatal(err)
+	}
+	// The gate files name a page only an image built from the full context
+	// carries. A missing one has no startup error: Squid starts and answers
+	// every denial with "Internal Error: Missing Template".
+	page, err := Docker(15*time.Second, "exec", "-u", "root", name, "cat", denialPageDir+"/"+denialPageErr)
+	if err != nil || !strings.Contains(page, "not allowlisted") {
+		t.Fatalf("gate image has no denial page at %s/%s: %v\n%s", denialPageDir, denialPageErr, err, page)
 	}
 	// The proxy user owns cache.log, and the unit job has no nettools image to chmod it.
 	// Root in the running gate can read the path Squid was given.
