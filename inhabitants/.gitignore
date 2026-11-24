@@ -1,4 +1,9 @@
-# Copies made for a hand build (see each folder's README). The source is day-one.md.
+# Copies made for a hand build (see each folder's README). The sources are day-one.md and profile.d-ca.sh.
 claude-code/day-one.md
+claude-code/profile.d-ca.sh
 grok-build/day-one.md
+grok-build/profile.d-ca.sh
 opencode/day-one.md
+opencode/profile.d-ca.sh
+pi/day-one.md
+pi/profile.d-ca.sh
