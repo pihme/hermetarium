@@ -4,12 +4,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
 
 // dockerFn exists so tests can stub Docker.
 var dockerFn = runDockerCLI
+
+// dockerExtraEnv is set in docker's environment beside the caller's. Only the
+// one build that needs it reads it; it is empty for every other call and for
+// whatever dockerFn a test installed.
+var dockerExtraEnv []string
 
 func Docker(timeout time.Duration, args ...string) (string, error) {
 	return dockerFn(timeout, args...)
@@ -22,6 +28,7 @@ func runDockerCLI(timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Env = append(os.Environ(), dockerExtraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

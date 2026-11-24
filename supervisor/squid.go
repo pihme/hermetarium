@@ -98,8 +98,15 @@ func EnsureSquid(root string) error {
 	if err := os.WriteFile(stamp, []byte(squidDockerfile), 0o644); err != nil {
 		return err
 	}
-	_, err = Docker(5*time.Minute, "build", "-t", SquidImage, dir)
+	ca := HabitatBuildCA()
+	if err := ca.Prepare(dir); err != nil {
+		return fmt.Errorf("build squid image: %w", err)
+	}
+	build, err := ca.Overlays(dir, stamp)
 	if err != nil {
+		return fmt.Errorf("build squid image: %w", err)
+	}
+	if _, err := ca.Docker(5*time.Minute, append([]string{"build", "-t", SquidImage}, append(build, dir)...)...); err != nil {
 		return fmt.Errorf("build squid image: %w", err)
 	}
 	return nil
@@ -141,7 +148,15 @@ func EnsureNetTools(root string) error {
 	if err := os.WriteFile(stamp, []byte(df), 0o644); err != nil {
 		return err
 	}
-	if _, err := Docker(3*time.Minute, "build", "-t", NetToolsImage, dir); err != nil {
+	ca := HabitatBuildCA()
+	if err := ca.Prepare(dir); err != nil {
+		return err
+	}
+	build, err := ca.Overlays(dir, stamp)
+	if err != nil {
+		return err
+	}
+	if _, err := ca.Docker(3*time.Minute, append([]string{"build", "-t", NetToolsImage}, append(build, dir)...)...); err != nil {
 		if os.IsNotExist(readErr) {
 			if rmErr := os.Remove(stamp); rmErr != nil && !os.IsNotExist(rmErr) {
 				return fmt.Errorf("%w\nremove Dockerfile: %v", err, rmErr)

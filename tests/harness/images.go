@@ -56,11 +56,7 @@ func EnsureEchoImage(root string) error {
 	if err := os.WriteFile(filepath.Join(ctx, "echo-service"), b, 0o755); err != nil {
 		return err
 	}
-	_, err = supervisor.Docker(3*time.Minute, "build", "-t", EchoImage,
-		"-f", filepath.Join(root, "examples", "echo", "Dockerfile"),
-		ctx,
-	)
-	return err
+	return buildImage(ctx, 3*time.Minute, EchoImage, filepath.Join(root, "examples", "echo", "Dockerfile"))
 }
 
 func EnsureAgentdImage(root string) error {
@@ -79,11 +75,7 @@ func EnsureAgentdImage(root string) error {
 	if err := os.WriteFile(filepath.Join(ctx, "agentd"), b, 0o755); err != nil {
 		return err
 	}
-	_, err = supervisor.Docker(3*time.Minute, "build", "-t", AgentdImage,
-		"-f", filepath.Join(root, "examples", "agentd", "Dockerfile"),
-		ctx,
-	)
-	return err
+	return buildImage(ctx, 3*time.Minute, AgentdImage, filepath.Join(root, "examples", "agentd", "Dockerfile"))
 }
 
 func EnsureOfficialImage(root, name, image string) error {
@@ -128,10 +120,22 @@ func EnsureOfficialImage(root, name, image string) error {
 			return err
 		}
 	}
-	_, err = supervisor.Docker(10*time.Minute, "build", "-t", image,
-		"-f", filepath.Join(srcDir, "Dockerfile"),
-		ctx,
-	)
+	return buildImage(ctx, 10*time.Minute, image, filepath.Join(srcDir, "Dockerfile"))
+}
+
+// buildImage builds one image. Inside a habitat the build steps cannot reach
+// the gate without its CA, so the supervisor overlays the Dockerfile for this
+// build alone; on a machine with no habitat CA the build is the plain one.
+func buildImage(ctx string, timeout time.Duration, image, dockerfile string) error {
+	ca := supervisor.HabitatBuildCA()
+	if err := ca.Prepare(ctx); err != nil {
+		return err
+	}
+	opts, err := ca.Overlays(ctx, dockerfile)
+	if err != nil {
+		return err
+	}
+	_, err = ca.Docker(timeout, append([]string{"build", "-t", image}, append(opts, ctx)...)...)
 	return err
 }
 

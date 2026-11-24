@@ -285,6 +285,21 @@ Build the image. The folder you name holds `settings.json` and `porter`.
 docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code
 ```
 
+**Building it from inside a habitat.** The private key stays on the host, and the habitat trusts the gate at one path, `/etc/ssl/hermetarium-mitm.crt` ([the gate certificate](inhabitants/day-one.md#the-gate-certificate)). A `docker build` step that uses the network does not see that trust: it has the base image's own certificate list, so `RUN apk add` or `RUN apt-get install` fails with `TLS: server certificate not trusted` while `curl` on the host works. Do not put the CA in the Dockerfile. `COPY` it and the image carries one habitat's CA for good, and the next habitat's gate is a different CA. With no network step in the build, the build works as it is.
+
+The images in this repository build themselves inside a habitat. Hermetarium's supervisor and test harness build them through a wrapper, and a shell can do the same three things. A Dockerfile that a build step trusts the gate under looks like this (the rest of the file is unchanged):
+
+```dockerfile
+# syntax=docker/dockerfile:1.7
+FROM scratch AS hermetarium-build-ca
+COPY ca.crt /hermetarium-build-ca/ca.crt
+FROM debian:bookworm-slim
+RUN --mount=type=bind,from=hermetarium-build-ca,source=/hermetarium-build-ca/ca.crt,target=/tmp/ca.crt,ro \
+	env SSL_CERT_FILE=/tmp/ca.crt apt-get update && apt-get install -y --no-install-recommends curl
+```
+
+The CA is in the build context and nowhere else: no `COPY` reaches `ca.crt`, so it is in no layer, and the image keeps its own certificate list. The mount lasts for the one `RUN`. Build it with `DOCKER_BUILDKIT=1 docker build -f` that file after `cp /etc/ssl/hermetarium-mitm.crt` into the context. The stock bases `debian:bookworm-slim` and `node:26-bookworm-slim` have no `RUN` that uses the network, so they need none of this.
+
 Copy the gate file and replace `__VENDOR_KEY__` with your key:
 
 ```bash
