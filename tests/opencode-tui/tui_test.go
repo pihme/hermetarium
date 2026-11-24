@@ -174,6 +174,58 @@ func TestOpenCodeTUIFiles(t *testing.T) {
 	if strings.Contains(gate, `urlpath_regex \.\. %`) {
 		t.Fatal("gate file still denies every percent")
 	}
+	assertPassthrough(t, gate)
+}
+
+// assertPassthrough pins the pass-through list, host by host. A host added or
+// dropped by accident either loses splice for a registry or widens the wall,
+// and neither shows up in a plain config check.
+func assertPassthrough(t *testing.T, gate string) {
+	t.Helper()
+	const prefix = "acl passthrough ssl::server_name "
+	var have []string
+	found := 0
+	for _, line := range strings.Split(gate, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "acl passthrough ") {
+			continue
+		}
+		found++
+		if !strings.HasPrefix(line, prefix) {
+			t.Fatalf("passthrough ACL is not a server name list: %s", line)
+		}
+		have = strings.Fields(strings.TrimPrefix(line, prefix))
+	}
+	if found != 1 {
+		t.Fatalf("%d passthrough ACL lines, want 1", found)
+	}
+	// The Docker chain is registry-1.docker.io and auth.docker.io, and the
+	// layer blobs redirect to production.cloudfront.docker.com. The Debian
+	// hosts are the bookworm base image's sources. pinned.example is the
+	// file's placeholder and stays.
+	want := []string{
+		"pinned.example",
+		"registry.npmjs.org",
+		"registry-1.docker.io",
+		"auth.docker.io",
+		"production.cloudfront.docker.com",
+		"production.cloudflare.docker.com",
+		"repo.maven.apache.org",
+		"repo1.maven.org",
+		"crates.io",
+		"static.crates.io",
+		"index.crates.io",
+		"pypi.org",
+		"files.pythonhosted.org",
+		"deb.debian.org",
+		"security.debian.org",
+	}
+	if strings.Join(have, " ") != strings.Join(want, " ") {
+		t.Fatalf("passthrough hosts\n got %q\nwant %q", have, want)
+	}
+	if !squidLine(gate, "ssl_bump splice passthrough") {
+		t.Fatal("passthrough ACL is not spliced")
+	}
 }
 
 func TestOpenCodeTUI(t *testing.T) {
