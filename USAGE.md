@@ -307,7 +307,7 @@ $ docker run --rm alpine:3.24 apk add --no-cache curl
 OK
 ```
 
-A host **not** on the list is decrypted, and a step that reaches it fails with `TLS: server certificate not trusted`. Adding one is a cold change to the gate file, not `squid -k reconfigure` ([the cookbook](docs/wall-rules.md)).
+A host **not** on the list is decrypted, and a step that reaches it fails a certificate check. `apk` says `TLS: server certificate not trusted`; `curl` says `SSL certificate problem: self-signed certificate in certificate chain`. Adding one is a cold change to the gate file, not `squid -k reconfigure` ([the cookbook](docs/wall-rules.md)).
 
 **Give the build step the habitat CA.** For a host that cannot be passed through — one that pins a certificate, or one the operator will not open — put the CA in the build context and mount it for the one step. A `docker build` step cannot take `-v`, and `--mount`'s `source` resolves in the **build context**, not on the host, so copy the file in first:
 
@@ -340,6 +340,7 @@ RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
 ```
 
 Point it at a decrypted host — or any command that really does contact one — to see the difference: without the mount it fails with a certificate error, with it the command succeeds.
+
 The first example installs the CA, so that image trusts this habitat's gate for good. That is wrong for a released image: every `create` makes a fresh CA. Use it for a throwaway build only. For a released image, stop at the `SSL_CERT_FILE` form above, which trusts the CA for that one command and leaves no trace.
 
 CI is not affected: GitHub's runners are not behind the gate, and the same builds pass there.
