@@ -53,6 +53,13 @@ make build
 docker build -t pi inhabitants/pi
 ```
 
+The image carries the static guide `inhabitants/day-one.md` at `/etc/hermetarium/day-one.md`, and the CA-trust profile `inhabitants/profile.d-ca.sh` at `/etc/profile.d/hermetarium-ca.sh`. The Dockerfile `COPY`s them from the build context, so copy them next to the Dockerfile for a hand build:
+
+```bash
+cp inhabitants/day-one.md inhabitants/pi/
+cp inhabitants/profile.d-ca.sh inhabitants/pi/
+```
+
 Copy the gate file and fill the six words. Edit the copy, not the file in git.
 
 ```bash
