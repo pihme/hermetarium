@@ -60,10 +60,11 @@ func TestParseSquidLine(t *testing.T) {
 	if !ok || !rec.Allowed || rec.Aborted || rec.Protocol != "https" || rec.Port != 443 || rec.Destination != "pinned.example" || rec.Upstream != "10.60.0.2" || rec.TLS != "passthrough" || rec.Bytes != 3138 {
 		t.Fatalf("splice tunnel %+v ok=%v", rec, ok)
 	}
-	// The client closed during the handshake. Not a policy denial. The name is SNI.
-	gaveUp := "1757162700.000 1 10.20.0.3 NONE_NONE_ABORTED/000 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 443 splice pinned.example"
+	// The client closed during the handshake. Not an ACL denial, but it is a
+	// refused request with a reason. The name is SNI.
+	gaveUp := "1757162700.000 1 10.20.0.3 NONE_NONE_ABORTED/000 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 443 bump pinned.example - -"
 	rec, ok = ParseSquidLine(gaveUp)
-	if !ok || !rec.Allowed || !rec.Aborted || rec.Destination != "pinned.example" || rec.TLS != "passthrough" || rec.Method != "CONNECT" || rec.Protocol != "https" || rec.Port != 443 {
+	if !ok || rec.Allowed || rec.Reason != ReasonCAUntrusted || !rec.Aborted || rec.Destination != "pinned.example" || rec.TLS != "decrypted" || rec.Method != "CONNECT" || rec.Protocol != "https" || rec.Port != 443 {
 		t.Fatalf("gave up %+v ok=%v", rec, ok)
 	}
 	gaveDir := t.TempDir()
@@ -78,7 +79,7 @@ func TestParseSquidLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gaveRecs) != 1 || !gaveRecs[0].Aborted || !gaveRecs[0].Allowed || gaveRecs[0].Destination != "pinned.example" || gaveRecs[0].TLS != "passthrough" {
+	if len(gaveRecs) != 1 || !gaveRecs[0].Aborted || gaveRecs[0].Allowed || gaveRecs[0].Reason != ReasonCAUntrusted || gaveRecs[0].Destination != "pinned.example" || gaveRecs[0].TLS != "decrypted" {
 		t.Fatalf("synced gave up %+v", gaveRecs)
 	}
 	// The tunnel existed and then closed. Not a handshake the client gave up on.
@@ -185,8 +186,15 @@ func TestSyncReadsRotatedDNS(t *testing.T) {
 }
 
 // TestRefusalReason: a refused record says why; an allowed one says nothing.
+// An ACL denial is TCP_DENIED, but a name that does not resolve is a Squid
+// error page, NONE/503, so the error code has to decide the verdict too.
 func TestRefusalReason(t *testing.T) {
-	cases := []struct{ name, line, want string }{
+	cases := []struct {
+		name        string
+		line        string
+		want        string
+		wantAborted bool
+	}{
 		{
 			name: "acl denial, gate file without error fields",
 			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 GET http://example.com/ - HIER_NONE/- text/html",
@@ -198,26 +206,56 @@ func TestRefusalReason(t *testing.T) {
 			want: ReasonNotAllowlisted,
 		},
 		{
-			name: "client refused the certificate",
+			name: "access denied, from a gate file without error fields",
+			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 0 CONNECT example.com:443 - HIER_NONE/- - 443 bump example.com",
+			want: ReasonNotAllowlisted,
+		},
+		{
+			// A published access.log line from a real DNS failure.
+			name: "dns failure as a squid error page",
+			line: "1635169354.239 171 10.72.1.103 NONE/503 0 CONNECT ad.360yield.com:443 - HIER_NONE/- - ERR_DNS_FAIL/-",
+			want: ReasonNoSuchHost,
+		},
+		{
+			name: "dns failure as a squid error page, bumping",
+			line: "1757162698.000 0 10.20.0.3 NONE/503 0 CONNECT nowhere.invalid:443 - HIER_NONE/- - 3130 bump nowhere.invalid ERR_DNS_FAIL/-",
+			want: ReasonNoSuchHost,
+		},
+		{
+			// The gate file that logs no mime type puts the code at field 11,
+			// the last field the scan reaches.
+			name: "dns failure, a short line",
+			line: "1757162698.000 171 10.20.0.3 NONE/503 0 CONNECT nowhere.invalid:443 - HIER_NONE/- - ERR_DNS_FAIL/-",
+			want: ReasonNoSuchHost,
+		},
+		{
+			name: "cannot forward as a squid error page",
+			line: "1757162698.000 20 10.20.0.3 NONE/503 0 CONNECT nowhere.invalid:443 - HIER_DIRECT/10.9.9.9 - 3130 bump nowhere.invalid ERR_CANNOT_FORWARD/503 -",
+			want: ReasonNoSuchHost,
+		},
+		{
+			// ERR_SECURE_CONNECT_FAIL is Squid failing TLS to the origin, not
+			// the client refusing our certificate, so it is not ca-untrusted.
+			name: "origin tls failure is not a certificate rejection",
 			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 CONNECT example.com:443 - HIER_NONE/- text/html 3130 bump example.com ERR_SECURE_CONNECT_FAIL/400 -",
-			want: ReasonCAUntrusted,
+			want: ReasonNotAllowlisted,
 		},
 		{
-			name: "name does not resolve",
-			line: "1757162698.000 0 10.20.0.3 TCP_DENIED/403 12 CONNECT nowhere.invalid:443 - HIER_NONE/- text/html 3130 bump nowhere.invalid ERR_DNS_FAIL/503 -",
-			want: ReasonNoSuchHost,
-		},
-		{
-			// %6tr is space-padded to ten characters, so a response that takes
-			// ten seconds or more splits into two fields and shifts the rest.
-			// The reason must still be found.
-			name: "slow request shifts the fields",
-			line: "1757162698.000        12 10.20.0.3 TCP_DENIED/403 12 CONNECT nowhere.invalid:443 - HIER_NONE/- text/html 3130 bump nowhere.invalid ERR_DNS_FAIL/503 -",
-			want: ReasonNoSuchHost,
+			// The client dropped the bumped handshake. Squid logs no denial
+			// and no error code; the closed CONNECT is the record of it.
+			name:        "client dropped the bumped handshake",
+			line:        "1757162700.000 1 10.20.0.3 NONE_NONE_ABORTED/000 0 CONNECT 10.60.0.2:443 - HIER_NONE/- - 443 bump example.com - -",
+			want:        ReasonCAUntrusted,
+			wantAborted: true,
 		},
 		{
 			name: "allowed request carries no reason",
 			line: "1757162698.123 12 10.20.0.3 TCP_MISS/200 45 GET http://example.com/ - HIER_DIRECT/1.2.3.4 text/plain 3130 bump example.com - -",
+			want: "",
+		},
+		{
+			name: "allowed tunnel carries no reason",
+			line: "1757162698.123 5 10.20.0.3 TCP_TUNNEL/200 0 CONNECT pinned.example:443 - HIER_DIRECT/10.1.0.2 - 3130 splice pinned.example - -",
 			want: "",
 		},
 	}
@@ -231,6 +269,16 @@ func TestRefusalReason(t *testing.T) {
 		}
 		if c.want != "" && rec.Allowed {
 			t.Errorf("%s: refused record marked allowed", c.name)
+		}
+		if c.want == "" && !rec.Allowed {
+			t.Errorf("%s: allowed record marked refused", c.name)
+		}
+		if rec.Aborted != c.wantAborted {
+			t.Errorf("%s: aborted = %v, want %v", c.name, rec.Aborted, c.wantAborted)
+		}
+		// A refusal must still name the host an auditor is asking about.
+		if c.want != "" && rec.Destination == "" {
+			t.Errorf("%s: refusal has no destination: %+v", c.name, rec)
 		}
 	}
 }
