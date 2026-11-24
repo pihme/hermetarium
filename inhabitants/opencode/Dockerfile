@@ -29,6 +29,8 @@ COPY auto-models.ts /root/.config/opencode/plugins/auto-models.ts
 COPY bashrc /root/.bashrc
 COPY bash_profile /root/.bash_profile
 COPY daemon.json /etc/docker/daemon.json
+# The same static guide in every inhabitant image. Nothing about the habitat is in it.
+COPY day-one.md /etc/hermetarium/day-one.md
 COPY start.sh /usr/local/bin/opencode-start
 RUN chmod 755 /usr/local/bin/opencode-start /usr/local/bin/porter
 ENV HARNESS=opencode

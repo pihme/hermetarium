@@ -195,6 +195,8 @@ That command exits. A second attach runs `tmux new-session -d` with a command th
 
 ### Official CLI smoke
 
+`tests/inhabitants` `TestDayOneGuide`. Needs Docker, no habitat. Builds `hermetarium-in-claude:local`, `hermetarium-in-grok:local`, and `hermetarium-in-opencode:local`, exports each image, and reads `/etc/hermetarium/day-one.md` out of it. The file must be there, non-empty, and the guide.
+
 `tests/inhabitants` `TestOfficialCLIs`. Weak wall only. One subtest per inhabitant.
 
 | Inhabitant | Command that must exit 0 | Log host if the mock chat succeeds |

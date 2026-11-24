@@ -9,6 +9,22 @@ import (
 	"github.com/pihme/hermetarium/tests/harness"
 )
 
+func TestDayOneGuide(t *testing.T) {
+	root, err := supervisor.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{harness.InhabitantClaude, harness.InhabitantGrok, harness.InhabitantOpenCode} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			if err := harness.EnsureOfficialImage(root, name, harness.ImageFor(name)); err != nil {
+				t.Fatal(err)
+			}
+			harness.AssertDayOneInImage(t, harness.ImageFor(name))
+		})
+	}
+}
+
 func TestOfficialCLIs(t *testing.T) {
 	root, err := supervisor.Root()
 	if err != nil {

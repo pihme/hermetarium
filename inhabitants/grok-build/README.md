@@ -89,6 +89,12 @@ go build -o inhabitants/grok-build/porter ./porter
 docker build -t grok inhabitants/grok-build
 ```
 
+The image carries the static guide `inhabitants/day-one.md` at `/etc/hermetarium/day-one.md`. The Dockerfile `COPY`s it from the build context, so copy it next to the Dockerfile for a hand build:
+
+```bash
+cp inhabitants/day-one.md inhabitants/grok-build/
+```
+
 Copy the gate file and replace `__VENDOR_KEY__` with your xAI API key. A login token from `grok login` is not that key.
 
 ```bash
