@@ -40,6 +40,9 @@ GIT_SSL_CAINFO
 PIP_CERT
 ```
 
+They are also exported by the image's login profile (`/etc/profile.d/hermetarium-ca.sh`),
+so an interactive `hermetarium attach` shell and anything it starts have them too.
+
 A program that does not read them needs the file itself. The fingerprint, if you need to check it, is the SHA-256 of the file:
 
 ```sh

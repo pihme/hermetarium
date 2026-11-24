@@ -10,6 +10,8 @@ COPY porter /usr/local/bin/porter
 COPY settings.json /root/.claude/settings.json
 # The same static guide in every inhabitant image. Nothing about the habitat is in it.
 COPY day-one.md /etc/hermetarium/day-one.md
+# CA trust vars for login shells, matching day-one.md. Copied from the context for a hand build.
+COPY profile.d-ca.sh /etc/profile.d/hermetarium-ca.sh
 ENV HARNESS=claude
 ENV HARNESS_WORKDIR=/work
 ENV ANTHROPIC_BASE_URL=http://claude.hermetarium.test
