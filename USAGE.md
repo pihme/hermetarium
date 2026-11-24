@@ -142,8 +142,10 @@ access_log stdio:/log/access.log htm
 
 `hermetarium logs` splits the access log on spaces. Keep this field order. The local port is the field after the mime type. Port 18081 means the line came in from you. A gate file may append the bump mode and the SNI after that port.
 
+Every shipped gate file also appends `%err_code %err_detail` at the very end. They are read from the end of the line, because the bump mode and the SNI are optional: a gate file that says `bump` or `splice` puts two more fields before them. The error code decides two things. A name that does not resolve, or a request Squid cannot forward, is logged as a Squid error page (`NONE/503`, `ERR_DNS_FAIL` or `ERR_CANNOT_FORWARD`) rather than a denial, so that line is recorded as `allowed: false` with reason `no-such-host`. An `http_access deny` is `TCP_DENIED/403` with `ERR_ACCESS_DENIED`, or a `-` in a gate file without these fields, and its reason is `not-allowlisted`. The reason `ca-untrusted` is set when a bumped CONNECT is closed during the handshake (`NONE_*_ABORTED`): the client refused the interception certificate. `ERR_SECURE_CONNECT_FAIL` is Squid failing TLS to the origin, not the client refusing ours, so it is not `ca-untrusted`. A gate file of your own should copy the whole line below. Port, bump mode and SNI stay at positions 11, 12 and 13, counted from the front.
+
 ```
-logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp
+logformat htm %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru %[un %Sh/%<a %mt %>lp %err_code %err_detail
 access_log stdio:/log/access.log htm
 ```
 

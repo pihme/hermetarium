@@ -24,6 +24,8 @@ type Record struct {
 	Path     string `json:"path,omitempty"`
 	Result   string `json:"result,omitempty"`
 	Allowed  bool   `json:"allowed"`
+	// Reason says why a request was refused; it is empty when it was allowed.
+	Reason string `json:"reason,omitempty"`
 	// Aborted is a CONNECT closed before a tunnel existed (NONE_*_ABORTED).
 	// The destination is the SNI host name when the gate file logged it.
 	// TCP_TUNNEL_ABORTED is a tunnel that later closed, and is not this.
@@ -100,6 +102,8 @@ func ParseSquidLine(line string) (Record, bool) {
 		}
 	}
 	status := f[3]
+	errCode := errorCode(f)
+	refused := reasonIsRefusal(status, errCode)
 	dir := "out"
 	if len(f) >= 11 {
 		if lp, err := strconv.Atoi(f[10]); err == nil && lp == InboundPort {
@@ -107,6 +111,8 @@ func ParseSquidLine(line string) (Record, bool) {
 		}
 	}
 	// Bump mode and SNI follow the local port when the gate file logs them.
+	// Read them before the abort check, which needs the SNI to tell a refused
+	// certificate from a client that closed the tunnel by itself.
 	tlsMode := ""
 	if len(f) >= 12 {
 		switch f[11] {
@@ -132,6 +138,16 @@ func ParseSquidLine(line string) (Record, bool) {
 			upstream = authorityHost
 		}
 	}
+	aborted := handshakeAbort(status, f[5])
+	// A bumped CONNECT that the client closed during the handshake is the one
+	// log shape this repo has for a rejected interception certificate. Only a
+	// bumped abort counts, and only to a name: whether a spliced abort shows
+	// the SNI depends on the gate file, so a spliced abort stays an aborted
+	// request with no reason.
+	caRejected := aborted && tlsMode == "decrypted" && f[12] != "-"
+	if caRejected {
+		refused = true
+	}
 	return Record{
 		Time:        time.Unix(unix, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano),
 		Direction:   dir,
@@ -141,11 +157,25 @@ func ParseSquidLine(line string) (Record, bool) {
 		Port:        port,
 		Method:      f[5],
 		Path:        path,
-		Allowed:     !strings.Contains(status, "DENIED"),
-		Aborted:     handshakeAbort(status, f[5]),
+		Allowed:     !refused,
+		Aborted:     aborted,
 		Bytes:       bytes,
 		TLS:         tlsMode,
+		Reason:      reasonOf(refused, caRejected, errCode),
 	}, true
+}
+
+// reasonOf is the record's Reason: empty for an allowed request, ca-untrusted
+// for a bumped handshake the client closed, else the refusalReason the error
+// code names.
+func reasonOf(refused, caRejected bool, errCode string) string {
+	if !refused {
+		return ""
+	}
+	if caRejected {
+		return ReasonCAUntrusted
+	}
+	return refusalReason(errCode)
 }
 
 // handshakeAbort is NONE_*_ABORTED on CONNECT. No tunnel was established.
@@ -310,4 +340,69 @@ func LogHasDirection(path, dir string) bool {
 		}
 	}
 	return false
+}
+
+// The refusal reasons an I/O log record can carry.
+const (
+	ReasonNotAllowlisted = "not-allowlisted"
+	ReasonCAUntrusted    = "ca-untrusted"
+	ReasonNoSuchHost     = "no-such-host"
+)
+
+// errCodeOf strips the HTTP status Squid appends to %err_code, so
+// "ERR_ACCESS_DENIED/403" becomes "ERR_ACCESS_DENIED". Squid also marks a
+// disabled field with a "#", so "#ERR_DNS_FAIL" loses that first.
+func errCodeOf(tok string) string {
+	tok = strings.TrimPrefix(tok, "#")
+	name, _, _ := strings.Cut(tok, "/")
+	return name
+}
+
+// errorCode finds the Squid error code on a line whose gate file logs
+// %err_code %err_detail at the end, or returns "" when it logs neither.
+// Bump mode and SNI are optional before them, so the end moves; scan back
+// from it. The scan stops at the fixed ten fields in front, so a mime type
+// can never be read as a code. An `http_access deny` logs "-" there.
+func errorCode(f []string) string {
+	for i := len(f) - 1; i >= 10; i-- {
+		if code := errCodeOf(f[i]); strings.HasPrefix(code, "ERR_") {
+			return code
+		}
+	}
+	return ""
+}
+
+// refusalReason names why a refused request was refused.
+//
+// Two different Squid outcomes are refusals. An ACL denial is `TCP_DENIED/403`
+// with `ERR_ACCESS_DENIED`. A name that did not resolve, or a request Squid
+// could not forward at all, is logged as a Squid error page rather than a
+// denial: `NONE/503` with `ERR_DNS_FAIL` or `ERR_CANNOT_FORWARD`. The status
+// code alone does not tell them apart, so the error code decides, and
+// reasonIsRefusal holds Allowed to the same answer. A refused line whose gate
+// file does not log %err_code has no code and counts as not-allowlisted.
+//
+// Squid's ERR_SECURE_CONNECT_FAIL is not a reason and is left unmapped. It
+// means Squid could not finish TLS to the origin, which is the other direction
+// from a client rejecting our certificate, so such a line falls back to
+// not-allowlisted when denied. The client that rejects the intercepted
+// certificate drops the bumped handshake: Squid logs that closed CONNECT as
+// NONE_*_ABORTED with no error code, and reasonOf names it ca-untrusted.
+func refusalReason(errCode string) string {
+	switch errCode {
+	case "ERR_DNS_FAIL", "ERR_CANNOT_FORWARD":
+		return ReasonNoSuchHost
+	}
+	return ReasonNotAllowlisted
+}
+
+// reasonIsRefusal reports whether the status and error code describe a refusal.
+// It keeps Allowed in step with Reason: an ACL denial and a Squid failure page
+// are both refusals, whether or not the gate file logged the error code.
+func reasonIsRefusal(status, errCode string) bool {
+	switch errCode {
+	case "ERR_DNS_FAIL", "ERR_CANNOT_FORWARD":
+		return true
+	}
+	return strings.Contains(status, "DENIED")
 }
