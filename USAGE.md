@@ -285,7 +285,9 @@ Build the image. The folder you name holds `settings.json` and `porter`.
 docker build -t myorg/claude:dev -f Dockerfile inhabitants/claude-code
 ```
 
-**A build inside a habitat cannot reach the network.** A `RUN` step runs in a container layer with the base image's certificate list, not the habitat's. The gate decrypts TLS and re-signs it, so the step sees `CN=Hermetarium` and refuses it, while `curl` and `git` on the habitat's own shell work:
+### Building an image inside a habitat
+
+**A build can fail to reach the network.** A `RUN` step runs in a container layer with the base image's certificate list, not the habitat's. The gate decrypts TLS and re-signs it, so the step sees `CN=Hermetarium` and refuses it, while `curl` and `git` on the habitat's own shell work:
 
 ```
 $ docker run --rm alpine:3.24 apk add --no-cache curl
@@ -296,26 +298,45 @@ TLS: server certificate not trusted
 
 Two ways out, cheapest first.
 
-**Pass the host through at the gate.** A host on the gate file's `passthrough` list keeps its real certificate, so a container validates it with nothing mounted. `deb.debian.org` is on that list and works; Alpine's `dl-cdn.alpinelinux.org` is not and does not:
+**Pass the host through at the gate.** A host on the gate file's `passthrough` list keeps its real certificate, so a container validates it with nothing mounted. Every package host the omakase setup needs is on that list today, including Debian's `deb.debian.org` and Alpine's `dl-cdn.alpinelinux.org`, so a base-image install works in a habitat with no further arrangement:
 
 ```sh
-$ docker run --rm debian:bookworm-slim apt-get update -qq      # passed through
+$ docker run --rm debian:bookworm-slim apt-get update -qq
 OK
-$ docker run --rm alpine:3.24 apk add --no-cache curl          # decrypted
-TLS: server certificate not trusted
-```
-
-Adding a host is a cold change to the gate file, not `squid -k reconfigure` ([the cookbook](docs/wall-rules.md)). hermetarium#226 tracks the missing entries in the omakase setup.
-
-**Give the one build step the habitat CA.** For a host that cannot be passed through, mount it for the build:
-
-```sh
-docker run --rm -v /etc/ssl/hermetarium-mitm.crt:/etc/ssl/certs/ca-certificates.crt:ro \
-  alpine:3.24 apk add --no-cache curl
+$ docker run --rm alpine:3.24 apk add --no-cache curl
 OK
 ```
 
-Do not `COPY` the CA into a Dockerfile. Every `create` makes a fresh CA, so a released image would trust one habitat's gate for good.
+A host **not** on the list is decrypted, and a step that reaches it fails with `TLS: server certificate not trusted`. Adding one is a cold change to the gate file, not `squid -k reconfigure` ([the cookbook](docs/wall-rules.md)).
+
+**Give the build step the habitat CA.** For a host that cannot be passed through — one that pins a certificate, or one the operator will not open — put the CA in the build context and mount it for the one step. A `docker build` step cannot take `-v`, and `--mount`'s `source` resolves in the **build context**, not on the host, so copy the file in first:
+
+```sh
+cp /etc/ssl/hermetarium-mitm.crt ca.crt
+DOCKER_BUILDKIT=1 docker build -t myimage:dev .
+```
+
+Then, in the Dockerfile, give the step that needs it the CA. The mount disappears with the step, so the CA is not in a layer unless the step copies it in:
+
+```dockerfile
+# syntax=docker/dockerfile:1.7
+FROM debian:bookworm-slim
+RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
+	env SSL_CERT_FILE=/tmp/ca.crt apt-get update -qq \
+	&& env SSL_CERT_FILE=/tmp/ca.crt apt-get install -y --no-install-recommends ca-certificates \
+	&& cp /tmp/ca.crt /usr/local/share/ca-certificates/hermetarium.crt \
+	&& update-ca-certificates \
+	&& apt-get update -qq
+```
+
+`SSL_CERT_FILE` is enough for `apt-get` itself; `ca-certificates` has to be installed before `update-ca-certificates` exists, so the sequence runs it twice. An image that only shells out to a tool honouring `SSL_CERT_FILE` needs nothing beyond the mount:
+
+```dockerfile
+RUN --mount=type=bind,source=ca.crt,target=/tmp/ca.crt,ro \
+	env SSL_CERT_FILE=/tmp/ca.crt curl -fsSL https://example.internal/install.sh
+```
+
+Never `COPY` the CA on a path that persists: every `create` makes a fresh CA, so a released image would trust one habitat's gate for good. Copying it into a step, as above, keeps it to that step's scratch space only if you stop before `update-ca-certificates`.
 
 CI is not affected: GitHub's runners are not behind the gate, and the same builds pass there.
 
