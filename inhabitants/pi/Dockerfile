@@ -37,6 +37,8 @@ COPY bashrc /root/.bashrc
 COPY bash_profile /root/.bash_profile
 COPY daemon.json /etc/docker/daemon.json
 COPY day-one.md /etc/hermetarium/day-one.md
+# CA trust vars for login shells, matching day-one.md. Copied from the context for a hand build.
+COPY profile.d-ca.sh /etc/profile.d/hermetarium-ca.sh
 COPY start.sh /usr/local/bin/pi-start
 RUN chmod 755 /usr/local/bin/pi-start /usr/local/bin/porter
 ENV HARNESS=pi
